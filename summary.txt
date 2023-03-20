@@ -1,0 +1,21 @@
+can serve as control for measuring planet Q
+
+constrain population and properties of exoplanet false +
+
+ETV can constrain k2, hence internal structure
+
+Direct test of stellar evolution:
+https://ui.adsabs.harvard.edu/abs/2018MNRAS.479.1953D/abstract, https://ui.adsabs.harvard.edu/abs/2012MNRAS.427..127B/abstract
+https://ui.adsabs.harvard.edu/abs/2016ApJ...832..121G/abstract
+
+Limb darkening calibration and stellar atmospheres modeling
+
+Spectral synthesis for galaxy science: https://ui.adsabs.harvard.edu/abs/2017PASA...34...58E/abstract
+
+Study tides: interesting article:  Rotation Period Evolution in Low-mass Binary Stars: The Impact of Tidal Torques and Magnetic Braking 
+
+Dark Matter studies: https://ui.adsabs.harvard.edu/abs/2022ApJ...928L..17C/abstract
+
+Read through
+https://ui.adsabs.harvard.edu/abs/2012ocpd.conf...51S/abstract
+for further applications
