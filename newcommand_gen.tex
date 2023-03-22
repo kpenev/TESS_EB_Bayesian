@@ -1,0 +1,178 @@
+%%GB: General commands to make editing easier and with less typos.
+
+% -----------------------------------------------
+\newcommand{\tbd}[1]{{\par\bf\textsc{TBD: #1\\}}}
+\newcommand{\ctbd}[1]{}
+\newcommand{\cor}{\textcolor{red}{(corr?) }}
+\newcommand{\spl}{\textcolor{red}{(spl?) }}
+
+\newcommand{\ii}{\'\i }
+\newcommand{\oo}{\H{o}}
+\newcommand{\uu}{\H u}
+
+% --------------------------------------
+\newcommand{\lc}{light curve}
+\newcommand{\lcs}{light curves}
+\newcommand{\Lc}{Light curve}
+\newcommand{\Lcs}{Light curves}
+\newcommand{\avg}[1]{\ensuremath{\langle #1\rangle}}
+\newcommand{\dpt}{data-point}
+\newcommand{\dpts}{data-points}
+\newcommand{\tel}{telescope}
+\newcommand{\magn}{magnitude}
+\newcommand{\stan}{standard}
+\newcommand{\aper}{aperture}
+\newcommand{\oot}{out-of-transit}
+\newcommand{\OOT}{Out-of-Transit}
+\newcommand{\cfa}{Harvard-Smithsonian Center for Astrophysics (CfA)}
+\newcommand{\cfadigi}{CfA Speedometers}
+\newcommand{\cmd}{color-magnitude diagram}
+
+% ---------------------------------------------
+\newcommand{\C}{\ensuremath{^{\circ}C\;}}
+\newcommand{\el}{\ensuremath{e^-}}
+\newcommand{\sqarcsec}{\ensuremath{\Box^{\prime\prime}}}
+\newcommand{\sqarcdeg}{\ensuremath{\Box^{\circ}}}
+\newcommand{\pxs}{\ensuremath{\rm \arcsec pixel^{-1}}}
+\newcommand{\conc}[1]{\noindent\par{\noindent{$\mathbf \Longrightarrow$ \bf #1}}}
+\newcommand{\aduel}{\ensuremath{\lbrack ADU/\el \rbrack}}
+\newcommand{\eladu}{\ensuremath{\lbrack \el/ADU \rbrack}}
+\newcommand{\adupixs}{\ensuremath{\rm ADU/(pix\, s)}}
+\newcommand{\diam}{\ensuremath{\oslash}}
+\newcommand{\ccdsize}[1]{\ensuremath{\rm #1\times\rm#1}}
+\newcommand{\tsize}[1]{\mbox{\rm #1 m}}
+\newcommand{\ghr}{\ensuremath{^h}}
+\newcommand{\gmin}{\ensuremath{^m}}
+\newcommand{\Ks}{\ensuremath{K_s}}
+\newcommand{\masy}{\ensuremath{\rm mas\,yr^{-1}}}
+\newcommand{\kms}{\ensuremath{\rm km\,s^{-1}}}
+\newcommand{\ms}{\ensuremath{\rm m\,s^{-1}}}
+
+\newcommand{\hd}[1]{\mbox{HD #1}}
+
+% ---------------------------------------------------------------------
+\newcommand{\teff}{\ensuremath{T_{\rm eff}}}
+\newcommand{\logg}{\ensuremath{\log{g}}}
+\newcommand{\vsini}{\ensuremath{v \sin{i}}}
+\newcommand{\feh}{[Fe/H]}
+\newcommand{\logl}{\ensuremath{\log{L}}}
+
+\newcommand{\rsun}{\ensuremath{R_\sun}}
+\newcommand{\msun}{\ensuremath{M_\sun}}
+\newcommand{\lsun}{\ensuremath{L_\sun}}
+\newcommand{\teffsun}{\ensuremath{T_{eff,\sun}}}
+\newcommand{\rhosun}{\ensuremath{\rho_\sun}}
+
+\newcommand{\rstar}{\ensuremath{R_*}}
+\newcommand{\mstar}{\ensuremath{M_*}}
+\newcommand{\lstar}{\ensuremath{L_*}}
+\newcommand{\loglstar}{\ensuremath{\log{L_*}}}
+\newcommand{\teffstar}{\ensuremath{T_{eff,*}}}
+\newcommand{\rhostar}{\ensuremath{\rho_*}}
+
+\newcommand{\rearth}{\ensuremath{R_\earth}}
+\newcommand{\mearth}{\ensuremath{M_\earth}}
+\newcommand{\learth}{\ensuremath{L_\earth}}
+\newcommand{\teffearth}{\ensuremath{T_{eff,\earth}}}
+\newcommand{\rhoearth}{\ensuremath{\rho_\earth}}
+
+%\newcommand{\rpl}{\ensuremath{R_{\rm P}}}
+%\newcommand{\mpl}{\ensuremath{M_{\rm P}}}
+%\newcommand{\lpl}{\ensuremath{L_{\rm P}}}
+%\newcommand{\teffpl}{\ensuremath{T_{eff,{\rm P}}}}
+%\newcommand{\rhopl}{\ensuremath{\rho_{\rm P}}}
+%\newcommand{\ipl}{\ensuremath{i_{\rm P}}}
+
+\newcommand{\rpl}{\ensuremath{R_{P}}}
+\newcommand{\mpl}{\ensuremath{M_{P}}}
+\newcommand{\lpl}{\ensuremath{L_{P}}}
+\newcommand{\teffpl}{\ensuremath{T_{eff,{P}}}}
+\newcommand{\rhopl}{\ensuremath{\rho_{P}}}
+\newcommand{\ipl}{\ensuremath{i_{P}}}
+\newcommand{\gpl}{\ensuremath{g_{P}}}
+
+\newcommand{\rjup}{\ensuremath{R_{\rm J}}}
+\newcommand{\mjup}{\ensuremath{M_{\rm J}}}
+\newcommand{\ljup}{\ensuremath{L_{\rm J}}}
+\newcommand{\teffjup}{\ensuremath{T_{eff,{\rm J}}}}
+\newcommand{\rhojup}{\ensuremath{\rho_{\rm J}}}
+\newcommand{\gjup}{\ensuremath{\g_{\rm J}}}
+
+\newcommand{\msini}{\ensuremath{m \sin i}}
+
+% ---------------------
+\newcommand{\ordo}{\ensuremath{\mathcal{O}}}
+
+% -----------------------------
+\newcommand{\pack}[1]{\textsc{\lowercase{#1}}}
+\newcommand{\prog}[1]{\texttt{\lowercase{#1}}}
+\newcommand{\iraf}{\pack{iraf}}
+\newcommand{\todcor}{\prog{todcor}}
+\newcommand{\xcsao}{\prog{xcsao}}
+\newcommand{\daophot}{\pack{daophot}}
+\newcommand{\fihat}{\pack{fihat}}
+\newcommand{\fistar}{\prog{fistar}}
+\newcommand{\fiphot}{\prog{fiphot}}
+\newcommand{\grmatch}{\prog{grmatch}}
+\newcommand{\grtrans}{\prog{grtrans}}
+
+% ---------------------------------------
+\newcommand{\pref}[1]{p.~\pageref{#1}}
+\newcommand{\figr}[1]{Fig.~\ref{fig:#1}}
+\newcommand{\secr}[1]{\mbox{\S\ \ref{sec:#1}}}
+\newcommand{\eqr}[1]{Eq.~\ref{eq:#1}}
+\newcommand{\tabsr}[1]{Tab.~\ref{tab:#1}}
+\newcommand{\tabr}[1]{\mbox{Table~\ref{tab:#1}}}
+\newcommand{\figrp}[1]{Fig.~\ref{fig:#1} on \pref{fig:#1}}
+\newcommand{\secrp}[1]{\S\ref{sec:#1} on \pref{sec:#1}}
+\newcommand{\eqrp}[1]{Eq.~\ref{eq:#1} on \pref{eq:#1}}
+\newcommand{\tabrp}[1]{Tab.~\ref{tab:#1} on \pref{tab:#1}}
+
+% --------------------------------------
+%
+% Instruments
+%
+% FLWO 1.2 m telescope
+\newcommand{\flwof}{\mbox{FLWO 1.2 m}}
+
+% FLWO 1.5 m telescope
+\newcommand{\flwos}{\mbox{FLWO 1.5 m}}
+
+% TopHAT 0.25m telescope
+\newcommand{\flwot}{\mbox{TopHAT 0.25 m}}
+
+% MMT
+\newcommand{\mmt}{\mbox{MMT 6.5 m}}
+
+% Spitzer
+\newcommand{\ssts}{{\em Spitzer}}
+\newcommand{\sstL}{{\em Spitzer Space Telescope}}
+
+% HST
+\newcommand{\hst}{{\em HST}}
+
+
+% --------------------------------------
+% Variable types
+%
+\newcommand{\dscu}{\mbox{$\delta$ Scuti}}
+\newcommand{\gdor}{\mbox{$\gamma$ Dor}}
+
+\newcommand\kepler{\textit{Kepler}}
+\newcommand\tess{TESS}
+\newcommand{\ktwo}{\emph{K2}}
+\newcommand{\plato}{PLATO}
+
+\newcommand{\refsec}[1]{\mbox{\S\ \ref{sec:#1}}}
+\newcommand{\reffig}[1]{Fig.\,\ref{fig:#1}}
+
+% --------------------------------------
+% Formatting
+%
+\newcommand{\fancysection}[1]{
+%
+    \section{Objectives and Significance}
+%
+    \hrule \vspace{0.5mm}
+%
+}

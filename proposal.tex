@@ -1,0 +1,75 @@
+\documentclass[12pt,letter]{article}
+
+\include{preamble}
+
+\begin{document}
+
+\rhead{}
+
+\section*{\centering{\Large Summary}}
+
+\input{summary.txt}
+
+%\pagestyle{fancy}
+
+\pagenumbering{gobble}
+
+\lhead{}
+
+\newpage
+
+\setcounter{page}{0}
+
+\tableofcontents
+
+\newpage
+
+\import{project_description/}{project_description}
+
+\newpage
+
+%\setcounter{page}{1}
+%
+%\section*{\centering{\Large References and Citations}}
+%\addcontentsline{toc}{section}{\protect{\numberline{\thesection}}References and
+%Citations}
+%
+%\bibliography{bibliography}
+%
+%\bibliographystyle{abbrv}
+%
+%%\addtocounter{section}{1}
+%%\newpage
+%%\phantomsection
+%%\addcontentsline{toc}{section}{\protect{\numberline{\thesection}}
+%%    Biographical Sketches
+%%}
+%%\import{biosketches}{kp_bio2pg_body}
+%
+%%\newpage
+%%\import{}{work_effort_table}
+%%
+%%\newpage
+%%\section{Current and Pending Support}
+%%\import{current_and_pending}{kp_cp}
+%%
+%%\addtocounter{section}{1}
+%%\newpage
+%%\phantomsection
+%%\addcontentsline{toc}{section}{\protect{\numberline{\thesection}}
+%%    Budget Justification
+%%}
+%%\includepdf[pages={-}]{budget/budget_justification_redacted}
+%%
+%%\newpage
+%%\import{}{facilities_and_equipment}
+%%
+%%\addtocounter{section}{1}
+%%\newpage
+%%\phantomsection
+%%\addcontentsline{toc}{section}{\protect{\numberline{\thesection}}
+%%    Detailed Budget
+%%}
+%%\includepdf[landscape=true,pages={-}]{budget/budget_details_redacted}
+%
+\end{document}
