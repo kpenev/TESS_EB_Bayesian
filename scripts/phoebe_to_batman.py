@@ -111,6 +111,7 @@ def set_batman_component_params(batman_params,
 
     if component == 'secondary':
         batman_params.rp = 1.0 / batman_params.rp
+        batman_params.a *= batman_params.rp
 
         orbit = phoebe_binary['orbit@component']
         batman_params.t0 += (
@@ -152,7 +153,11 @@ def get_batman_lc(phoebe_binary, dataset='lc01'):
     flux = model.light_curve(params)
 
     set_batman_component_params(params, phoebe_binary, 'secondary', dataset)
-    print('Secondary flux from params: ' + repr(vars(params)))
-    flux += model.light_curve(params)
+    flux_ratio = (
+        phoebe_binary['secondary@teff'].get_value('K')
+        /
+        phoebe_binary['primary@teff'].get_value('K')
+    )**4 / params.rp**2
+    flux += model.light_curve(params) * flux_ratio
 
     return flux
