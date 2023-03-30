@@ -20,6 +20,15 @@ from phoebe_to_batman import get_batman_lc
 
 _logger = logging.getLogger(__name__)
 
+_quantity_order = ['m1', 'm2', 'porb', 'e', 'i', 'periapsis']
+
+_param_quantity = dict(m1='stellar_masses',
+                       m2='stellar_masses',
+                       porb='orbital_periods',
+                       e='eccentricities',
+                       i='inclinations',
+                       periapsis='periapses')
+
 
 def parse_command_line():
     """Return command line configuration."""
@@ -61,7 +70,7 @@ def parse_command_line():
         '--periapses',
         nargs='+',
         type=float,
-        default=numpy.arange(0.0, 360.0, 30.0),
+        default=numpy.arange(0.0, 360.0, 30.0)[:7:2],
         help='The periapses angles in degrees to compare models at combined in '
         'all possible ways with stellar masses, orbital periods, and '
         'eccentricities.'
@@ -117,13 +126,19 @@ def parse_command_line():
     )
     parser.add_argument(
         '--plot-fname-format',
-        default='lc_diff_vs_{vs:s}_m1{m1:s}_m2{m2:s}_i{i:s}.pdf',
+        default='lc_diff_vs_{vs:s}_m1={m1!s}_m2={m2!s}_i={i!s}.pdf',
         help='A format string specifying filenames to save requested plots as. '
         'Should include a `{vs}` substitution that will be replaced with '
         'the quantity shown on the x axis may also include substitutions for '
         'any of the quantities residuals can be plotted vs to split plots by '
         'some sub-set of of the available quantities to avoid too many lines '
         'in one plot.'
+    )
+    parser.add_argument(
+        '--logging-level',
+        choices=['debug', 'info', 'warning', 'error', 'critical'],
+        default='info',
+        help='The verbosity level of log messages.'
     )
     return parser.parse_args()
 
@@ -347,8 +362,9 @@ def explore_batman_approximation(param_grids,
         """Create an array with the orbital elements to explore."""
 
         num_grid_points = 1
-        for grid in param_grids.values():
-            num_grid_points *= len(grid)
+        for param, grid in param_grids.items():
+            if param != 'stellar_masses':
+                num_grid_points *= len(grid)
         result = numpy.empty(
             num_grid_points,
             dtype=[('period', float),
@@ -374,12 +390,16 @@ def explore_batman_approximation(param_grids,
             dtype=[('mass', float), ('logg', float), ('teff', float)]
         )
         result['mass'] = param_grids['stellar_masses']
-        result['logg'] = interpolator.get_interpolated('logg',
-                                                       result['mass'],
-                                                       0.0)
-        result['teff'] = 10.0**interpolator.get_interpolated('logTe',
-                                                             result['mass'],
-                                                             0.0)
+        result['logg'] = interpolator.get_interpolated(
+            'logg',
+            param_grids['stellar_masses'],
+            0.0
+        )
+        result['teff'] = 10.0**interpolator.get_interpolated(
+            'logTe',
+            param_grids['stellar_masses'],
+            0.0
+        )
         return result
 
 
@@ -396,9 +416,11 @@ def explore_batman_approximation(param_grids,
                     break
                 for _ in range(4):
                     numpy.load(progress_f)
-    _logger.info('Found %d/%d evolutions in progres file.',
-                 len(progress),
-                 stellar_params.size**2 * orbit_params.size)
+    _logger.info(
+        'Found %d/%d evolutions in progres file.',
+        len(progress),
+        stellar_params.size * (stellar_params.size + 1) / 2 * orbit_params.size
+    )
     if progress_only:
         return
 
@@ -451,24 +473,19 @@ def read_plot_data(progress_fname,
                    param_grids):
     """Read and organize the pre-computed data for plotting."""
 
-    config_order = ['m1', 'm2', 'porb', 'e', 'i', 'periapsis']
-    param_grid_order = ['stellar_masses',
-                        'stellar_masses',
-                        'orbital_periods',
-                        'eccentricities',
-                        'inclinations',
-                        'periapsis']
-
     def get_config_indices(configuration, skip_quantity):
         """Return tuple of indices within param grids given configuration."""
 
         result = [
-            numpy.argwhere(param_grids[param_q] == configuration[config_q])
-            for param_q, config_q in zip(param_grid_order,
-                                         config_order)
+            numpy.argwhere(
+                param_grids[_param_quantity[q]]
+                ==
+                configuration[q]
+            )
+            for q in _quantity_order
         ]
-        del result[config_order.index(skip_quantity)]
-        return result
+        del result[_quantity_order.index(skip_quantity)]
+        return tuple(int(i) if i.size else -1 for i in result)
 
 
     plot_data = dict()
@@ -499,9 +516,11 @@ def read_plot_data(progress_fname,
                 plot_fname = plot_fname_format.format(**configuration,
                                                       vs=x_quantity)
                 if plot_fname not in plot_data:
-                    plot_data[plot_fname] = dict()
+                    plot_data[plot_fname] = dict(x_quantity=x_quantity)
                 config_indices = get_config_indices(configuration, x_quantity)
-                if config_indices not in plot_data:
+                if min(config_indices) < 0:
+                    continue
+                if config_indices not in plot_data[plot_fname]:
                     plot_data[plot_fname][config_indices] = dict(x=[],
                                                                  beer_diff=[],
                                                                  orbit_diff=[])
@@ -512,7 +531,37 @@ def read_plot_data(progress_fname,
     return plot_data
 
 
-def create_plots(progress_fname, plot_vs, plot_fname_format, param_grids):
+def get_label_format(single_plot_data):
+    """Identify non-fixed quantities and include in label format string."""
+
+    grid_indices = list(single_plot_data.keys())
+    grid_indices.remove('x_quantity')
+    grid_indices = numpy.array(grid_indices)
+    assert grid_indices.shape[1] == len(_quantity_order) - 1
+
+    quantity_latex = dict(m1=r'M_1',
+                          m2=r'M_2',
+                          porb=r'P_\mathrm{{orb}}',
+                          e=r'e',
+                          i=r'i',
+                          periapsis=r'\omega')
+
+    label_quantities = _quantity_order[:]
+    label_quantities.remove(single_plot_data['x_quantity'])
+    label = ''
+    for quantity_i, quantity in enumerate(label_quantities):
+        if numpy.unique(grid_indices[:, quantity_i]).size > 1:
+            if label:
+                label = label + ', '
+            label += '$' + quantity_latex[quantity] + '={' + quantity + '!s}$'
+    return label
+
+
+def create_plots(progress_fname,
+                 plot_vs,
+                 plot_fname_format,
+                 param_grids,
+                 plot_residuals):
     """
     Plot the dependenc of LC differences on various quantities.
 
@@ -527,13 +576,53 @@ def create_plots(progress_fname, plot_vs, plot_fname_format, param_grids):
                                plot_vs,
                                plot_fname_format,
                                param_grids)
-    print('Plot data:\n' + repr(plot_data))
+    _logger.info('Creating %d plots.', len(plot_data))
+    for plot_fname, single_plot_data in plot_data.items():
+        pyplot.subplot(212)
+        label_format = get_label_format(single_plot_data)
+        label_quantities = _quantity_order[:]
+        label_quantities.remove(single_plot_data['x_quantity'])
+
+        plot_order = list(single_plot_data.keys())
+        plot_order.remove('x_quantity')
+        plot_order.sort()
+
+        for config_indices in plot_order:
+            points = single_plot_data[config_indices]
+            if config_indices == 'x_quantity':
+                continue
+            label = label_format.format_map({
+                q: numpy.round(param_grids[_param_quantity[q]][i], 8)
+                for q, i in zip(label_quantities, config_indices)
+            })
+            if plot_residuals in ['beer', 'both']:
+                pyplot.plot(
+                    points['x'],
+                    points['beer_diff'],
+                    'x',
+                    label=label + (' BEER' if plot_residuals == 'both' else '')
+                )
+            if plot_residuals in ['orbit', 'both']:
+                pyplot.plot(
+                    points['x'],
+                    points['orbit_diff'],
+                    'o',
+                    label=label + (' orbit' if plot_residuals == 'both' else '')
+                )
+        pyplot.figlegend(loc='upper center',
+                         bbox_to_anchor=(0.5, 1.0),
+                         ncol=3)
+        pyplot.savefig(plot_fname)
+        pyplot.cla()
+        pyplot.clf()
+        _logger.debug('Created %s', plot_fname)
 
 
 def main(config):
     """Avoid polluting global namespace."""
 
     phoebe.progressbars_off()
+    logging.basicConfig(level=getattr(logging, config.logging_level.upper()))
     param_grids = dict(
         stellar_masses=config.stellar_masses,
         orbital_periods=config.orbital_periods,
@@ -553,7 +642,8 @@ def main(config):
     create_plots(config.progress_fname,
                  config.plot_vs,
                  config.plot_fname_format,
-                 param_grids)
+                 param_grids,
+                 config.plot_residuals)
 
 if __name__ == '__main__':
     main(parse_command_line())
