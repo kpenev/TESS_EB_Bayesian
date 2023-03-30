@@ -135,7 +135,7 @@ def set_batman_component_params(batman_params,
         batman_params.u = value
 
 
-def get_batman_lc(phoebe_binary, dataset='lc01'):
+def get_batman_lc(phoebe_binary, dataset='lc01', secondary_flux_fraction=None):
     """Use BATMAN to approximate the LC of the given binary."""
 
     params = get_common_batman_params(phoebe_binary)
@@ -153,11 +153,14 @@ def get_batman_lc(phoebe_binary, dataset='lc01'):
     flux = model.light_curve(params)
 
     set_batman_component_params(params, phoebe_binary, 'secondary', dataset)
-    flux_ratio = (
-        phoebe_binary['secondary@teff'].get_value('K')
-        /
-        phoebe_binary['primary@teff'].get_value('K')
-    )**4 / params.rp**2
-    flux += model.light_curve(params) * flux_ratio
+
+    if secondary_flux_fraction is None:
+        secondary_flux_fraction = (
+            phoebe_binary['secondary@teff'].get_value('K')
+            /
+            phoebe_binary['primary@teff'].get_value('K')
+        )**4 / params.rp**2
+
+    flux += model.light_curve(params) * secondary_flux_fraction
 
     return flux

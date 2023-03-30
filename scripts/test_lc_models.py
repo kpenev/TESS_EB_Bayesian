@@ -70,7 +70,7 @@ def parse_command_line():
         '--periapses',
         nargs='+',
         type=float,
-        default=numpy.arange(0.0, 360.0, 30.0)[:7:2],
+        default=numpy.arange(0.0, 360.0, 30.0),
         help='The periapses angles in degrees to compare models at combined in '
         'all possible ways with stellar masses, orbital periods, and '
         'eccentricities.'
@@ -118,6 +118,15 @@ def parse_command_line():
         help='What to plot the LC differences vs.'
     )
     parser.add_argument(
+        '--maximize-over',
+        nargs='*',
+        default=['periapsis'],
+        choices=['m1', 'm2', 'msum', 'mratio', 'porb', 'e', 'i', 'periapsis'],
+        help='Only the maximum difference for the given list of parameters is '
+        'plotted instead of the difference at every value.'
+    )
+
+    parser.add_argument(
         '--plot-residuals',
         choices=['both', 'beer', 'orbit'],
         default='orbit',
@@ -140,6 +149,25 @@ def parse_command_line():
         default='info',
         help='The verbosity level of log messages.'
     )
+    parser.add_argument(
+        '--x-scale',
+        choices=['linear', 'log'],
+        default='linear',
+        help='The scale to use for the x axis.'
+    )
+    parser.add_argument(
+        '--y-scale',
+        choices=['linear', 'log'],
+        default='log',
+        help='The scale to use for the y axis.'
+    )
+    parser.add_argument(
+        '--show-model-plots',
+        action='store_true',
+        help='If passed, each scenario for which models are calculated is '
+        'plotted and shown.'
+    )
+
     return parser.parse_args()
 
 
@@ -241,7 +269,9 @@ def plot_lc_model_comparison(plot_times,
     pyplot.show()
 
 
-def calc_max_lc_difference(phoebe_binary, plot=False):
+def calc_max_lc_difference(phoebe_binary,
+                           secondary_flux_fraction=None,
+                           plot=False):
     """Return maximum difference between PHOEBE and BATMAN + phase curve LCs."""
 
     phoebe_binary.add_dataset('rv', dataset='rv01')
@@ -263,7 +293,8 @@ def calc_max_lc_difference(phoebe_binary, plot=False):
     phoebe_lc = (
         phoebe_binary.get('fluxes@lc01@phoebe01@latest@lc@model').get_value()
     )
-    batman_lc = get_batman_lc(phoebe_binary)
+    batman_lc = get_batman_lc(phoebe_binary,
+                              secondary_flux_fraction=secondary_flux_fraction)
 
     batman_residuals = phoebe_lc - batman_lc
     beer_lc = fit_beer(
@@ -298,12 +329,12 @@ def calc_max_lc_difference(phoebe_binary, plot=False):
                                  phase_lc)
 
     return (
-        (phoebe_lc - (batman_lc + beer_lc)).max(),
+        numpy.abs(phoebe_lc - (batman_lc + beer_lc)).max() / batman_lc.max(),
         numpy.abs(phoebe_lc - (batman_lc + phase_lc)).max() / batman_lc.max()
     )
 
 
-def calc_approximation_diff(param_queue, result_queue):
+def calc_approximation_diff(param_queue, result_queue, plot=False):
     """Calc. approximation errors for both phase curve models given params"""
 
     for (
@@ -343,7 +374,15 @@ def calc_approximation_diff(param_queue, result_queue):
                 primary_params,
                 secondary_params,
                 orbit,
-                calc_max_lc_difference(phoebe_binary)
+                calc_max_lc_difference(
+                    phoebe_binary,
+                    10.0**(
+                        0.4
+                        *
+                        (primary_params['mag'] - secondary_params['mag'])
+                    ),
+                    plot
+                )
             )
         )
 
@@ -355,7 +394,9 @@ def explore_batman_approximation(param_grids,
                                  num_parallel_processes,
                                  cmd_isochrone,
                                  progress_fname,
-                                 progress_only):
+                                 *,
+                                 progress_only=False,
+                                 show_model_plots=False):
     """Calculate deviations from PHOEBE LC on a grid of system parameters."""
 
     def get_orbits():
@@ -387,7 +428,10 @@ def explore_batman_approximation(param_grids,
         interpolator = CMDInterpolator(cmd_isochrone)
         result = numpy.empty(
             len(param_grids['stellar_masses']),
-            dtype=[('mass', float), ('logg', float), ('teff', float)]
+            dtype=[('mass', float),
+                   ('logg', float),
+                   ('teff', float),
+                   ('mag', float)]
         )
         result['mass'] = param_grids['stellar_masses']
         result['logg'] = interpolator.get_interpolated(
@@ -397,6 +441,11 @@ def explore_batman_approximation(param_grids,
         )
         result['teff'] = 10.0**interpolator.get_interpolated(
             'logTe',
+            param_grids['stellar_masses'],
+            0.0
+        )
+        result['mag'] = interpolator.get_interpolated(
+            'Vmag',
             param_grids['stellar_masses'],
             0.0
         )
@@ -452,7 +501,7 @@ def explore_batman_approximation(param_grids,
     workers = [
         Process(
             target=calc_approximation_diff,
-            args=(param_queue, result_queue)
+            args=(param_queue, result_queue, show_model_plots)
         )
         for _ in range(num_parallel_processes)
     ]
@@ -467,26 +516,31 @@ def explore_batman_approximation(param_grids,
 #pylint: enable=too-many-branches
 
 
+def get_config_indices(configuration, param_grids, skip_quantities):
+    """Return tuple of indices within param grids given configuration."""
+
+    result = [
+        numpy.argwhere(
+            numpy.asarray(param_grids[_param_quantity[q]])
+            ==
+            configuration[q]
+        )
+        for q in _quantity_order
+    ]
+    skip_indices = [_quantity_order.index(q) for q in skip_quantities]
+    result = [
+        result[i]
+        for i in range(len(result)) if i not in skip_indices
+    ]
+    return tuple(int(i) if i.size else -1 for i in result)
+
+
 def read_plot_data(progress_fname,
                    plot_vs,
+                   maximize_over,
                    plot_fname_format,
                    param_grids):
     """Read and organize the pre-computed data for plotting."""
-
-    def get_config_indices(configuration, skip_quantity):
-        """Return tuple of indices within param grids given configuration."""
-
-        result = [
-            numpy.argwhere(
-                param_grids[_param_quantity[q]]
-                ==
-                configuration[q]
-            )
-            for q in _quantity_order
-        ]
-        del result[_quantity_order.index(skip_quantity)]
-        return tuple(int(i) if i.size else -1 for i in result)
-
 
     plot_data = dict()
     with open(progress_fname, 'rb') as progress_f:
@@ -517,7 +571,11 @@ def read_plot_data(progress_fname,
                                                       vs=x_quantity)
                 if plot_fname not in plot_data:
                     plot_data[plot_fname] = dict(x_quantity=x_quantity)
-                config_indices = get_config_indices(configuration, x_quantity)
+                config_indices = get_config_indices(
+                    configuration,
+                    param_grids,
+                    [x_quantity] + maximize_over
+                )
                 if min(config_indices) < 0:
                     continue
                 if config_indices not in plot_data[plot_fname]:
@@ -525,19 +583,35 @@ def read_plot_data(progress_fname,
                                                                  beer_diff=[],
                                                                  orbit_diff=[])
                 target = plot_data[plot_fname][config_indices]
-                target['x'].append(configuration[x_quantity])
-                target['beer_diff'].append(data['residuals'][0])
-                target['orbit_diff'].append(data['residuals'][1])
+                try:
+                    x_ind = target['x'].index(configuration[x_quantity])
+                    target['beer_diff'][x_ind] = max(
+                        target['beer_diff'][x_ind],
+                        data['residuals'][0]
+                    )
+                    target['orbit_diff'][x_ind] = max(
+                        target['orbit_diff'][x_ind],
+                        data['residuals'][1]
+                    )
+                except ValueError:
+                    target['x'].append(configuration[x_quantity])
+                    target['beer_diff'].append(data['residuals'][0])
+                    target['orbit_diff'].append(data['residuals'][1])
     return plot_data
 
 
-def get_label_format(single_plot_data):
+def get_label_format(single_plot_data, skip_quantities):
     """Identify non-fixed quantities and include in label format string."""
 
     grid_indices = list(single_plot_data.keys())
     grid_indices.remove('x_quantity')
+    print('Grid indices: ' + repr(grid_indices))
     grid_indices = numpy.array(grid_indices)
-    assert grid_indices.shape[1] == len(_quantity_order) - 1
+    assert (
+        grid_indices.shape[1]
+        ==
+        len(_quantity_order) - 1 - len(skip_quantities)
+    )
 
     quantity_latex = dict(m1=r'M_1',
                           m2=r'M_2',
@@ -547,7 +621,9 @@ def get_label_format(single_plot_data):
                           periapsis=r'\omega')
 
     label_quantities = _quantity_order[:]
-    label_quantities.remove(single_plot_data['x_quantity'])
+    for quantity in [single_plot_data['x_quantity']] + skip_quantities:
+        label_quantities.remove(quantity)
+
     label = ''
     for quantity_i, quantity in enumerate(label_quantities):
         if numpy.unique(grid_indices[:, quantity_i]).size > 1:
@@ -557,35 +633,41 @@ def get_label_format(single_plot_data):
     return label
 
 
-def create_plots(progress_fname,
-                 plot_vs,
-                 plot_fname_format,
-                 param_grids,
-                 plot_residuals):
+def create_plots(config, param_grids):
     """
     Plot the dependenc of LC differences on various quantities.
 
     Args:
-        See command line documentation for description of arguments.
+        config:    The command line configuration of what and how to plot.
+
+        param_grids(dict):    The sampled values for each of the parameters.
 
     Returns:
         None
     """
 
-    plot_data = read_plot_data(progress_fname,
-                               plot_vs,
-                               plot_fname_format,
+    plot_data = read_plot_data(config.progress_fname,
+                               config.plot_vs,
+                               config.maximize_over,
+                               config.plot_fname_format,
                                param_grids)
     _logger.info('Creating %d plots.', len(plot_data))
     for plot_fname, single_plot_data in plot_data.items():
-        pyplot.subplot(212)
-        label_format = get_label_format(single_plot_data)
+        print('Generating ' + repr(plot_fname))
+        print('Single plot data: ' + repr(single_plot_data))
+        if len(single_plot_data) == 1:
+            continue
+        label_format = get_label_format(single_plot_data, config.maximize_over)
         label_quantities = _quantity_order[:]
-        label_quantities.remove(single_plot_data['x_quantity'])
+        for quantity in [single_plot_data['x_quantity']] + config.maximize_over:
+            label_quantities.remove(quantity)
 
         plot_order = list(single_plot_data.keys())
         plot_order.remove('x_quantity')
         plot_order.sort()
+
+        pyplot.xscale(config.x_scale)
+        pyplot.yscale(config.y_scale)
 
         for config_indices in plot_order:
             points = single_plot_data[config_indices]
@@ -595,19 +677,21 @@ def create_plots(progress_fname,
                 q: numpy.round(param_grids[_param_quantity[q]][i], 8)
                 for q, i in zip(label_quantities, config_indices)
             })
-            if plot_residuals in ['beer', 'both']:
+            if config.plot_residuals in ['beer', 'both']:
                 pyplot.plot(
                     points['x'],
                     points['beer_diff'],
                     'x',
-                    label=label + (' BEER' if plot_residuals == 'both' else '')
+                    label=label + (' BEER' if config.plot_residuals == 'both'
+                                   else '')
                 )
-            if plot_residuals in ['orbit', 'both']:
+            if config.plot_residuals in ['orbit', 'both']:
                 pyplot.plot(
                     points['x'],
                     points['orbit_diff'],
                     'o',
-                    label=label + (' orbit' if plot_residuals == 'both' else '')
+                    label=label + (' orbit' if config.plot_residuals == 'both'
+                                   else '')
                 )
         pyplot.figlegend(loc='upper center',
                          bbox_to_anchor=(0.5, 1.0),
@@ -622,6 +706,7 @@ def main(config):
     """Avoid polluting global namespace."""
 
     phoebe.progressbars_off()
+    phoebe.logger(clevel='INFO')
     logging.basicConfig(level=getattr(logging, config.logging_level.upper()))
     param_grids = dict(
         stellar_masses=config.stellar_masses,
@@ -636,14 +721,11 @@ def main(config):
         num_parallel_processes=config.num_parallel_processes,
         cmd_isochrone=config.cmd_isochrone,
         progress_fname=config.progress_fname,
-        progress_only=config.report_progress_only
+        progress_only=config.report_progress_only,
+        show_model_plots=config.show_model_plots
     )
 
-    create_plots(config.progress_fname,
-                 config.plot_vs,
-                 config.plot_fname_format,
-                 param_grids,
-                 config.plot_residuals)
+    create_plots(config, param_grids)
 
 if __name__ == '__main__':
     main(parse_command_line())
