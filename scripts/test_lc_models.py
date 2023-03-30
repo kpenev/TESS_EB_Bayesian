@@ -292,10 +292,10 @@ def calc_approximation_diff(param_queue, result_queue):
     """Calc. approximation errors for both phase curve models given params"""
 
     for (
-        param_hash,
-        primary_params,
-        secondary_params,
-        orbit
+            param_hash,
+            primary_params,
+            secondary_params,
+            orbit
     ) in iter(param_queue.get, 'STOP'):
         phoebe_binary = phoebe.default_binary()
 
@@ -527,6 +527,7 @@ def create_plots(progress_fname, plot_vs, plot_fname_format, param_grids):
                                plot_vs,
                                plot_fname_format,
                                param_grids)
+    print('Plot data:\n' + repr(plot_data))
 
 
 def main(config):
@@ -549,6 +550,10 @@ def main(config):
         progress_only=config.report_progress_only
     )
 
+    create_plots(config.progress_fname,
+                 config.plot_vs,
+                 config.plot_fname_format,
+                 param_grids)
 
 if __name__ == '__main__':
     main(parse_command_line())
