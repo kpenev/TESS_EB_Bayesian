@@ -66,7 +66,7 @@ Applications:
   applications
 
 * Look through citations to `Lurie et. al. (2017)
-  <https://ui.adsabs.harvard.edu/abs/2017AJ....154..250L/abstract>` for
+  <https://ui.adsabs.harvard.edu/abs/2017AJ....154..250L/abstract>`_ for
   application of spin measurements, ellipsoidal variations, etc.
 
 Expected outcomes discussion should include:
@@ -118,7 +118,7 @@ Methodology:
       * stellar evolution? Seems ~1% differences between models are
         not atypical better near the sun (since Solar calibrated) but
         worse the further away from sun we go. E.g. 
-        `Bressan et. al. (2012) <https://ui.adsabs.harvard.edu/abs/2012MNRAS.427..127B/abstract>`
+        `Bressan et. al. (2012) <https://ui.adsabs.harvard.edu/abs/2012MNRAS.427..127B/abstract>`_
 
       * atmospheres?
 
@@ -168,10 +168,10 @@ Methodology:
   * Follow Lurie to combine autocorrelation and Lomb-Scargle periodograms.
 
   * Most directly relevant paper: `Martins et. al. (2020)
-    <https://ui.adsabs.harvard.edu/abs/2020ApJS..250...20C/abstract>`
+    <https://ui.adsabs.harvard.edu/abs/2020ApJS..250...20C/abstract>`_
 
   * Wavelets would also be useful. A good starting point may be `Bravo et. al.
-    (2014) <https://ui.adsabs.harvard.edu/abs/2014A%26A...568A..34B/abstract>`.
+    (2014) <https://ui.adsabs.harvard.edu/abs/2014A%26A...568A..34B/abstract>`_.
     It suggest using 6-th order Morlett transform. This could serve as a check
     and perhaps additional way to flag candidates and improve analysis for stars
     with intermittent rotational variability.
@@ -203,22 +203,22 @@ Methodology:
     * Compare to their full catalog 
 
   * `Prsa et. al. (2022)
-    <https://ui.adsabs.harvard.edu/abs/2022ApJS..258...16P/abstract>`
+    <https://ui.adsabs.harvard.edu/abs/2022ApJS..258...16P/abstract>`_
 
   * What did above validate against
 
 * For spin validation compare to:
 
   * Martins et. al. (2020) above and the associated `livig database
-    <https://filtergraph.com/tess_rotation_tois>` (287 TOIs with "unambiguous
+    <https://filtergraph.com/tess_rotation_tois>`_ (287 TOIs with "unambiguous
     rotation" flag)
     
   * KELT rotations: `Oelkers et al. (2018)
-    <https://ui.adsabs.harvard.edu/abs/2018AJ....155...39O/abstract>` which
+    <https://ui.adsabs.harvard.edu/abs/2018AJ....155...39O/abstract>`_ which
     contains 62x10^3 likely rotation periods based on a KELT photometry + TFA
     
   * Overlap with Kepler binarise from `Lurie et. al. (2017)
-    <https://ui.adsabs.harvard.edu/abs/2017AJ....154..250L/abstract>`?
+    <https://ui.adsabs.harvard.edu/abs/2017AJ....154..250L/abstract>`_?
 
   * others?
 
