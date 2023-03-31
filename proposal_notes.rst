@@ -1,275 +1,275 @@
 Expected outcomes discussion should include:
 ============================================
 
-  * Prediction for:
+* Prediction for:
 
-    * how many binaries will have well characterized physical parameters
+  * how many binaries will have well characterized physical parameters
 
-    * how many will have spin detections
+  * how many will have spin detections
 
-    * what will be the overlap between the two above
+  * what will be the overlap between the two above
 
-    * how many EBs will have apsidal precession measurements with good
-      precision
+  * how many EBs will have apsidal precession measurements with good
+    precision
 
-  * Selection effects:
+* Selection effects:
 
-    * Stamp selection effects are hard to characterize but high cadence and
-      Prsa et al. (2022) compiled comprehensive list to search
+  * Stamp selection effects are hard to characterize but high cadence and
+    Prsa et al. (2022) compiled comprehensive list to search
 
-    * FFI: no selection effects (everything downloaded). We will use very
-      straightforward algorithm for generating candidate list for manual
-      review. Only select well detached high signal to noise EBs. We can do
-      injection-recovery simulations to characterize selection.
+  * FFI: no selection effects (everything downloaded). We will use very
+    straightforward algorithm for generating candidate list for manual
+    review. Only select well detached high signal to noise EBs. We can do
+    injection-recovery simulations to characterize selection.
 
-    * What additional selection effects we impose and how will we
-      characterize them
+  * What additional selection effects we impose and how will we
+    characterize them
 
-      * physical parameter sample
+    * physical parameter sample
 
-      * spin sample
+    * spin sample
 
-      * differences of selection effects between short and long cadence
-        LCs
+    * differences of selection effects between short and long cadence
+      LCs
 
 Applications:
 =============
 
-  * Measure Qstar:
+* Measure Qstar:
 
-    * control with long period systems to show no signature => no
-      constraints
+  * control with long period systems to show no signature => no
+    constraints
 
-    * Comppare spin vs eccentricity constraints (same object different
-      dominant freuencies)
+  * Comppare spin vs eccentricity constraints (same object different
+    dominant freuencies)
 
-    * Many more systems than W19 => able to explore more dependencies, not
-      just frequency.
+  * Many more systems than W19 => able to explore more dependencies, not
+    just frequency.
 
-  * can serve as control for measuring planet Q:
+* can serve as control for measuring planet Q:
 
-    * Probe very similar population of stars to exoplanet hosts (many
-      selection effects shared: brightness limit, resolution, sky coverage)
+  * Probe very similar population of stars to exoplanet hosts (many
+    selection effects shared: brightness limit, resolution, sky coverage)
 
-    * Stellar dissipation has big impact on required planet dissipation (can
-      drive partcircularization itself, does not conserve angular momentum
-      => bigger orbital decay for same circularization).
+  * Stellar dissipation has big impact on required planet dissipation (can
+    drive partcircularization itself, does not conserve angular momentum
+    => bigger orbital decay for same circularization).
 
-  * constrain population and properties of exoplanet false positives
+* constrain population and properties of exoplanet false positives
 
-  * Direct test of stellar evolution:
+* Direct test of stellar evolution:
 
-    * https://ui.adsabs.harvard.edu/abs/2018MNRAS.479.1953D/abstract, 
+  * https://ui.adsabs.harvard.edu/abs/2018MNRAS.479.1953D/abstract, 
 
-    * https://ui.adsabs.harvard.edu/abs/2012MNRAS.427..127B/abstract
+  * https://ui.adsabs.harvard.edu/abs/2012MNRAS.427..127B/abstract
 
-    * https://ui.adsabs.harvard.edu/abs/2016ApJ...832..121G/abstract
+  * https://ui.adsabs.harvard.edu/abs/2016ApJ...832..121G/abstract
 
 
-  * ETV can constrain k2, hence internal structure
+* ETV can constrain k2, hence internal structure
 
-  * Limb darkening calibration and stellar atmospheres modeling
+* Limb darkening calibration and stellar atmospheres modeling
 
-  * Spectral synthesis for galaxy science:
-    https://ui.adsabs.harvard.edu/abs/2017PASA...34...58E/abstract
+* Spectral synthesis for galaxy science:
+  https://ui.adsabs.harvard.edu/abs/2017PASA...34...58E/abstract
 
-  * Study tides: interesting article:  Rotation Period Evolution in Low-mass
-    Binary Stars: The Impact of Tidal Torques and Magnetic Braking 
+* Study tides: interesting article:  Rotation Period Evolution in Low-mass
+  Binary Stars: The Impact of Tidal Torques and Magnetic Braking 
 
-  * Dark Matter studies:
-    https://ui.adsabs.harvard.edu/abs/2022ApJ...928L..17C/abstract
+* Dark Matter studies:
+  https://ui.adsabs.harvard.edu/abs/2022ApJ...928L..17C/abstract
 
-  * Read through
-    https://ui.adsabs.harvard.edu/abs/2012ocpd.conf...51S/abstract for further
-    applications
+* Read through
+  https://ui.adsabs.harvard.edu/abs/2012ocpd.conf...51S/abstract for further
+  applications
 
 
 Methodology:
 ============
 
-  * LC modeling:
+* LC modeling:
 
-    * For well separated binaries (vast majority): use BATMAN + orbit based
-      phase curvefor LC modeling.
+  * For well separated binaries (vast majority): use BATMAN + orbit based
+    phase curvefor LC modeling.
 
-      * Works to few ppt regardless of binary parameters or orientation.
+    * Works to few ppt regardless of binary parameters or orientation.
 
-      * How does precision compare to typical model uncertainties?
+    * How does precision compare to typical model uncertainties?
 
-        * stellar evolution? Seems ~1% differences between models are
-          not atypical better near the sun (since Solar calibrated) but
-          worse the further away from sun we go. E.g. 
-          `Bressan et. al. (2012) <https://ui.adsabs.harvard.edu/abs/2012MNRAS.427..127B/abstract>`
+      * stellar evolution? Seems ~1% differences between models are
+        not atypical better near the sun (since Solar calibrated) but
+        worse the further away from sun we go. E.g. 
+        `Bressan et. al. (2012) <https://ui.adsabs.harvard.edu/abs/2012MNRAS.427..127B/abstract>`
 
-        * atmospheres?
+      * atmospheres?
 
-      * Precision better than spot variability?
+    * Precision better than spot variability?
 
-      * For building orbits for phase curve terms: 
-        
-          * will not sample uniform times, but interpolate time like the other
-            parameters. 
-            
-          * Use table of prescribed eccentric anomaly values at grid of
-            eccentricities to ensure interpolation to desired precision.
-
-          * Simulate orbit in 2D apply rotation matrix to account for
-            inclination and periapsis (use GPUs?)
-
-      * For the very few very close (and high precision?) binaries can use
-        PHOEBE if no other option. Investigate when we need to switch. Perhaps
-        OK to drop.
-
-      * Analysis will begin with fast model to find max likelihood values, but
-        will not run to convergence. Manual inspection of max likelihood LC vs
-        instrumental LC will catch few binaries requiring full PHOEBE.
-
-  * SED modeling options (choose one or perhps need mixture):
-
-    * **CDS isochrones, combining two isolated stars**: 
+    * For building orbits for phase curve terms: 
       
-      * provides TESS magnitudes for LC models
+        * will not sample uniform times, but interpolate time like the other
+          parameters. 
+          
+        * Use table of prescribed eccentric anomaly values at grid of
+          eccentricities to ensure interpolation to desired precision.
 
-      * Have interpolation already working
+        * Simulate orbit in 2D apply rotation matrix to account for
+          inclination and periapsis (use GPUs?)
+
+    * For the very few very close (and high precision?) binaries can use
+      PHOEBE if no other option. Investigate when we need to switch. Perhaps
+      OK to drop.
+
+    * Analysis will begin with fast model to find max likelihood values, but
+      will not run to convergence. Manual inspection of max likelihood LC vs
+      instrumental LC will catch few binaries requiring full PHOEBE.
+
+* SED modeling options (choose one or perhps need mixture):
+
+  * **CDS isochrones, combining two isolated stars**: 
     
-    * ~~PHOEBE?~~
+    * provides TESS magnitudes for LC models
 
-    * Exctiction and reddening options: 
+    * Have interpolation already working
+  
+  * ~~PHOEBE?~~
+
+  * Exctiction and reddening options: 
+    
+    * what do Justesen & Albrecht 
       
-      * what do Justesen & Albrecht 
-        
-      * W19?
+    * W19?
 
-      * CMD: "Using extinction coefficients computed star-by-star (except
-        for the OBC case, which uses constant coefficients)". Read paper
-        and see how that works.
+    * CMD: "Using extinction coefficients computed star-by-star (except
+      for the OBC case, which uses constant coefficients)". Read paper
+      and see how that works.
 
-  * Physical parameter validation:
-      
-    * W19
+* Physical parameter validation:
+    
+  * W19
 
-    * J&A
+  * J&A
 
-    * What did above validate against
+  * What did above validate against
 
-  * Spin measurements:
+* Spin measurements:
 
-    * Follow Lurie to combine autocorrelation and Lomb-Scargle periodograms.
+  * Follow Lurie to combine autocorrelation and Lomb-Scargle periodograms.
 
-    * Find other spin papers to see if other approaches are used?
+  * Find other spin papers to see if other approaches are used?
 
-    * What quality control measures can be used?
+  * What quality control measures can be used?
 
-      * What does Lurie do?
+    * What does Lurie do?
 
-      * What do other papers do?
+    * What do other papers do?
 
 Need to argue
 -------------
 
-  1. There will be enough systems that we can analyze to generate a big
-     catalog, hopefully many thousands 
+1. There will be enough systems that we can analyze to generate a big
+   catalog, hopefully many thousands 
 
-     * Filter from Prsa et all (2022) to estimate yield from 2x10^5 stamps:
-       1,200 EBs with morph < 0.5 & primary eclipse depth > 1% & T < 12 (up to
-       1,341 for T < 13, 1,389 for T < 13.5 per QLP)
+   * Filter from Prsa et all (2022) to estimate yield from 2x10^5 stamps:
+     1,200 EBs with morph < 0.5 & primary eclipse depth > 1% & T < 12 (up to
+     1,341 for T < 13, 1,389 for T < 13.5 per QLP)
 
-     * Use some scaling to estimate yield from FFI: 10^7 QLP lightcurves for
-       T<13.5. Justesen & Albrecht (2019) autodetected ~350 high quality EBs
-       from southern hemisphere alone => ~700 from both hemispheres from
-       stamps => ~35,000 from naive scaling. This is an overestimate
-       because TESS targets were selected to:
+   * Use some scaling to estimate yield from FFI: 10^7 QLP lightcurves for
+     T<13.5. Justesen & Albrecht (2019) autodetected ~350 high quality EBs
+     from southern hemisphere alone => ~700 from both hemispheres from
+     stamps => ~35,000 from naive scaling. This is an overestimate
+     because TESS targets were selected to:
 
-         - avoid blending
+       - avoid blending
 
-         - be brighter on average
+       - be brighter on average
 
-         - probably be biased to continuous viewing zone or zones with more
-           coverage
+       - probably be biased to continuous viewing zone or zones with more
+         coverage
 
-       but not selected to target EBs deliberately. Probably safe to say FFIs
-       will yield many thousands of well characterized EBs.
+     but not selected to target EBs deliberately. Probably safe to say FFIs
+     will yield many thousands of well characterized EBs.
 
-  2. The precision of the data will be sufficient to get useful constraints:
+2. The precision of the data will be sufficient to get useful constraints:
 
-         this is ensured from the selection criteria above (deep transits,
-         well detached, bright => high photometric precision). Signal to noise
-         ratio will be >> 10 for most EBs and always bigger than ~20.
+       this is ensured from the selection criteria above (deep transits,
+       well detached, bright => high photometric precision). Signal to noise
+       ratio will be >> 10 for most EBs and always bigger than ~20.
 
-  3. We have the computing resources to do the analysis: 
+3. We have the computing resources to do the analysis: 
 
-     * With fast LC modeling TACC should be plenty
+   * With fast LC modeling TACC should be plenty
 
-  4. We will have the time to do the coding and article writing etc within the
-     time frame of the project
+4. We will have the time to do the coding and article writing etc within the
+   time frame of the project
 
-     * LC models and already implemented
+   * LC models and already implemented
 
-     * MCMC relies on existing package just have to define likelihood
-       function
+   * MCMC relies on existing package just have to define likelihood
+     function
 
-     * Calculations will run while articles are being written 
+   * Calculations will run while articles are being written 
 
 
 Work Plan
 ---------
 
-  * EBs from stamps
+* EBs from stamps
 
-    * LC detrending unless using PDCSAP
+  * LC detrending unless using PDCSAP
+  
+  * Phase curve + BATMAN model: 1 month
+
+  * Automatic candidate EB selection from stamps: 1 month
+
+  * MCMC likelihood: 1 month
     
-    * Phase curve + BATMAN model: 1 month
+      * Extinction model
 
-    * Automatic candidate EB selection from stamps: 1 month
+      * SED likelihood
 
-    * MCMC likelihood: 1 month
-      
-        * Extinction model
+      * LC likelihood
 
-        * SED likelihood
+  * Manual selection of EBs: 1 month
 
-        * LC likelihood
+  * Sampling: 3 months in parallel to EB selection
 
-    * Manual selection of EBs: 1 month
+  * Analyzing results, validation against W19 and J&A other: 2 months
+    parallel to sampling
 
-    * Sampling: 3 months in parallel to EB selection
+  * Article: 2 months
 
-    * Analyzing results, validation against W19 and J&A other: 2 months
-      parallel to sampling
+* EBs from FFIs
 
-    * Article: 2 months
+  * LC detrending?
 
-  * EBs from FFIs
+  * Adapt automatic candidate selection: 3 weeks
 
-    * LC detrending?
+  * Adapt MCMC likelihood: 2 weeks (extinction and SED models are same)
 
-    * Adapt automatic candidate selection: 3 weeks
+  * Manual selection of EBs: 5 months
 
-    * Adapt MCMC likelihood: 2 weeks (extinction and SED models are same)
+  * Sampling: 6 months in parallel to selection
 
-    * Manual selection of EBs: 5 months
+  * Analyzing results, validation against W19 and J&A other: 2 months
+    parallel to sampling
 
-    * Sampling: 6 months in parallel to selection
+  * Article: 2 months
 
-    * Analyzing results, validation against W19 and J&A other: 2 months
-      parallel to sampling
+* Spin from stamp LCs
 
-    * Article: 2 months
+  * Custom LC detrending for stamps (what did Lurie do?) ?
 
-  * Spin from stamp LCs
+  * Implement periodogram & autocorrelation searches like Lurie et. al.
 
-    * Custom LC detrending for stamps (what did Lurie do?) ?
+  * Automated search of stamp LCs
 
-    * Implement periodogram & autocorrelation searches like Lurie et. al.
+  * Manual review of candidates from stamps: partially in parallel to
+    automated search
 
-    * Automated search of stamp LCs
+  * Custom LC detrending from FFIs?
 
-    * Manual review of candidates from stamps: partially in parallel to
-      automated search
+  * Automated search of FFI LCs: partially in parallel to stamp manual
+    review 
 
-    * Custom LC detrending from FFIs?
-
-    * Automated search of FFI LCs: partially in parallel to stamp manual
-      review 
-
-    * Article: 2 months 
+  * Article: 2 months 
