@@ -19,8 +19,8 @@ Expected outcomes discussion should include:
 
         * FFI: no selection effects (everything downloaded). We will use very
           straightforward algorithm for generating candidate list for manual
-          review. Only select well detached high signal to noise EBs. Can we do
-          injection-recovery simulations to characterize selection?
+          review. Only select well detached high signal to noise EBs. We can do
+          injection-recovery simulations to characterize selection.
 
         * What additional selection effects we impose and how will we
           characterize them
@@ -87,17 +87,51 @@ Methodology:
 
     * LC modeling:
 
-        * For well separated binaries (vast majority): use BATMAN + BEER for LC
-          modeling (test speed or ask Simon).
+        * For well separated binaries (vast majority): use BATMAN + orbit based
+          phase curvefor LC modeling.
+
+        * For building orbits for phase curve terms: 
+          
+            * will not sample uniform times, but interpolate time like the other
+              parameters. 
+              
+            * Use table of prescribed eccentric anomaly values at grid of
+              eccentricities to ensure interpolation to desired precision.
+
+            * Simulate orbit in 2D apply rotation matrix to account for
+              inclination and periapsis (use GPUs?)
 
         * For the very few very close (and high precision?) binaries can use
-          PHOEBE if no other option.  Investigate when we need to switch.
+          PHOEBE if no other option. Investigate when we need to switch. Perhaps
+          OK to drop.
 
     * SED modeling options (choose one or perhps need mixture):
-        
-        * PHOEBE
+
+        * **CDS isochrones, combining two isolated stars**: 
           
-        * CDS isochrones, combining two isolated stars
+            * provides TESS magnitudes for LC models
+
+            * Have interpolation already working
+        
+        * ~~PHOEBE?~~
+
+        * Exctiction and reddening options: 
+          
+            * what do Justesen & Albrecht 
+              
+            * W19?
+
+            * CMD: "Using extinction coefficients computed star-by-star (except
+              for the OBC case, which uses constant coefficients)". Read paper
+              and see how that works.
+
+    * Validation:
+        
+        * W19
+
+        * J&A
+
+        * What did above validate against
 
 Need to argue
 -------------
@@ -126,11 +160,85 @@ Need to argue
           will yield many thousands of well characterized EBs.
 
     2. The precision of the data will be sufficient to get useful constraints:
+
            this is ensured from the selection criteria above (deep transits,
            well detached, bright => high photometric precision). Signal to noise
            ratio will be >> 10 for most EBs and always bigger than ~20.
 
-    3. We have the computing resources to do the analysis
+    3. We have the computing resources to do the analysis: 
+
+           With fast LC modeling TACC should be plenty
 
     4. We will have the time to do the coding and article writing etc within the
        time frame of the project
+
+        * LC models and already implemented
+
+        * MCMC relies on existing package just have to define likelihood
+          function
+
+        * Calculations will run while articles are being written 
+
+
+Work Plan
+---------
+
+    * EBs from stamps
+
+        * LC detrending unless using PDCSAP
+        
+        * Phase curve + BATMAN model: 1 month
+
+        * Automatic candidate EB selection from stamps: 1 month
+
+        * MCMC likelihood: 1 month
+          
+            * Extinction model
+
+            * SED likelihood
+
+            * LC likelihood
+
+        * Manual selection of EBs: 1 month
+
+        * Sampling: 3 months in parallel to EB selection
+
+        * Analyzing results, validation against W19 and J&A other: 2 months
+          parallel to sampling
+
+        * Article: 2 months
+
+    * EBs from FFIs
+
+        * LC detrending?
+
+        * Adapt automatic candidate selection: 3 weeks
+
+        * Adapt MCMC likelihood: 2 weeks (extinction and SED models are same)
+
+        * Manual selection of EBs: 5 months
+
+        * Sampling: 6 months in parallel to selection
+
+        * Analyzing results, validation against W19 and J&A other: 2 months
+          parallel to sampling
+
+        * Article: 2 months
+
+    * Spin from stamp LCs
+
+        * Custom LC detrending for stamps (what did Lurie do?) ?
+
+        * Implement periodogram & autocorrelation searches like Lurie et. al.
+
+        * Automated search of stamp LCs
+
+        * Manual review of candidates from stamps: partially in parallel to
+          automated search
+
+        * Custom LC detrending from FFIs?
+
+        * Automated search of FFI LCs: partially in parallel to stamp manual
+          review 
+
+        * Article: 2 months 
