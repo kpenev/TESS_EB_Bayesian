@@ -277,10 +277,10 @@ def calc_max_lc_difference(phoebe_binary,
     phoebe_binary.add_dataset('rv', dataset='rv01')
     phoebe_binary.add_dataset('orb') #LTT?
 
-    eval_times = phoebe.linspace(
+    eval_times = numpy.arange(
         0,
         phoebe_binary['orbit@period'].get_value(units.day),
-        101
+        0.01
     )
     phoebe_binary.set_value_all('times', eval_times)
     phoebe_binary.set_value_all('compute_times', eval_times)
@@ -706,8 +706,8 @@ def main(config):
     """Avoid polluting global namespace."""
 
     phoebe.progressbars_off()
-    phoebe.logger(clevel='INFO')
-    logging.basicConfig(level=getattr(logging, config.logging_level.upper()))
+    phoebe.logger(clevel=None)
+    _logger.setLevel(getattr(logging, config.logging_level.upper()))
     param_grids = dict(
         stellar_masses=config.stellar_masses,
         orbital_periods=config.orbital_periods,
@@ -725,7 +725,8 @@ def main(config):
         show_model_plots=config.show_model_plots
     )
 
-    create_plots(config, param_grids)
+    if not config.report_progress_only:
+        create_plots(config, param_grids)
 
 if __name__ == '__main__':
     main(parse_command_line())

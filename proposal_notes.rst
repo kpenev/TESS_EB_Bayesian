@@ -1,36 +1,18 @@
-Expected outcomes discussion should include:
-============================================
+Goals
+=====
 
-* Prediction for:
+* Fully characterized distributions of EB physical parameters from TESS
+  photometry and SED information (GAIA + 2MASS + ... catalogues)
 
-  * how many binaries will have well characterized physical parameters
+* Spin of EB primary stars
 
-  * how many will have spin detections
+* Detection of ellipsoidal variations, reflected light, doppler beaming
 
-  * what will be the overlap between the two above
+* Measure eclipsing timing variability (ETV)? 
+  
+  * apsidal precession 
 
-  * how many EBs will have apsidal precession measurements with good
-    precision
-
-* Selection effects:
-
-  * Stamp selection effects are hard to characterize but high cadence and
-    Prsa et al. (2022) compiled comprehensive list to search
-
-  * FFI: no selection effects (everything downloaded). We will use very
-    straightforward algorithm for generating candidate list for manual
-    review. Only select well detached high signal to noise EBs. We can do
-    injection-recovery simulations to characterize selection.
-
-  * What additional selection effects we impose and how will we
-    characterize them
-
-    * physical parameter sample
-
-    * spin sample
-
-    * differences of selection effects between short and long cadence
-      LCs
+  * other causes?
 
 Applications:
 =============
@@ -83,6 +65,43 @@ Applications:
   https://ui.adsabs.harvard.edu/abs/2012ocpd.conf...51S/abstract for further
   applications
 
+* Look through citations to `Lurie et. al. (2017)
+  <https://ui.adsabs.harvard.edu/abs/2017AJ....154..250L/abstract>` for
+  application of spin measurements, ellipsoidal variations, etc.
+
+Expected outcomes discussion should include:
+============================================
+
+* Prediction for:
+
+  * how many binaries will have well characterized physical parameters
+
+  * how many will have spin detections
+
+  * what will be the overlap between the two above
+
+  * how many EBs will have apsidal precession measurements with good
+    precision
+
+* Selection effects:
+
+  * Stamp selection effects are hard to characterize but high cadence and
+    Prsa et al. (2022) compiled comprehensive list to search
+
+  * FFI: no selection effects (everything downloaded). We will use very
+    straightforward algorithm for generating candidate list for manual
+    review. Only select well detached high signal to noise EBs. We can do
+    injection-recovery simulations to characterize selection.
+
+  * What additional selection effects we impose and how will we
+    characterize them
+
+    * physical parameter sample
+
+    * spin sample
+
+    * differences of selection effects between short and long cadence
+      LCs
 
 Methodology:
 ============
@@ -144,17 +163,18 @@ Methodology:
       for the OBC case, which uses constant coefficients)". Read paper
       and see how that works.
 
-* Physical parameter validation:
-    
-  * W19
-
-  * J&A
-
-  * What did above validate against
-
 * Spin measurements:
 
   * Follow Lurie to combine autocorrelation and Lomb-Scargle periodograms.
+
+  * Most directly relevant paper: `Martins et. al. (2020)
+    <https://ui.adsabs.harvard.edu/abs/2020ApJS..250...20C/abstract>`
+
+  * Wavelets would also be useful. A good starting point may be `Bravo et. al.
+    (2014) <https://ui.adsabs.harvard.edu/abs/2014A%26A...568A..34B/abstract>`.
+    It suggest using 6-th order Morlett transform. This could serve as a check
+    and perhaps additional way to flag candidates and improve analysis for stars
+    with intermittent rotational variability.
 
   * Find other spin papers to see if other approaches are used?
 
@@ -163,6 +183,44 @@ Methodology:
     * What does Lurie do?
 
     * What do other papers do?
+
+  * In addition to spin, we will detect 
+
+
+* Physical parameter validation:
+    
+  * W19 
+
+    * analyze small sample of Kepler LCs to compare algorithms
+
+    * Find overlapping detections to compare to independent analysis applied on
+      independent data
+
+  * J&A
+
+    * Very similar analysis. Run on J&A short LCs to compare algorithm.
+      
+    * Compare to their full catalog 
+
+  * `Prsa et. al. (2022)
+    <https://ui.adsabs.harvard.edu/abs/2022ApJS..258...16P/abstract>`
+
+  * What did above validate against
+
+* For spin validation compare to:
+
+  * Martins et. al. (2020) above and the associated `livig database
+    <https://filtergraph.com/tess_rotation_tois>` (287 TOIs with "unambiguous
+    rotation" flag)
+    
+  * KELT rotations: `Oelkers et al. (2018)
+    <https://ui.adsabs.harvard.edu/abs/2018AJ....155...39O/abstract>` which
+    contains 62x10^3 likely rotation periods based on a KELT photometry + TFA
+    
+  * Overlap with Kepler binarise from `Lurie et. al. (2017)
+    <https://ui.adsabs.harvard.edu/abs/2017AJ....154..250L/abstract>`?
+
+  * others?
 
 Need to argue
 -------------
