@@ -234,20 +234,11 @@ Methodology:
       components, compute the distance modulus, and correct for dust extinction
       along the line of sight assuming an exponential dust distribution with
       scale height h0 = 119 pc (Kruse & Agol 2014):
+      
+      $$\\mathrm{mag}_{\\lambda,\\mathrm{binary}} + 5\\log_{10}\\left(\\frac{d}{10pc}\\right) + A_\\lambda E(B-V) \\left[1-\\exp\\left(\\frac{-d\\sin b_G}{h_0}\\right)\\right]$$
 
-      .. math::
-
-          \mathrm{mag}_{\lambda,\mathrm{binary}} 
-          +
-          5\log_{10}\left(\frac{d}{10pc} 
-          + 
-          A_\lambda E(B-V) \left[1
-              -\exp\left(\frac{-d\sin b_G}{h_0}\right)
-          \right]
-
-
-      where :math:`b_G` is a target’s Galactic latitude, d is distance in pc,
-      and E(B − V) and :math:`A_λ` are reddening and band specific extinction
+      where b_G is a target’s Galactic latitude, d is distance in pc,
+      and E(B − V) and A_\lambda are reddening and band specific extinction
       computed from a Milky Way extinction law with R = 3.1 (Fitzpatrick 1999).
       The integrated absolute magnitude of the binary in a given bandpass is
 
