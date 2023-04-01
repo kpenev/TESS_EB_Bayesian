@@ -4,7 +4,7 @@ Goals
 * Fully characterized distributions of EB physical parameters from TESS
   photometry and SED information (GAIA + 2MASS + ... catalogues)
 
-* Spin of EB primary stars
+* Spin and differential rotation of TESS EB primary stars
 
 * Detection of ellipsoidal variations, reflected light, doppler beaming
 
@@ -25,8 +25,9 @@ Applications:
   * Comppare spin vs eccentricity constraints (same object different
     dominant freuencies)
 
-  * Many more systems than W19 => able to explore more dependencies, not
-    just frequency.
+  * Many more systems than `W19
+    <https://ui.adsabs.harvard.edu/abs/2019MNRAS.489.1644W/abstract>`_ => able
+    to explore more dependencies, not just frequency.
 
 * can serve as control for measuring planet Q:
 
@@ -47,6 +48,10 @@ Applications:
 
   * https://ui.adsabs.harvard.edu/abs/2016ApJ...832..121G/abstract
 
+* Study magnetic breaking from distribution of binaries at short orbital
+  periods: `Kareem et. al. (2022)
+  <https://ui.adsabs.harvard.edu/abs/2022MNRAS.517.4916E/abstract>`_ 
+
 
 * ETV can constrain k2, hence internal structure
 
@@ -61,20 +66,49 @@ Applications:
 * Dark Matter studies:
   https://ui.adsabs.harvard.edu/abs/2022ApJ...928L..17C/abstract
 
-* <++>**READ THROUGH**
-  https://ui.adsabs.harvard.edu/abs/2012ocpd.conf...51S/abstract **FOR FURTHER
-  APPLICATIONS**
+* `Reinhold et. al. (2013
+  <https://ui.adsabs.harvard.edu/abs/2013A%26A...560A...4R/abstract>`_,
+  `Reinhold & Gizon (2015)
+  <https://ui.adsabs.harvard.edu/abs/2015A%26A...583A..65R/abstract>`_, and
+  `Lurie et. al. (2017)
+  <https://ui.adsabs.harvard.edu/abs/2017AJ....154..250L/abstract>`_ all
+  interpret additional peak in LS periodogram as differential rotation.
 
-* <++>**LOOK THROUGH CITATIONS TO AND INTRODUCTION OF** `Lurie et. al. (2017)
-  <https://ui.adsabs.harvard.edu/abs/2017AJ....154..250L/abstract>`_ **FOR
-  APPLICATION OF SPIN MEASUREMENTS, ELLIPSOIDAL VARIATIONS, ETC.**
+* Differential rotation is important to binary evolution in its own right, as it
+  influences magnetic braking through surface activity and the magnetic dynamo
+  (`Schatzman 1962
+  <https://ui.adsabs.harvard.edu/abs/1962AnAp...25...18S/abstract>`_, `Adam et.
+  al. 2020a <https://ui.adsabs.harvard.edu/abs/2020MNRAS.498.3782J/abstract>`_,
+  `Adam et. al. 2020b
+  <https://ui.adsabs.harvard.edu/abs/2020MNRAS.491..690J/abstract>`_)
 
-Expected outcomes discussion should include:
-============================================
+Expected outcomes:
+==================
 
-* Prediction for:
+* Number of binaries with well characterized physical parameters
 
-  * <++>**HOW MANY BINARIES WILL HAVE WELL CHARACTERIZED PHYSICAL PARAMETERS**
+  * Filter from Prsa et all (2022) to estimate yield from 2x10^5 stamps: 1,200
+    EBs with morph < 0.5 & primary eclipse depth > 1% & T < 12 (up to 1,341
+    for T < 13, 1,389 for T < 13.5 per QLP)
+
+  * Use some scaling to estimate yield from FFI: 10^7 QLP lightcurves for
+    T<13.5. Justesen & Albrecht (2019) autodetected ~350 high quality EBs from
+    southern hemisphere alone => ~700 from both hemispheres from stamps =>
+    ~35,000 from naive scaling. This is an overestimate because TESS targets
+    were selected to:
+
+    - avoid blending
+
+    - be brighter on average
+
+    - probably be biased to continuous viewing zone or zones with more
+      coverage
+
+    but not selected to target EBs deliberately. Probably safe to say FFIs
+    will yield many thousands of well characterized EBs.
+
+
+* Need predictions for:
 
   * <++>**HOW MANY WILL HAVE SPIN DETECTIONS**
 
@@ -93,8 +127,8 @@ Expected outcomes discussion should include:
     review. Only select well detached high signal to noise EBs. We will do
     injection-recovery simulations to characterize selection.
 
-  * <++>**WHAT ADDITIONAL SELECTION EFFECTS WE IMPOSE AND HOW WILL WE
-    CHARACTERIZE THEM**
+  * Additional selection effects we will impose and how will we characterize
+    them:
 
     * <++>**PHYSICAL PARAMETER SAMPLE**
 
@@ -174,13 +208,74 @@ Methodology:
   
   * <++>**EXCTICTION AND REDDENING OPTIONS**: 
     
-    * **WHAT DO JUSTESEN & ALBRECHT DO**
+    * Per `J&A
+      <https://ui.adsabs.harvard.edu/abs/2021ApJ...912..123J/abstract>`_:
+
+      We construct the SED from the apparent magnitudes, distance (adopted from
+      Bailer-Jones et al. (2018) using Gaia DR2 parallaxes) and extinction
+      listed in the TIC. We include Johnson–Cousins B and V, Two Micron All Sky
+      Survey J, H, and K, and Wide-field Infrared Survey Explorer W1 and W2
+      magnitudes where available. If no extinction is listed in the TIC, we
+      query the 3D galactic dust map by Green et al. (2019) or the dust map by
+      Schlegel et al. (1998) as the last priority. We convert apparent
+      magnitudes to absolute magnitudes via the distance modulus. To obtain
+      synthetic absolute magnitudes, we use the bolometric correction (BC)
+      tables developed for the Bag of Stellar Tracks and Isochrones (BaSTI)
+      isochrones (Hidalgo et al. 2018) and compute the combined absolute
+      magnitudes of the two binary components using their effective temperatures
+      and radii. We adopt the BC tables assuming solar metallicity and a surface
+      gravity of logg=4.5. We note that the BC is mostly insensitive to
+      metallicity and surface gravity.
       
-    * **W19?**
+    * Per `W19
+      <https://ui.adsabs.harvard.edu/abs/2019MNRAS.489.1644W/abstract>`_:
+
+      To fit the archival data, we sum the predicted SEDs of both stellar
+      components, compute the distance modulus, and correct for dust extinction
+      along the line of sight assuming an exponential dust distribution with
+      scale height h0 = 119 pc (Kruse & Agol 2014):
+
+      .. math::
+
+          \mathrm{mag}_{\lambda,\mathrm{binary}} 
+          +
+          5\log_{10}\left(\frac{d}{10pc} 
+          + 
+          A_\lambda E(B-V) \left[1
+              -\exp\left(\frac{-d\sin b_G}{h_0}\right)
+          \right]
+
+
+      where :math:`b_G` is a target’s Galactic latitude, d is distance in pc,
+      and E(B − V) and :math:`A_λ` are reddening and band specific extinction
+      computed from a Milky Way extinction law with R = 3.1 (Fitzpatrick 1999).
+      The integrated absolute magnitude of the binary in a given bandpass is
+
+      <Equation combining flux from both stars>
+
+      We use cross-matched Gaia distances derived from Bailer-Jones et al.
+      (2018) and Schlafly & Finkbeiner (2011) dust maps results, when available,
+      to place Gaussian priors on d and E(B − V) in our model. Accurate
+      distances from parallax may be used to place better constraints on EB
+      masses since mass correlates tightly with luminosity on the main sequence
+      (MS). Well-calibrated EBs can be used as standard candles to calibrate
+      parallaxes (Southworth, Maxted & Smalley 2005), and the converse should
+      also be true for systems with well-constrained geometries (Stassun &
+      Torres 2016). In particular, accurate distances may better constrain
+      masses for binaries with non-total or non-annular eclipses by precisely
+      determining total system luminosities. However, rather than using reported
+      uncertainties as fixed σ d , σ E(B−V) , we allow the widths of these
+      Gaussian priors to float to tolerate inaccuracies in the dust map or Gaia
+      data due to source confusion or presence of tertiary companions, which has
+      an occurrence rate of ∼15–20 per cent in the Kepler field (Gies et al.
+      2012; Rappaport et al. 2013; Conroy et al.  2014; Orosz 2015). Frequent
+      eclipses or nearby long-period binaries may also deleteriously affect the
+      accuracy of Gaia astrometry.
 
     * CMD: "Using extinction coefficients computed star-by-star (except for the
-      OBC case, which uses constant coefficients)". <++>**READ PAPER AND SEE HOW
-      THAT WORKS.**
+      OBC case, which uses constant coefficients)": extinction of Av=1.0, with
+      coefficients derived star-by-star, for Cardelli et al 89 + O'Donnell 94
+      Rv=3.1 extinction curve <++>**READ THE PAPERS AND SEE HOW THAT WORKS.**
 
 * Physical parameter validation and quality control:
 
@@ -194,7 +289,8 @@ Methodology:
     * Use gradient descend from max likelihood parameters to check for bias in
       parameters due to simplified modeling
     
-  * Compare overlaps to W19
+  * Compare overlaps to `W19
+    <https://ui.adsabs.harvard.edu/abs/2019MNRAS.489.1644W/abstract>`_
 
     * analyze small sample of Kepler LCs to compare algorithms
 
@@ -313,26 +409,6 @@ Need to argue
 1. There will be enough systems that we can analyze to generate a big
    catalog, hopefully many thousands 
 
-   * Filter from Prsa et all (2022) to estimate yield from 2x10^5 stamps:
-     1,200 EBs with morph < 0.5 & primary eclipse depth > 1% & T < 12 (up to
-     1,341 for T < 13, 1,389 for T < 13.5 per QLP)
-
-   * Use some scaling to estimate yield from FFI: 10^7 QLP lightcurves for
-     T<13.5. Justesen & Albrecht (2019) autodetected ~350 high quality EBs
-     from southern hemisphere alone => ~700 from both hemispheres from
-     stamps => ~35,000 from naive scaling. This is an overestimate
-     because TESS targets were selected to:
-
-     - avoid blending
-
-     - be brighter on average
-
-     - probably be biased to continuous viewing zone or zones with more
-       coverage
-
-     but not selected to target EBs deliberately. Probably safe to say FFIs
-     will yield many thousands of well characterized EBs.
-
 2. The precision of the data will be sufficient to get useful constraints: this
    is ensured from the selection criteria above (deep transits, well detached,
    bright => high photometric precision). Signal to noise ratio will be >> 10
@@ -382,8 +458,9 @@ Work Plan
 
   * Sampling: 3 months in parallel to EB selection
 
-  * Analyzing results, validation against W19 and J&A other: 2 months
-    parallel to sampling
+  * Analyzing results, validation against `W19
+    <https://ui.adsabs.harvard.edu/abs/2019MNRAS.489.1644W/abstract>`_ and J&A
+    other: 2 months parallel to sampling
 
   * Article: 2 months
 
@@ -405,8 +482,9 @@ Work Plan
 
   * Sampling: 6 months in parallel to selection
 
-  * Analyzing results, validation against W19 and J&A other: 2 months
-    parallel to sampling
+  * Analyzing results, validation against `W19
+    <https://ui.adsabs.harvard.edu/abs/2019MNRAS.489.1644W/abstract>`_ and J&A
+    other: 2 months parallel to sampling
 
   * Article: 2 months
 
