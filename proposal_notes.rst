@@ -126,13 +126,13 @@ Methodology:
 
     * For building orbits for phase curve terms: 
       
-        * will not sample uniform times, but interpolate time like the other
-          parameters. 
-          
-        * Use table of prescribed eccentric anomaly values at grid of
-          eccentricities to ensure interpolation to desired precision.
+      * will not sample uniform times, but interpolate time like the other
+        parameters. 
+        
+      * Use table of prescribed eccentric anomaly values at grid of
+        eccentricities to ensure interpolation to desired precision.
 
-        * Simulate orbit in 2D apply rotation matrix to account for
+      * Simulate orbit in 2D apply rotation matrix to account for
           inclination and periapsis (use GPUs?)
 
     * For the very few very close (and high precision?) binaries can use
@@ -238,21 +238,20 @@ Need to argue
      stamps => ~35,000 from naive scaling. This is an overestimate
      because TESS targets were selected to:
 
-       - avoid blending
+     - avoid blending
 
-       - be brighter on average
+     - be brighter on average
 
-       - probably be biased to continuous viewing zone or zones with more
-         coverage
+     - probably be biased to continuous viewing zone or zones with more
+       coverage
 
      but not selected to target EBs deliberately. Probably safe to say FFIs
      will yield many thousands of well characterized EBs.
 
-2. The precision of the data will be sufficient to get useful constraints:
-
-       this is ensured from the selection criteria above (deep transits,
-       well detached, bright => high photometric precision). Signal to noise
-       ratio will be >> 10 for most EBs and always bigger than ~20.
+2. The precision of the data will be sufficient to get useful constraints: this
+   is ensured from the selection criteria above (deep transits, well detached,
+   bright => high photometric precision). Signal to noise ratio will be >> 10
+   for most EBs and always bigger than ~20.
 
 3. We have the computing resources to do the analysis: 
 
@@ -282,11 +281,11 @@ Work Plan
 
   * MCMC likelihood: 1 month
     
-      * Extinction model
+    * Extinction model
 
-      * SED likelihood
+    * SED likelihood
 
-      * LC likelihood
+    * LC likelihood
 
   * Manual selection of EBs: 1 month
 
