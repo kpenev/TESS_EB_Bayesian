@@ -85,6 +85,11 @@ Applications:
 Expected outcomes:
 ==================
 
+* The precision of the data will be sufficient to get useful constraints: this
+  is ensured from the selection criteria above (deep transits, well detached,
+  bright => high photometric precision). Signal to noise ratio will be >> 10 for
+  most EBs and always bigger than ~20.
+
 * Number of binaries with well characterized physical parameters
 
   * Filter from Prsa et all (2022) to estimate yield from 2x10^5 stamps: 1,200
@@ -107,15 +112,11 @@ Expected outcomes:
     but not selected to target EBs deliberately. Probably safe to say FFIs
     will yield many thousands of well characterized EBs.
 
-
 * Need predictions for:
 
   * <++>**HOW MANY WILL HAVE SPIN DETECTIONS**
 
   * <++>**WHAT WILL BE THE OVERLAP BETWEEN THE TWO ABOVE**
-
-  * <++>**HOW MANY EBS WILL HAVE APSIDAL PRECESSION MEASUREMENTS WITH GOOD
-    PRECISION IF LOOKING FOR PRECESSION**
 
 * Selection effects:
 
@@ -145,7 +146,7 @@ Methodology:
 * LC preparation options <++>**PICK ONE FOR MCMC** use others to validate max
   likelihood parameters:
 
-  * PDCSAP: 
+  * PDCSAP: Used by J&A
     
     **pros:** minimize instrumental effects, 
 
@@ -160,6 +161,12 @@ Methodology:
     **cons:** may leave instrumental efffects.
     
   * Use PDCSAP and remove low frequencies
+
+  * Follow W19 to use only LC near eclipses:
+
+    Instead, we clipped the LC around each eclipse with a window 1.5–2.0 times
+    eclipse durations, which were initially taken from VKEBC, and then
+    iteratively refined during the optimization process.
 
   * LC modeling:
 
@@ -206,7 +213,7 @@ Methodology:
 
     * Have interpolation already working
   
-  * <++>**EXCTICTION AND REDDENING OPTIONS**: 
+  * Exctiction and reddening options: 
     
     * Per `J&A
       <https://ui.adsabs.harvard.edu/abs/2021ApJ...912..123J/abstract>`_:
@@ -337,13 +344,11 @@ Methodology:
   * Most directly relevant paper: `Martins et. al. (2020)
     <https://ui.adsabs.harvard.edu/abs/2020ApJS..250...20C/abstract>`_
 
-  * Wavelets would also be useful. A good starting point may be `Bravo et. al.
-    (2014) <https://ui.adsabs.harvard.edu/abs/2014A%26A...568A..34B/abstract>`_.
-    It suggest using 6-th order Morlett transform. This could serve as a check
-    and perhaps additional way to flag candidates and improve analysis for stars
+  * Add wavelets. A good starting point may be `Bravo et. al.  (2014)
+    <https://ui.adsabs.harvard.edu/abs/2014A%26A...568A..34B/abstract>`_.  It
+    suggest using 6-th order Morlett transform. This could serve as a check and
+    perhaps additional way to flag candidates and improve analysis for stars
     with intermittent rotational variability.
-
-  * <++>**FIND OTHER SPIN PAPERS TO SEE IF OTHER APPROACHES ARE USED?**
 
   * <++>**WHAT QUALITY CONTROL MEASURES CAN BE USED?**
 
@@ -368,7 +373,20 @@ Methodology:
     curve effects, especially for circular orbits where they become
     indistinguishable.
 
-    * <++>**HOW CAN WE DEAL WITH THIS**
+    * Rotational variability is usually more complicated than BEER (i.e. not
+      just $\Omega_{orb}$ and $2\Omega_{orb}$ components (e.g. Lure et. al. 2017
+      Fig. 1 top). 
+      
+    * Will not remain at exactly the same phase and will change shape over time,
+      especially between repeat observations of later sectors.
+
+    * Amplitude of rotational variability if reliably detected should be much
+      larger than BEER effects. As a result, if erroneously interpreted as BEER
+      during physical parameter fitting, the best fit phase curve amplitudes
+      will be orders of magnitude off from PHOEBE calculations (see PHOEBE
+      validation of LC models above).
+
+    * <++>**OTHER IDEAS HOW TO DEAL WITH THIS?**
 
 
   * As spin gets faster than the orbit the effect on physical parameters
@@ -379,37 +397,43 @@ Methodology:
 
     * do simultaneous analysis for physical parameters and spin
 
-* For spin validation compare to:
+* For spin validation:
 
-  * Martins et. al. (2020) above and the associated `livig database
+  * ACF: Follow Lurie:
+
+    compare the ACF peak heights of EBs with starspot modulations to the EBs
+    without periodic out-of-eclipse variability. Following McQuil- lan et al.
+    (2013), we define the peak height as the height of the ACF peak relative to
+    the adjacent minima. Unlike the absolute height, the relative height is less
+    susceptible to systematic effects in the light curve, such as long-term
+    trends. The ACF has values between −1 and 1, so the relative peak height has
+    values between 0 and 2.
+
+  * LS: use bootstrap to define false alarm probability
+
+  * Compare all three methods
+
+  * Compare to Martins et. al. (2020) above and the associated `livig database
     <https://filtergraph.com/tess_rotation_tois>`_ (287 TOIs with "unambiguous
     rotation" flag)
     
-  * KELT rotations: `Oelkers et al. (2018)
+  * Compare to KELT rotations: `Oelkers et al. (2018)
     <https://ui.adsabs.harvard.edu/abs/2018AJ....155...39O/abstract>`_ which
     contains 62x10^3 likely rotation periods based on a KELT photometry + TFA
     
-  * Overlap with Kepler binarise from `Lurie et. al. (2017)
+  * Compare to overlap with Kepler binarise from `Lurie et. al. (2017)
     <https://ui.adsabs.harvard.edu/abs/2017AJ....154..250L/abstract>`_?
 
   * <++>**OTHERS?**
 
 Need to argue
--------------
+=============
 
-1. There will be enough systems that we can analyze to generate a big
-   catalog, hopefully many thousands 
-
-2. The precision of the data will be sufficient to get useful constraints: this
-   is ensured from the selection criteria above (deep transits, well detached,
-   bright => high photometric precision). Signal to noise ratio will be >> 10
-   for most EBs and always bigger than ~20.
-
-3. We have the computing resources to do the analysis: 
+1. We have the computing resources to do the analysis: 
 
    * With fast LC modeling TACC should be plenty
 
-4. We will have the time to do the coding and article writing etc within the
+2. We will have the time to do the coding and article writing etc within the
    time frame of the project
 
    * LC models and already implemented
@@ -421,7 +445,7 @@ Need to argue
 
 
 Work Plan
----------
+=========
 
 * EBs from stamps
 
