@@ -61,27 +61,27 @@ Applications:
 * Dark Matter studies:
   https://ui.adsabs.harvard.edu/abs/2022ApJ...928L..17C/abstract
 
-* Read through
-  https://ui.adsabs.harvard.edu/abs/2012ocpd.conf...51S/abstract for further
-  applications
+* <++>**READ THROUGH**
+  https://ui.adsabs.harvard.edu/abs/2012ocpd.conf...51S/abstract **FOR FURTHER
+  APPLICATIONS**
 
-* Look through citations to `Lurie et. al. (2017)
-  <https://ui.adsabs.harvard.edu/abs/2017AJ....154..250L/abstract>`_ for
-  application of spin measurements, ellipsoidal variations, etc.
+* <++>**LOOK THROUGH CITATIONS TO AND INTRODUCTION OF** `Lurie et. al. (2017)
+  <https://ui.adsabs.harvard.edu/abs/2017AJ....154..250L/abstract>`_ **FOR
+  APPLICATION OF SPIN MEASUREMENTS, ELLIPSOIDAL VARIATIONS, ETC.**
 
 Expected outcomes discussion should include:
 ============================================
 
 * Prediction for:
 
-  * how many binaries will have well characterized physical parameters
+  * <++>**HOW MANY BINARIES WILL HAVE WELL CHARACTERIZED PHYSICAL PARAMETERS**
 
-  * how many will have spin detections
+  * <++>**HOW MANY WILL HAVE SPIN DETECTIONS**
 
-  * what will be the overlap between the two above
+  * <++>**WHAT WILL BE THE OVERLAP BETWEEN THE TWO ABOVE**
 
-  * how many EBs will have apsidal precession measurements with good
-    precision
+  * <++>**HOW MANY EBS WILL HAVE APSIDAL PRECESSION MEASUREMENTS WITH GOOD
+    PRECISION IF LOOKING FOR PRECESSION**
 
 * Selection effects:
 
@@ -90,80 +90,160 @@ Expected outcomes discussion should include:
 
   * FFI: no selection effects (everything downloaded). We will use very
     straightforward algorithm for generating candidate list for manual
-    review. Only select well detached high signal to noise EBs. We can do
+    review. Only select well detached high signal to noise EBs. We will do
     injection-recovery simulations to characterize selection.
 
-  * What additional selection effects we impose and how will we
-    characterize them
+  * <++>**WHAT ADDITIONAL SELECTION EFFECTS WE IMPOSE AND HOW WILL WE
+    CHARACTERIZE THEM**
 
-    * physical parameter sample
+    * <++>**PHYSICAL PARAMETER SAMPLE**
 
-    * spin sample
+    * <++>**SPIN SAMPLE**
 
-    * differences of selection effects between short and long cadence
-      LCs
+    * <++>**DIFFERENCES OF SELECTION EFFECTS BETWEEN SHORT AND LONG CADENCE
+      LCS**
 
 Methodology:
 ============
 
-* LC modeling:
+**EB physical parameters:**
 
-  * For well separated binaries (vast majority): use BATMAN + orbit based
-    phase curvefor LC modeling.
+* LC preparation options <++>**PICK ONE FOR MCMC** use others to validate max
+  likelihood parameters:
 
-    * Works to few ppt regardless of binary parameters or orientation.
+  * PDCSAP: 
+    
+    **pros:** minimize instrumental effects, 
 
-    * How does precision compare to typical model uncertainties?
+    **cons:** may modify phase curve.
 
-      * stellar evolution? Seems ~1% differences between models are
-        not atypical better near the sun (since Solar calibrated) but
-        worse the further away from sun we go. E.g. 
-        `Bressan et. al. (2012) <https://ui.adsabs.harvard.edu/abs/2012MNRAS.427..127B/abstract>`_
+  * Apply low-pass filter to LC and subtract the result from the original:
 
-      * atmospheres?
+    **pros:** preserves all astrophysical variability with frequency >= to the
+    orbital. Will also remove non-orbit related astrophysical variability on
+    long timescales.
 
-    * Precision better than spot variability?
+    **cons:** may leave instrumental efffects.
+    
+  * Use PDCSAP and remove low frequencies
 
-    * For building orbits for phase curve terms: 
-      
-      * will not sample uniform times, but interpolate time like the other
-        parameters. 
+  * LC modeling:
+
+    * For well separated binaries (vast majority): use BATMAN + orbit based
+      phase curvefor LC modeling.
+
+      * Works to few ppt regardless of binary parameters or orientation.
+
+      * How does precision compare to typical model uncertainties?
+
+        * stellar evolution? Seems ~1% differences between models are
+          not atypical better near the sun (since Solar calibrated) but
+          worse the further away from sun we go. E.g. 
+          `Bressan et. al. (2012) <https://ui.adsabs.harvard.edu/abs/2012MNRAS.427..127B/abstract>`_
+
+        * atmospheres?
+
+      * Precision better than spot variability?
+
+      * For building orbits for phase curve terms: 
         
-      * Use table of prescribed eccentric anomaly values at grid of
-        eccentricities to ensure interpolation to desired precision.
+        * will not sample uniform times, but interpolate time like the other
+          parameters. 
+          
+        * Use table of prescribed eccentric anomaly values at grid of
+          eccentricities to ensure interpolation to desired precision.
 
-      * Simulate orbit in 2D apply rotation matrix to account for
-          inclination and periapsis (use GPUs?)
+        * Simulate orbit in 2D apply rotation matrix to account for inclination
+          and periapsis (use GPUs?)
 
-    * For the very few very close (and high precision?) binaries can use
-      PHOEBE if no other option. Investigate when we need to switch. Perhaps
-      OK to drop.
+      * For the very few very close (and high precision?) binaries can use
+        PHOEBE if no other option. Investigate when we need to switch. Perhaps
+        OK to drop.
 
-    * Analysis will begin with fast model to find max likelihood values, but
-      will not run to convergence. Manual inspection of max likelihood LC vs
-      instrumental LC will catch few binaries requiring full PHOEBE.
+      * Analysis will begin with fast model to find max likelihood values, but
+        will not run to convergence. Manual inspection of max likelihood LC vs
+        instrumental LC will catch few binaries requiring full PHOEBE.
 
 * SED modeling options (choose one or perhps need mixture):
 
-  * **CDS isochrones, combining two isolated stars**: 
+  * CDS isochrones, combining two isolated stars: 
     
     * provides TESS magnitudes for LC models
 
     * Have interpolation already working
   
-  * ~~PHOEBE?~~
-
-  * Exctiction and reddening options: 
+  * <++>**EXCTICTION AND REDDENING OPTIONS**: 
     
-    * what do Justesen & Albrecht 
+    * **WHAT DO JUSTESEN & ALBRECHT DO**
       
-    * W19?
+    * **W19?**
 
-    * CMD: "Using extinction coefficients computed star-by-star (except
-      for the OBC case, which uses constant coefficients)". Read paper
-      and see how that works.
+    * CMD: "Using extinction coefficients computed star-by-star (except for the
+      OBC case, which uses constant coefficients)". <++>**READ PAPER AND SEE HOW
+      THAT WORKS.**
 
-* Spin measurements:
+* Physical parameter validation and quality control:
+
+  * Visual inspection to flag porly fitting LCs or SEDs
+
+  * Run PHOEBE 
+    
+    * with maximum likelihood parameters from MCMC to check if LC is consistent
+      and see if BEER parameters are of the right order of magnitude
+
+    * Use gradient descend from max likelihood parameters to check for bias in
+      parameters due to simplified modeling
+    
+  * Compare overlaps to W19
+
+    * analyze small sample of Kepler LCs to compare algorithms
+
+    * Find overlapping detections to compare to independent analysis applied on
+      independent data
+
+  * Compare to J&A
+
+    * Very similar analysis. Run on J&A short LCs to compare algorithm.
+      
+    * Compare to their full catalog 
+
+  * Compare to `Prsa et. al. (2022)
+    <https://ui.adsabs.harvard.edu/abs/2022ApJS..258...16P/abstract>`_
+
+  * Validate maximum likelihood parameters against other options of preparing
+    the LC
+
+  * <++>**WHAT DID ABOVE VALIDATE AGAINST**
+
+**Spin measurements:**
+
+* LC preparation options <++>**PICK ONE USE OTHERS FOR VALIDATION**:
+
+  * Collective wisdom suggests starting with PDCSAP is the best option. Lurie
+    used PDCSAP masking eclipses.
+
+    **pro:** Minimizes the number of false positive detections
+
+    **con:** Lose slow rotators
+
+  * Alternatively: start with SAP LC and apply reconstructive TFA to build
+    Lomb-Scargle. 
+    
+    * Could be too computationally expensive.
+     
+    * Need to implement template star selection: identify LCs from single
+      CCD-campaign combo, use HAT algorithm to select stars.
+
+  * Options for dealing with binary effects:
+
+    * Mask out eclipses: still leaves phase curve effectsat orbital frequency
+
+    * Subtract full orbital model
+
+    * Do both and compare results from the three period search methods on each
+      version of the LC
+
+* Period search:
 
   * Follow Lurie to combine autocorrelation and Lomb-Scargle periodograms.
 
@@ -176,36 +256,41 @@ Methodology:
     and perhaps additional way to flag candidates and improve analysis for stars
     with intermittent rotational variability.
 
-  * Find other spin papers to see if other approaches are used?
+  * <++>**FIND OTHER SPIN PAPERS TO SEE IF OTHER APPROACHES ARE USED?**
 
-  * What quality control measures can be used?
+  * <++>**WHAT QUALITY CONTROL MEASURES CAN BE USED?**
 
-    * What does Lurie do?
+    * <++>**WHAT DOES LURIE DO?**
 
-    * What do other papers do?
+    * <++>**WHAT DO OTHER PAPERS DO?**
 
-  * In addition to spin, we will detect 
+  * In addition to spin, we will detect:
+
+    * periodic or quasi-periodic (with wavelet analysis) pulsations
+
+    * <++>**WHAT ELSE?**
+
+* Rotational or other stellar variability can affect physical parameter
+  determination.
+
+  * For timescales longer than the orbit our filtering will remove most of the
+    signal, unless very close to the orbital frequency. It will not
+    significantlny affect the determination of physical parameters.
+
+  * For synchronized systems, rotational variability can masquarade as phase
+    curve effects, especially for circular orbits where they become
+    indistinguishable.
+
+    * <++>**HOW CAN WE DEAL WITH THIS**
 
 
-* Physical parameter validation:
+  * As spin gets faster than the orbit the effect on physical parameters
+    decreases quickly and rotational signal becomes detectable by our period
+    search. For such systems <++>**PICK ONE OPTION**: 
     
-  * W19 
+    * rotational signal can be subtracted and physical parameters re-analyzed
 
-    * analyze small sample of Kepler LCs to compare algorithms
-
-    * Find overlapping detections to compare to independent analysis applied on
-      independent data
-
-  * J&A
-
-    * Very similar analysis. Run on J&A short LCs to compare algorithm.
-      
-    * Compare to their full catalog 
-
-  * `Prsa et. al. (2022)
-    <https://ui.adsabs.harvard.edu/abs/2022ApJS..258...16P/abstract>`_
-
-  * What did above validate against
+    * do simultaneous analysis for physical parameters and spin
 
 * For spin validation compare to:
 
@@ -220,7 +305,7 @@ Methodology:
   * Overlap with Kepler binarise from `Lurie et. al. (2017)
     <https://ui.adsabs.harvard.edu/abs/2017AJ....154..250L/abstract>`_?
 
-  * others?
+  * <++>**OTHERS?**
 
 Need to argue
 -------------
@@ -273,7 +358,13 @@ Work Plan
 
 * EBs from stamps
 
-  * LC detrending unless using PDCSAP
+  * LC preparation
+
+  * Collect SED information. 
+    
+    * Crossmatch with GAIA already available. 
+
+    * Is GAIA already crossmathed to other catalogs?
   
   * Phase curve + BATMAN model: 1 month
 
@@ -298,7 +389,13 @@ Work Plan
 
 * EBs from FFIs
 
-  * LC detrending?
+  * LC preparation
+
+  * Collect SED information: 
+    
+    * Did QLP use GAIA positions for photometry?
+
+    * Crossmatch to other catalogs from GAIA already done?
 
   * Adapt automatic candidate selection: 3 weeks
 
@@ -313,20 +410,25 @@ Work Plan
 
   * Article: 2 months
 
-* Spin from stamp LCs
+* Spin
 
-  * Custom LC detrending for stamps (what did Lurie do?) ?
+  * Stamp LC preparation
 
-  * Implement periodogram & autocorrelation searches like Lurie et. al.
+  * Implement periodogram, wavelet, and autocorrelation
 
-  * Automated search of stamp LCs
+  * Automated selection of candidates signals from stamp LCs
 
   * Manual review of candidates from stamps: partially in parallel to
     automated search
 
-  * Custom LC detrending from FFIs?
+  * FFI LC preparation
 
   * Automated search of FFI LCs: partially in parallel to stamp manual
     review 
+
+  * Manual review of candidates
+
+  * Investigate cases where rotational or pulsational variability may have
+    affected physical parameter determination
 
   * Article: 2 months 
