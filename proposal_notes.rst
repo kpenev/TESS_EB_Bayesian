@@ -114,9 +114,30 @@ Expected outcomes:
 
 * Need predictions for:
 
-  * <++>**HOW MANY WILL HAVE SPIN DETECTIONS**
+  * At least 10%-20% of stars will show detectable amplitude rotational
+    variability.
 
-  * <++>**WHAT WILL BE THE OVERLAP BETWEEN THE TWO ABOVE**
+    * `Claytor et. al. (2022)
+      <https://ui.adsabs.harvard.edu/abs/2022ApJ...927..219C/abstract>`_ and
+      references therein may be useful.
+
+      * `Canto Martins et. al. (20202)
+        <https://ui.adsabs.harvard.edu/abs/2020ApJS..250...20C/abstract>` found
+        163 rotation signatures out of 1000 KOI, with 113 having unambiguous
+        rotation period measurements from just 1 sector of TESS.
+
+    * `Oelkers et. al. (2018)
+      <https://ui.adsabs.harvard.edu/abs/2018AJ....155...39O/abstract>`_ used
+      KELT observatinos found 62,229 objects identified with likely stellar
+      rotation periods with rms-amplitude from ∼3 mmag to ∼2.3 mag out of a
+      subset of $4\times10^6$ sources (selected to be "likely TESS targets")
+      with 47,174 having spin peridos below 13 days (likely upper limit for
+      single sector based detections. TESS photometry is better than KELT, with
+      less systematics. So we should detect a significantly bigger fraction than
+      11%. 
+
+  * At least 10%-20% of binaries with physical parameters will also have spin
+    period detections: ~1000 systems or at least many hundreds. 
 
 * Selection effects:
 
@@ -350,12 +371,6 @@ Methodology:
     perhaps additional way to flag candidates and improve analysis for stars
     with intermittent rotational variability.
 
-  * <++>**WHAT QUALITY CONTROL MEASURES CAN BE USED?**
-
-    * <++>**WHAT DOES LURIE DO?**
-
-    * <++>**WHAT DO OTHER PAPERS DO?**
-
   * In addition to spin, we will detect:
 
     * periodic or quasi-periodic (with wavelet analysis) pulsations
@@ -387,7 +402,6 @@ Methodology:
       validation of LC models above).
 
     * <++>**OTHER IDEAS HOW TO DEAL WITH THIS?**
-
 
   * As spin gets faster than the orbit the effect on physical parameters
     decreases quickly and rotational signal becomes detectable by our period
