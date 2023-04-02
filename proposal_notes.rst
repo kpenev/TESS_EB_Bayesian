@@ -25,9 +25,8 @@ Applications:
   * Comppare spin vs eccentricity constraints (same object different
     dominant freuencies)
 
-  * Many more systems than `W19
-    <https://ui.adsabs.harvard.edu/abs/2019MNRAS.489.1644W/abstract>`_ => able
-    to explore more dependencies, not just frequency.
+  * Many more systems than `W19`_ => able to explore more dependencies, not just
+    frequency.
 
 * can serve as control for measuring planet Q:
 
@@ -49,9 +48,7 @@ Applications:
   * https://ui.adsabs.harvard.edu/abs/2016ApJ...832..121G/abstract
 
 * Study magnetic breaking from distribution of binaries at short orbital
-  periods: `Kareem et. al. (2022)
-  <https://ui.adsabs.harvard.edu/abs/2022MNRAS.517.4916E/abstract>`_ 
-
+  periods: `Kareem et. al. (2022)`_ 
 
 * ETV can constrain k2, hence internal structure
 
@@ -70,9 +67,8 @@ Applications:
   <https://ui.adsabs.harvard.edu/abs/2013A%26A...560A...4R/abstract>`_,
   `Reinhold & Gizon (2015)
   <https://ui.adsabs.harvard.edu/abs/2015A%26A...583A..65R/abstract>`_, and
-  `Lurie et. al. (2017)
-  <https://ui.adsabs.harvard.edu/abs/2017AJ....154..250L/abstract>`_ all
-  interpret additional peak in LS periodogram as differential rotation.
+  `Lurie et. al. (2017)`_ all interpret additional peak in LS periodogram as
+  differential rotation.
 
 * Differential rotation is important to binary evolution in its own right, as it
   influences magnetic braking through surface activity and the magnetic dynamo
@@ -141,30 +137,75 @@ Expected outcomes:
 
 * Selection effects:
 
-  * Stamp selection effects are hard to characterize but high cadence and
-    Prsa et al. (2022) compiled comprehensive list to search
+  * Physical parameters:
 
-  * FFI: no selection effects (everything downloaded). We will use very
-    straightforward algorithm for generating candidate list for manual
-    review. Only select well detached high signal to noise EBs. We will do
-    injection-recovery simulations to characterize selection.
+    * Pericenter separation should be large enough to be well separated
+      (models break down below that). Can characterize by comparing PHOEBE
+      with our modeling.
+  
+    * Period should be short enough to detect multiple consecutive eclipses to
+      uniquely determine orbital period.
+  
+    * Stamps offer high cadence and select higher quality sources thus likely
+      higher fractional yield. `Prsa et al. (2022)`_ compiled comprehensive list
+      to search. However, fully characterizing the selection effects for stamps is
+      impossible, because targets were deliberately selected through the TESS
+      guest investigator program during multiple cycles to observe known binaries
+      using a complicated weighting scheme involving things like membership in
+      othe catalogs, and scientific importance among more easy to account for
+      factors, such as brightness and sky position.
+  
+    * FFI: everything is downloaded, and we will analyze all candidates flagged by
+      other projects leading to hard to characterize selection effects. However,
+      we will also use a straightforward algorithm for generating candidate list
+      for manual review and a catalog of the automatically selected candidates
+      will be provided. 
+  
+      * We will do injection-recovery simulations to characterize the selection
+        effects of the automated search by injecting PHOEBE generated and `W19`_
+        (Kepler has much highe S/N than TESS) transits in quiet TESS stars with
+        the range of observing patterns as our targets and testing recovery.
+  
+      * The above procedure does not fully characterize the selection effects. The
+        QLP post-processing may also suppress or otherwise modify astrophysical
+        signals along with instrumental effects. Accounting for such effects would
+        require injecting signals into raw light curves, or even at the pixel
+        level and re-running QLP. This is beyond the scope of this proposal.
+        However, should anyone need to carry out such analysis, our automated
+        selection algorithm will be publicly available as a pip installable python
+        package and well documented. Reproducing the cantdidate selection of this
+        effort will simply require running with QLP formatted lightcurves as
+        input.
 
-  * Additional selection effects we will impose and how will we characterize
-    them:
+  * Spins:
 
-    * <++>**PHYSICAL PARAMETER SAMPLE**
+    * We will search for spin signatures in:
+     
+      * all binaries selected for physical parameter characterization
 
-    * <++>**SPIN SAMPLE**
+      * all binaries from `Prsa et al. (2022)`_
 
-    * <++>**DIFFERENCES OF SELECTION EFFECTS BETWEEN SHORT AND LONG CADENCE
-      LCS**
+    * Injection recovery simulations will be performed on all binaries without
+      spin detection:
 
+      * Inject signals from `Lurie et. al. (2017)`_ with random phase (Kepler
+        has much higher signal to noise and much longer time coverage than TESS)
+        and repeat search to characterize fraction recovered and likelihood to
+        mis-identify period.
+
+      * Just like the physical parameter sample, this is not a complete
+        characterization of the selection effects which need to be combined with
+        PDC or QLP post-processing. However, that is outside the scope of this
+        poposal. We will provide our spin analysis and automated flagging
+        procedure as python package to enable other authors to carry out that
+        task should it become necessary.
+    
 Methodology:
 ============
 
 **EB physical parameters:**
 
-* LC preparation options <++>**PICK ONE FOR MCMC** use others to validate max
+* LC preparation: use the bolded option below and use others to validate max
   likelihood parameters:
 
   * PDCSAP: Used by J&A
@@ -173,58 +214,60 @@ Methodology:
 
     **cons:** may modify phase curve.
 
-  * Apply low-pass filter to LC and subtract the result from the original:
+  * Apply low-pass filter to LC and subtract the result from the original,
+    preserving all frequency >= orbital frequency:
 
     **pros:** preserves all astrophysical variability with frequency >= to the
     orbital. Will also remove non-orbit related astrophysical variability on
     long timescales.
 
-    **cons:** may leave instrumental efffects.
+    **cons:** may leave instrumental effects.
     
-  * Use PDCSAP and remove low frequencies
+  * **Use PDCSAP and remove low frequencies**
 
-  * Follow W19 to use only LC near eclipses:
+  * Follow W19 to use only LC near eclipses together with polynomial out of
+    eclipse model:
 
-    Instead, we clipped the LC around each eclipse with a window 1.5–2.0 times
-    eclipse durations, which were initially taken from VKEBC, and then
-    iteratively refined during the optimization process.
+        Instead, we clipped the LC around each eclipse with a window 1.5–2.0
+        times eclipse durations, which were initially taken from VKEBC, and then
+        iteratively refined during the optimization process.
 
-  * LC modeling:
+* LC modeling:
 
-    * For well separated binaries (vast majority): use BATMAN + orbit based
-      phase curvefor LC modeling.
+  * For well separated binaries (vast majority): use BATMAN + orbit based
+    phase curvefor LC modeling.
 
-      * Works to few ppt regardless of binary parameters or orientation.
+    * Works to few ppt regardless of binary parameters or orientation.
 
-      * How does precision compare to typical model uncertainties?
+    * How does precision compare to typical model uncertainties?
 
-        * stellar evolution? Seems ~1% differences between models are
-          not atypical better near the sun (since Solar calibrated) but
-          worse the further away from sun we go. E.g. 
-          `Bressan et. al. (2012) <https://ui.adsabs.harvard.edu/abs/2012MNRAS.427..127B/abstract>`_
+      * stellar evolution? Seems ~1% differences between models are
+        not atypical better near the sun (since Solar calibrated) but
+        worse the further away from sun we go. E.g. 
+        `Bressan et. al. (2012) <https://ui.adsabs.harvard.edu/abs/2012MNRAS.427..127B/abstract>`_
 
-        * atmospheres?
+      * atmospheres?
 
-      * Precision better than spot variability?
+    * Precision better than spot variability?
 
-      * For building orbits for phase curve terms: 
+    * For building orbits for phase curve terms: 
+      
+      * will not sample uniform times, but interpolate time like the other
+        parameters. 
         
-        * will not sample uniform times, but interpolate time like the other
-          parameters. 
-          
-        * Use table of prescribed eccentric anomaly values at grid of
-          eccentricities to ensure interpolation to desired precision.
+      * Use table of prescribed eccentric anomaly values at grid of
+        eccentricities to ensure interpolation to desired precision.
 
-        * Simulate orbit in 2D apply rotation matrix to account for inclination
-          and periapsis (use GPUs?)
+      * Simulate orbit in 2D apply rotation matrix to account for inclination
+        and periapsis (use GPUs?)
 
-      * For the very few very close (and high precision?) binaries can use
-        PHOEBE if no other option. Investigate when we need to switch. Perhaps
-        OK to drop.
+    * For the very few very close (and high precision?) binaries can use
+      PHOEBE if no other option. Investigate when we need to switch. Perhaps
+      OK to drop.
 
-      * Analysis will begin with fast model to find max likelihood values, but
-        will not run to convergence. Manual inspection of max likelihood LC vs
-        instrumental LC will catch few binaries requiring full PHOEBE.
+    * Analysis will begin with fast model to find max likelihood values, but
+      will not run to convergence. Manual inspection of max likelihood LC vs
+      instrumental LC will catch few binaries requiring full PHOEBE.
 
 * SED modeling options (choose one or perhps need mixture):
 
@@ -308,8 +351,7 @@ Methodology:
     * Use gradient descend from max likelihood parameters to check for bias in
       parameters due to simplified modeling
     
-  * Compare overlaps to `W19
-    <https://ui.adsabs.harvard.edu/abs/2019MNRAS.489.1644W/abstract>`_
+  * Compare overlaps to `W19`_
 
     * analyze small sample of Kepler LCs to compare algorithms
 
@@ -322,8 +364,7 @@ Methodology:
       
     * Compare to their full catalog 
 
-  * Compare to `Prsa et. al. (2022)
-    <https://ui.adsabs.harvard.edu/abs/2022ApJS..258...16P/abstract>`_
+  * Compare to `Prsa et. al. (2022)`_
 
   * Validate maximum likelihood parameters against other options of preparing
     the LC
@@ -332,7 +373,7 @@ Methodology:
 
 **Spin measurements:**
 
-* LC preparation options <++>**PICK ONE USE OTHERS FOR VALIDATION**:
+* LC preparation:
 
   * Collective wisdom suggests starting with PDCSAP is the best option. Lurie
     used PDCSAP masking eclipses.
@@ -340,14 +381,6 @@ Methodology:
     **pro:** Minimizes the number of false positive detections
 
     **con:** Lose slow rotators
-
-  * Alternatively: start with SAP LC and apply reconstructive TFA to build
-    Lomb-Scargle. 
-    
-    * Could be too computationally expensive.
-     
-    * Need to implement template star selection: identify LCs from single
-      CCD-campaign combo, use HAT algorithm to select stars.
 
   * Options for dealing with binary effects:
 
@@ -357,6 +390,14 @@ Methodology:
 
     * Do both and compare results from the three period search methods on each
       version of the LC
+
+  * As validation, start with SAP LC, remove binary effects with the two
+    algorithms above and apply reconstructive TFA to build Lomb-Scargle.
+    
+    * Could be too computationally expensive.
+    
+    * Need to implement template star selection: identify LCs from single
+      CCD-campaign combo, use HAT algorithm to select stars.
 
 * Period search:
 
@@ -539,3 +580,10 @@ Work Plan
     affected physical parameter determination
 
   * Article: 2 months 
+
+
+.. _`Prsa et. al. (2022)`: https://ui.adsabs.harvard.edu/abs/2022ApJS..258...16P/abstract
+.. _``Kareem et. al. (2022)`: https://ui.adsabs.harvard.edu/abs/2022MNRAS.517.4916E/abstract
+.. _W19: https://ui.adsabs.harvard.edu/abs/2019MNRAS.489.1644W/abstract
+.. _`Lurie et. al. (2017)`: https://ui.adsabs.harvard.edu/abs/2017AJ....154..250L/abstract
+.. _QLP: https://archive.stsci.edu/hlsp/qlp
