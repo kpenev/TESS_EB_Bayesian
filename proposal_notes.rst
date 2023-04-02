@@ -88,7 +88,7 @@ Expected outcomes:
 
 * Number of binaries with well characterized physical parameters
 
-  * Filter from Prsa et all (2022) to estimate yield from 2x10^5 stamps: 1,200
+  * Filter from `Prsa et. al. (2022)`_ to estimate yield from 2x10^5 stamps: 1,200
     EBs with morph < 0.5 & primary eclipse depth > 1% & T < 12 (up to 1,341
     for T < 13, 1,389 for T < 13.5 per QLP)
 
@@ -147,7 +147,7 @@ Expected outcomes:
       uniquely determine orbital period.
   
     * Stamps offer high cadence and select higher quality sources thus likely
-      higher fractional yield. `Prsa et al. (2022)`_ compiled comprehensive list
+      higher fractional yield. `Prsa et. al. (2022)`_ compiled comprehensive list
       to search. However, fully characterizing the selection effects for stamps is
       impossible, because targets were deliberately selected through the TESS
       guest investigator program during multiple cycles to observe known binaries
@@ -183,7 +183,7 @@ Expected outcomes:
      
       * all binaries selected for physical parameter characterization
 
-      * all binaries from `Prsa et al. (2022)`_
+      * all binaries from `Prsa et. al. (2022)`_
 
     * Injection recovery simulations will be performed on all binaries without
       spin detection:
@@ -583,7 +583,11 @@ Work Plan
 
 
 .. _`Prsa et. al. (2022)`: https://ui.adsabs.harvard.edu/abs/2022ApJS..258...16P/abstract
-.. _``Kareem et. al. (2022)`: https://ui.adsabs.harvard.edu/abs/2022MNRAS.517.4916E/abstract
+
+.. _`Kareem et. al. (2022)`: https://ui.adsabs.harvard.edu/abs/2022MNRAS.517.4916E/abstract
+
 .. _W19: https://ui.adsabs.harvard.edu/abs/2019MNRAS.489.1644W/abstract
+
 .. _`Lurie et. al. (2017)`: https://ui.adsabs.harvard.edu/abs/2017AJ....154..250L/abstract
+
 .. _QLP: https://archive.stsci.edu/hlsp/qlp
