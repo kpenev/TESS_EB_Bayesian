@@ -63,7 +63,7 @@ Applications:
 * Dark Matter studies:
   https://ui.adsabs.harvard.edu/abs/2022ApJ...928L..17C/abstract
 
-* `Reinhold et. al. (2013
+* `Reinhold et. al. (2013)
   <https://ui.adsabs.harvard.edu/abs/2013A%26A...560A...4R/abstract>`_,
   `Reinhold & Gizon (2015)
   <https://ui.adsabs.harvard.edu/abs/2015A%26A...583A..65R/abstract>`_, and
@@ -208,7 +208,7 @@ Methodology:
 * LC preparation: use the bolded option below and use others to validate max
   likelihood parameters:
 
-  * PDCSAP: Used by J&A
+  * PDCSAP: Used by `J&A`_
     
     **pros:** minimize instrumental effects, 
 
@@ -279,8 +279,7 @@ Methodology:
   
   * Exctiction and reddening options: 
     
-    * Per `J&A
-      <https://ui.adsabs.harvard.edu/abs/2021ApJ...912..123J/abstract>`_:
+    * Per `J&A`_:
 
       We construct the SED from the apparent magnitudes, distance (adopted from
       Bailer-Jones et al. (2018) using Gaia DR2 parallaxes) and extinction
@@ -298,8 +297,7 @@ Methodology:
       gravity of logg=4.5. We note that the BC is mostly insensitive to
       metallicity and surface gravity.
       
-    * Per `W19
-      <https://ui.adsabs.harvard.edu/abs/2019MNRAS.489.1644W/abstract>`_:
+    * Per `W19`_:
 
       To fit the archival data, we sum the predicted SEDs of both stellar
       components, compute the distance modulus, and correct for dust extinction
@@ -358,9 +356,9 @@ Methodology:
     * Find overlapping detections to compare to independent analysis applied on
       independent data
 
-  * Compare to J&A
+  * Compare to `J&A`_
 
-    * Very similar analysis. Run on J&A short LCs to compare algorithm.
+    * Very similar analysis. Run on `J&A`_ short LCs to compare algorithm.
       
     * Compare to their full catalog 
 
@@ -528,8 +526,7 @@ Work Plan
 
   * Sampling: 3 months in parallel to EB selection
 
-  * Analyzing results, validation against `W19
-    <https://ui.adsabs.harvard.edu/abs/2019MNRAS.489.1644W/abstract>`_ and J&A
+  * Analyzing results, validation against `W19`_ and `J&A`_
     other: 2 months parallel to sampling
 
   * Article: 2 months
@@ -552,8 +549,7 @@ Work Plan
 
   * Sampling: 6 months in parallel to selection
 
-  * Analyzing results, validation against `W19
-    <https://ui.adsabs.harvard.edu/abs/2019MNRAS.489.1644W/abstract>`_ and J&A
+  * Analyzing results, validation against `W19`_ and `J&A`_
     other: 2 months parallel to sampling
 
   * Article: 2 months
@@ -587,6 +583,8 @@ Work Plan
 .. _`Kareem et. al. (2022)`: https://ui.adsabs.harvard.edu/abs/2022MNRAS.517.4916E/abstract
 
 .. _W19: https://ui.adsabs.harvard.edu/abs/2019MNRAS.489.1644W/abstract
+
+.. _`J&A`: https://ui.adsabs.harvard.edu/abs/2021ApJ...912..123J/abstract
 
 .. _`Lurie et. al. (2017)`: https://ui.adsabs.harvard.edu/abs/2017AJ....154..250L/abstract
 
