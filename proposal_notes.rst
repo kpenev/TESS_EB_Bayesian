@@ -8,11 +8,27 @@ Goals
 
 * Detection of ellipsoidal variations, reflected light, doppler beaming
 
-* Measure eclipsing timing variability (ETV)? 
+* Measure eclipsing timing variability (ETV). Possible causes:
   
-  * apsidal precession 
+  * Light travel time effect (LITE): a third body perturbing the center of mass
+    of the binary system creates a light-time delay along the line of sight
+    which can cause eclipses to appear earlier or later than expected
 
-  * other causes?
+  * Non-hierarchical third body: the presence of a third body actually changes
+    the period of the binary over time
+
+  * Mass transfer: mass transfer between the com- ponents in the binary changes
+    the period
+
+  * Gravitational quadrupole coupling (Applegate effect): spin–orbit transfer of
+    angular momen- tum in a close binary due to one of the stars being active
+    produces period changes up to 10–5 times the binary period (Applegate 1992)
+
+  * Apsidal motion: the rotation of the line of apsides causes a change in the
+    time between primary and secondary eclipses even though the period remains
+    unchanged (requires an eccentric orbit; see Apsidal Angle) 6.  Spurious
+    signals: due to spots and other effects that distort the eclipsing binary
+    light curve
 
 Applications:
 =============
