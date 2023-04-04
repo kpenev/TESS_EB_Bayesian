@@ -94,6 +94,16 @@ Applications:
   `Adam et. al. 2020b
   <https://ui.adsabs.harvard.edu/abs/2020MNRAS.491..690J/abstract>`_)
 
+* <++>HOW IS THIS CATALOG UNIQUE<++>
+
+  * First catalog for TESS with detailed characterization of uncertainty
+    distributions.
+
+  * Will contain an order of magnitude more EBs than Kepler catalog and those
+    will be brighter allowing much cheaper followup observations if necessary. 
+
+  * 
+
 Expected outcomes:
 ==================
 
@@ -355,7 +365,45 @@ Methodology:
 
 * Physical parameter validation and quality control:
 
-  * Visual inspection to flag porly fitting LCs or SEDs
+  * From `Prsa et. al. (2022)`_ the following validation tests will be
+    performed:
+
+    * Centroid motion. The centroid test makes use of the open-source python
+      package CONTAMINANTE , which executes a pixel-level modeling of the TESS
+      target pixel files to determine the most likely location of the source of
+      the eclipses. The score for this test is scaled inversely with the
+      distance between the location-calculated source of signal and the location
+      of the target star.
+
+    * Contamination. The amount of contamination to the TESS aperture from
+      nearby stars. This provides an indication of how crowded the field is and
+      the likelihood of the signal originating from a nearby companion star.
+      The score for this test is scaled inversely with the contamination of
+      nearby source.
+
+    * Out-of-transit variability. EBs with orbital periods shorter than around 3
+      days are expected to show out-of-transit variability. As such, we search
+      for this variability for the short-period candidates. The significance of
+      such a detection is proportional to the score given for this test.
+      Candidates with periods greater than 3 days are given a score of 0.5 for
+      this test by default.
+
+    * Archival classification. Candidates that have previously been listed as an
+      EB on Simbad are awarded a score of 1 while all other candidates are
+      awarded a score of 0.5.  Figure 7. Histogram showing the distribution of
+      the individual test scores (dashed outlines), which combined, give the
+      overall likelihood of the candidate being a real EB (solid black
+      outlines).
+
+    * TCE/TOI. The TESS automated search pipeline flags light curves containing
+      a periodic signals, including both planetary and stellar, as
+      threshold-crossing events (TCEs) and TCEs that pass a large number of
+      rigorous planet- vetting tests are promoted to TOI status. As such,
+      candidates that are TOIs are given a score of 0; candidates that are TCEs
+      but not TOIs are given a score of 0.75, and candidates that are neither
+      TOIs nor TCEs receive a score of 0.5.
+
+  * Visual inspection to flag poorly fitting LCs or SEDs
 
   * Run PHOEBE 
     
