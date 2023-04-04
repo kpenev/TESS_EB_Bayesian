@@ -126,15 +126,13 @@ Expected outcomes:
 
     - avoid blending
 
-    - be brighter on average
-
     - probably be biased to continuous viewing zone or zones with more
       coverage
 
     but not selected to target EBs deliberately. Probably safe to say FFIs
     will yield many thousands of well characterized EBs.
 
-* Need predictions for:
+* Number of binaries with measured spins 
 
   * At least 10%-20% of stars will show detectable amplitude rotational
     variability.
@@ -143,13 +141,11 @@ Expected outcomes:
       <https://ui.adsabs.harvard.edu/abs/2022ApJ...927..219C/abstract>`_ and
       references therein may be useful.
 
-      * `Canto Martins et. al. (20202)
-        <https://ui.adsabs.harvard.edu/abs/2020ApJS..250...20C/abstract>` found
-        163 rotation signatures out of 1000 KOI, with 113 having unambiguous
-        rotation period measurements from just 1 sector of TESS.
+      * `Canto Martins et. al. (2020)`_ found 163 rotation signatures out of
+        1000 KOI, with 113 having unambiguous rotation period measurements from
+        just 1 sector of TESS.
 
-    * `Oelkers et. al. (2018)
-      <https://ui.adsabs.harvard.edu/abs/2018AJ....155...39O/abstract>`_ used
+    * `Oelkers et. al. (2018)`_ used
       KELT observatinos found 62,229 objects identified with likely stellar
       rotation periods with rms-amplitude from ∼3 mmag to ∼2.3 mag out of a
       subset of $4\times10^6$ sources (selected to be "likely TESS targets")
@@ -645,6 +641,10 @@ Work Plan
 .. _`Prsa et. al. (2022)`: https://ui.adsabs.harvard.edu/abs/2022ApJS..258...16P/abstract
 
 .. _`Kareem et. al. (2022)`: https://ui.adsabs.harvard.edu/abs/2022MNRAS.517.4916E/abstract
+
+.. _`Canto Martins et. al. (2020)`: https://ui.adsabs.harvard.edu/abs/2020ApJS..250...20C/abstract
+
+.. _`Oelkers et. al. (2018)`: https://ui.adsabs.harvard.edu/abs/2018AJ....155...39O/abstract
 
 .. _W19: https://ui.adsabs.harvard.edu/abs/2019MNRAS.489.1644W/abstract
 
