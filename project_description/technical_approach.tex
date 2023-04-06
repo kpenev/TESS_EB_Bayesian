@@ -105,12 +105,52 @@ comparing predicted lightcurves to what \tess{} observes. We require a model for
 two types of effects: each star blocking some part of the light from its
 companion from reaching us (i.e. the primary and secondary eclipses) and
 out-of-eclipse variability, driven by interactions between the two stars (phase
-curve). For the eclipses, we will use the Python package \tetxtt{batman}
-\citep{Kreidberg_15}, assuming quadratic limb darkening, allowing the limb
-darkening coefficients to vary freely as model parameters. 
+curve). For the eclipses, we will use the Python package \texttt{batman}
+\citep{Kreidberg_15}. We generate two \texttt{batman} models for a given set of
+EB parameters, modeling the eclipse of the primary and secondary stars
+separately. The two models are then added per the corresponding brightness ratio
+of the stars.
+
+In order to build a model, we need the radii of the primary and secondary stars,
+their brigtness ratio, and a limb darkening model. We will assuming quadratic
+limb darkening, and treat the limb darkening coefficients of each stars as model
+parameters to be constrained by observations rather than using theoretical
+models. Without radial velocity observations, there is nothing that constrains
+the masses of the stars in the binary (the lightcurve dependns only on orbital
+period, eccentricity, and orieantion, the ratio of radii, and the semimajor axis
+to primary radius ratio). In order to compensate for the lack of radial velocity
+data, we will instead rely on stellar evolution models to convert the two
+stellar masses, and common age and metallicity for a binary to radii and
+absolute magnitudes in the \tess{} bandpass (as well as other bandpasses when
+modeling the SED in \refsec{params_sed_modeling}). In particular, we will use
+<++>
 
 Our model for the phase curve must handle ellipsoidal modulations, Doppler
-beaming, and reflection effects.
+beaming, and reflection effects. Let $\theta$ be the angle between the line of
+sight direction and the line connecting the centers of the two stars in the
+binary, and $d$ be the separation between the two stars. To an excellent
+approximation, the ellipsoidal modulations are proportional to
+$\sin(2\theta)/d^3$, the reflection effect is proportional to $\cos\theta/d^2$,
+and the Doppler beaming is proportional to the line of sight velocity of the
+primary star. The proportionality constants of these terms depend on details of
+the stellar atmosphere and tidal love number. In our lightcurve model, we treat
+these constants as model parameters free to be adjusted to match the lightcurve.
+In fact in order to accommodate imperfectly filtered instrumental effects or
+astrophysical variability not related to binary interactions, we also include
+terms proportional to $\sin\theta/d^2$ and $\cos(2\theta)/d^3$.
+
+It should be noted that while there are much more sophisticated treatments of
+these effects available, for example by the \texttt{PHOEBE} package, those
+necessarily are much more computationally intensive. For example, generating a
+single EB lightcurve using \texttt{PHOEBE} with sufficient resolution for this
+project  takes several to several tens of seconds using a sintgle thread on a
+contemporary computer. Given that \citep{Windemuth_et_al_19} found it takes
+$\sim10^8$ samples ($10^6$ steps of 128 walker MCMC) for the samples to fully
+convenrge to the desired posterior distributoin, the proposed analysis is
+completely infeasible for tens of thousands of EBs even using state of the art
+high performance computing facilities. In contrast, the proposed modeling is
+$10^3$ to $10^5$ times faster (depending on the binary parameters) making it
+entirely feasible.
 
 \subsubsection{Spectral Energy Distribution Modeling}
 %
