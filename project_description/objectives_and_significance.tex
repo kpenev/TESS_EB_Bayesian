@@ -26,7 +26,7 @@ binaries that will:
 The proposed catalog will provide the required input for numerous investigations
 in stellar and exoplanetary physics.
 
-\subsection{Expected Applications}
+\subsection{Applications}
 %
 \label{sec:applications}
 
@@ -89,7 +89,7 @@ to a precision of $10^{-4}$ and often much better, where as typical
 uncertainties from ground based data are orders of magnitude larger
 \citep[c.f.][]{}<++>. Space-based photometry offers similar boost in precision
 in the determination of most of the physical parameters of the systems.
-Furthemore, effects often not detectable from the ground are easily detectable
+Furthermore, effects often not detectable from the ground are easily detectable
 from space (e.g. ellipsoidal variations, Doppler boosting etc.) which in turn
 provide crucial new constraints on the binary parameters and enable new science
 use cases.
@@ -156,96 +156,3 @@ change as a function of tidal frequency and amplitude, stellar spin and possibly
 other parameters. The larger sample size to come out of the proposed effort is
 required to study these dependencies, as smaller datasets quickly run out of
 objects when sliced along all these dimensions.
-
-\subsection{Expected Outcomes}
-%
-\label{sec:expected_outcomes}
-
-\citep{Prsa_et_al_22} searched $\sim2\times10^5$ lightcurves extracted from the
-high cadence stamp of the first 26 \tess{} sectors, detecting 4\,584 EBs. Not
-all of these binaries will be included in the catalog we plan to produce since
-the \citep{Prsa_et_al_22} catalog includes contact binaries and binaries for
-which the signal to noise will not be sufficient for high precision physical
-parameter determination.  Requiring detached binaries (the sum of the stellar
-radii not exceeding half the pericenter distance), primary eclipse depth of at
-least 5\%, secondary eclipse depth of at least 1\% allows us to estimate that we
-will be able to obtain high quality and high precision characterization of at
-least 800 binaries from stamp lightcurves with about double that number
-reasonably well constrained. We obtain the same estimate by scaling the results
-of \citep{Justesen_Albrecht_21} who found ~350 high precision binaries and more
-than 800 with reasonable constraints just from the southern hemisphere. With
-double or triple the observations for each binary, we will undoubtedly be able
-to extract high precision physical parameters from somewhat shallower eclipses
-than \citep{Justesen_Albrecht_21}, and will have improved sensitivity to longer
-orbital periods. Therefore, \textbf{to a good approximation our EB catalog based
-on stamp data alone should include $\sim1000$ EBs, roughly half of which will
-have high precision measurements of their parameters.}
-
-Predicting the expected EB detections from FFIs is less straightforward. We plan
-to use the Quick Look Pipeline (QLP) lightcurves based on the full frames. The
-QLP provides lightcurves for more than $10^7$ stars brighter than \tess{}
-magnitude $T<13.5$. Naively, we will search roughly 50 times more lightcurves
-and the 30 min cadence is still plenty to resolve all features of the
-lightcurve. AS a result, one could estimate creating a catalog of $5\times10^4$
-EBs, half with high precision parameters. However, the $2\times10^5$ stamps
-targets were not randomly selected. In fact over 1700 known or suspected EBs
-were specifically added to the target list through the TESS Guest Investigator
-program. On the other hand, the QLP lightcurve database only includes stars down
-to $T<13.5$ whereas stamp targets included much fainter stars. The photometric
-precision on a 1-h timescale vs magnitude reported for the stamp-based and
-FFI-based lightcurves is almost identical. AS a result, on average the FFI
-lightcurves will have higher precision than stamp lightcurves. Regardless, it is
-reasonable to expect that \textbf{we will end up with $\sim10^4$ EBs with high
-    precision parameters and roughly double that number in total from the FFI
-lightcurves.}
-
-In order to get a lower limit to the fraction of binaries for which we also
-expect to measure the spin period and often differential rotation, we look to
-\citep{CantoMartins_et_al_20}, who searched 1000 \tess{} objects of interest and
-measured 131 unambiguous rotation periods (13\%) using less than a year of
-observations, and \citep{Oelkers_et_al_18} who searched $\approx4\times10^6$
-ground based lightcurves (from the KELT survey) detecting 47\,174 (12\%) with
-clear spin signatures with periods under 13 days (a somewhat conservative upper
-limit to what can be detected using \tess). The former survey relied on much 2
-or 3 times fewer observations per target than we will use and the latter used
-ground based data of much lower photometric precision, so we can confidently
-conclude 10\%-15\% is a lower limit to the fraction of stars exhibiting
-rotational modulations detectable by \tess{} at any given time. When focusing on
-EBs that fraction is bound to be higher, since tidal interactions spin-up short
-period binaries increasing the fraction with periods under 13 days, and likely
-increasing the signal since faster rotators tend to have higher magnetic
-activity. An upper limit to the fraction of EBs for which we will measure the
-spin, we turn to \citep{Lurie_et_al_17} who used \kepler{} photometry (higher
-precision and longer time span than we will have) to measure spin of EBs.
-Crossmatching the \citep{Lurie_et_al_17} catalog of firmly detected spins with
-the \citep{Windemuth_et_al_19} catalog of EBs with high precision parameters
-results in 31\% (227 out of 728 EBs) of the \citep{Windemuth_et_al_19} stars
-having a spin period less than 13 days. In short, \textbf{we will be able to
-detect spin periods for between 10\% and 30\% of the EBs in our catalog: several
-hundred from stamps and many thousands from FFIs.}
-
-In addition to the number of systems, it would be useful to have an idea of the
-precision with which various physical parameters will be determined. Due to the
-generally highly correlated uncertainties of the parameters, the precision that
-is relevant to one application may be very different from another. For example,
-tides are sensitive to the ratio of stellar radii to the semimajor axis. This is
-usually much better constrained than either of the radii or the semimajor axis
-by itself (i.e. marginalized over all other quantities). Regardless,
-marginalized uncertainties of individual parameters can still be a useful guide
-to the value of the catalog. While \citep{Justesen_Albrecht_21} did not publish
-uncertainties, since they were not able to run their analysis long enough to be
-fully converged, the order of magnitude of the marginalized uncertainties can be
-estimated from the available samples. \textbf{For the high precision EBs
-    mentioned above, we expect marginalized uncertainties for the stellar masses
-    better than 3\%, and for the radii better than 2\% \citep[private
-    communication]{Justesen_Albrecht_21}. For eccentricities, the $e\cos\omega$
-    component is much better constrained, with typical uncertainties
-$\mathbf{\sim10^{-4}}$, than the $e\sin\omega$ component, with typical
-uncertainties $\mathbf{\sim10^{-3}}$ \citep{Justesen_Albrecht_21}.} Measuring
-spin periods from spot modulation usually produces extremely precise values.
-However, the real uncertainty in that quantity comes from the fact that
-different longitudes of the same star rotate at different rates. As a result,
-the uncertainty in the location of the stellar spots producing the rotational
-modulation dominates the uncertainty with which the rotation period can be
-measured. As a result, \textbf{the spin precision will be the best theoretically
-possible}, but still limited to $\sim$10\%.

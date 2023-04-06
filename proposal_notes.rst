@@ -116,9 +116,9 @@ Expected outcomes:
 
   * Filter from `Prsa et. al. (2022)`_ to estimate yield from 2x10^5 stamps: 1,200
     EBs with morph < 0.5 & primary eclipse depth > 1% & T < 12 (up to 1,341
-    for T < 13, 1,389 for T < 13.5 per QLP)
+    for T < 13, 1,389 for T < 13.5 per `QLP`_)
 
-  * Use some scaling to estimate yield from FFI: 10^7 QLP lightcurves for
+  * Use some scaling to estimate yield from FFI: 10^7 `QLP`_ lightcurves for
     T<13.5. Justesen & Albrecht (2019) autodetected ~350 high quality EBs from
     southern hemisphere alone => ~700 from both hemispheres from stamps =>
     ~35,000 from naive scaling. This is an overestimate because TESS targets
@@ -157,6 +157,21 @@ Expected outcomes:
   * At least 10%-20% of binaries with physical parameters will also have spin
     period detections: ~1000 systems or at least many hundreds. 
 
+* Expected precision
+
+  * masses: 3% or better
+
+  * radii: 2% or better
+
+  * ecosw: 1e-4, esinw: 1e-3
+
+  * Connect to applications
+
+    * eccentricity precision is crucial in tidal studies as it allows studying
+      close to circular orbits where a single tidal wave dominates.
+
+    * <++>CAN WE CONNECT TO ANY OF THE OTHERS?<++>
+
 * Selection effects:
 
   * Physical parameters:
@@ -189,14 +204,14 @@ Expected outcomes:
         the range of observing patterns as our targets and testing recovery.
   
       * The above procedure does not fully characterize the selection effects. The
-        QLP post-processing may also suppress or otherwise modify astrophysical
+        `QLP`_ post-processing may also suppress or otherwise modify astrophysical
         signals along with instrumental effects. Accounting for such effects would
         require injecting signals into raw light curves, or even at the pixel
-        level and re-running QLP. This is beyond the scope of this proposal.
+        level and re-running `QLP`_. This is beyond the scope of this proposal.
         However, should anyone need to carry out such analysis, our automated
         selection algorithm will be publicly available as a pip installable python
         package and well documented. Reproducing the cantdidate selection of this
-        effort will simply require running with QLP formatted lightcurves as
+        effort will simply require running with `QLP`_ formatted lightcurves as
         input.
 
   * Spins:
@@ -217,8 +232,8 @@ Expected outcomes:
 
       * Just like the physical parameter sample, this is not a complete
         characterization of the selection effects which need to be combined with
-        PDC or QLP post-processing. However, that is outside the scope of this
-        poposal. We will provide our spin analysis and automated flagging
+        PDC or `QLP`_ post-processing. However, that is outside the scope of
+        this poposal. We will provide our spin analysis and automated flagging
         procedure as python package to enable other authors to carry out that
         task should it become necessary.
     
@@ -227,14 +242,30 @@ Methodology:
 
 **EB physical parameters:**
 
-* LC preparation: use the bolded option below and use others to validate max
+* LC preparation: use the bolded options below and use others to validate max
   likelihood parameters:
 
-  * PDCSAP: Used by `J&A`_
-    
-    **pros:** minimize instrumental effects, 
+  * Starting LCs:
 
-    **cons:** may modify phase curve.
+    * PDCSAP: Used by `J&A`_
+    
+      **pros:** minimize instrumental effects, 
+
+      **cons:** may modify phase curve.
+
+    * **SAP: Used by** `W19`_ **and** `Prsa et. al. (2022)`_
+
+      * `Prsa et. al. (2022)`_ referred to `Twicken et. al. (2010)`_, `Stumpe
+        et. al.  (2012)`_, and the `Kepler Data Processing Handbook`_
+
+   
+    * For FFI use `QLP`_ lightcurves 
+      
+      * with detrending
+  
+      * **without detrending**
+
+  * Include co-trending basis vectors from SPOC in LC model
 
   * Apply low-pass filter to LC and subtract the result from the original,
     preserving all frequency >= orbital frequency:
@@ -244,8 +275,6 @@ Methodology:
     long timescales.
 
     **cons:** may leave instrumental effects.
-    
-  * **Use PDCSAP and remove low frequencies**
 
   * Follow W19 to use only LC near eclipses together with polynomial out of
     eclipse model:
@@ -253,6 +282,13 @@ Methodology:
         Instead, we clipped the LC around each eclipse with a window 1.5–2.0
         times eclipse durations, which were initially taken from VKEBC, and then
         iteratively refined during the optimization process.
+
+  * Candidate selection:
+
+    * Use `Prsa et. al. (2022)`_ for stamps
+
+    * Follow `J&A`_ automatic selection for FFI + a short dynesty run to find
+      maximum likelihood parameters and reject badly fittings ones.
 
 * LC modeling:
 
@@ -476,40 +512,6 @@ Methodology:
 
     * <++>**WHAT ELSE?**
 
-* Rotational or other stellar variability can affect physical parameter
-  determination.
-
-  * For timescales longer than the orbit our filtering will remove most of the
-    signal, unless very close to the orbital frequency. It will not
-    significantlny affect the determination of physical parameters.
-
-  * For synchronized systems, rotational variability can masquarade as phase
-    curve effects, especially for circular orbits where they become
-    indistinguishable.
-
-    * Rotational variability is usually more complicated than BEER (i.e. not
-      just $\Omega_{orb}$ and $2\Omega_{orb}$ components (e.g. Lure et. al. 2017
-      Fig. 1 top). 
-      
-    * Will not remain at exactly the same phase and will change shape over time,
-      especially between repeat observations of later sectors.
-
-    * Amplitude of rotational variability if reliably detected should be much
-      larger than BEER effects. As a result, if erroneously interpreted as BEER
-      during physical parameter fitting, the best fit phase curve amplitudes
-      will be orders of magnitude off from PHOEBE calculations (see PHOEBE
-      validation of LC models above).
-
-    * <++>**OTHER IDEAS HOW TO DEAL WITH THIS?**
-
-  * As spin gets faster than the orbit the effect on physical parameters
-    decreases quickly and rotational signal becomes detectable by our period
-    search. For such systems <++>**PICK ONE OPTION**: 
-    
-    * rotational signal can be subtracted and physical parameters re-analyzed
-
-    * do simultaneous analysis for physical parameters and spin
-
 * For spin validation:
 
   * ACF: Follow Lurie:
@@ -538,6 +540,69 @@ Methodology:
     <https://ui.adsabs.harvard.edu/abs/2017AJ....154..250L/abstract>`_?
 
   * <++>**OTHERS?**
+
+* Rotational or other stellar variability can affect physical parameter
+  determination.
+
+  * For timescales longer than the orbit our filtering will remove most of the
+    signal, unless very close to the orbital frequency. It will not
+    significantlny affect the determination of physical parameters.
+
+  * For synchronized systems, rotational variability can masquarade as phase
+    curve effects, especially for circular orbits where they become
+    indistinguishable.
+
+    * Rotational variability is usually more complicated than BEER (i.e. not
+      just $\Omega_{orb}$ and $2\Omega_{orb}$ components (e.g. Lure et. al. 2017
+      Fig. 1 top). 
+      
+    * Will not remain at exactly the same phase and will change shape over time,
+      especially between repeat observations of later sectors.
+
+    * Amplitude of rotational variability if reliably detected should be much
+      larger than BEER effects. As a result, if erroneously interpreted as BEER
+      during physical parameter fitting, the best fit phase curve amplitudes
+      will be orders of magnitude off from PHOEBE calculations (see PHOEBE
+      validation of LC models above).
+
+    * EB parameter analysis based on only near eclipse LC should not be
+      sensitive to rotational modulations (removed as trends). As a result,
+      validating against that approarch will flag problematic cases and protect
+      us against erroneous conclusions.
+
+    * <++>**OTHER IDEAS HOW TO DEAL WITH THIS?**
+
+  * As spin gets faster than the orbit the effect on physical parameters
+    decreases quickly and rotational signal becomes detectable by our period
+    search. For such systems <++>**PICK ONE OPTION**: 
+    
+    * rotational signal can be subtracted and physical parameters re-analyzed
+
+    * do simultaneous analysis for physical parameters and spin
+
+
+Catalog contents:
+=================
+
+  * TIC
+
+  * RA
+
+  * Dec
+
+  * T (tess magnitude)
+
+  * GR, GB, GG (gaia magnitudes)
+
+  * Primary/secondary eclipse depths
+
+  * LC residuals from maximum likelihood model
+
+  * <physical parameters>
+
+  * <spin periods>
+
+  * manual vetting flag (passed, failed, not vetted)
 
 Need to argue
 =============
@@ -597,7 +662,7 @@ Work Plan
 
   * Collect SED information: 
     
-    * Did QLP use GAIA positions for photometry?
+    * Did `QLP`_ use GAIA positions for photometry?
 
     * Crossmatch to other catalogs from GAIA already done?
 
@@ -646,6 +711,10 @@ Work Plan
 
 .. _`Oelkers et. al. (2018)`: https://ui.adsabs.harvard.edu/abs/2018AJ....155...39O/abstract
 
+.. _`Twicken et. al. (2010)`: https://ui.adsabs.harvard.edu/abs/2010SPIE.7740E..23T/abstract 
+
+.. _`Stumpe et. al. (2012)`: https://ui.adsabs.harvard.edu/abs/2012PASP..124..985S/abstract
+
 .. _W19: https://ui.adsabs.harvard.edu/abs/2019MNRAS.489.1644W/abstract
 
 .. _`J&A`: https://ui.adsabs.harvard.edu/abs/2021ApJ...912..123J/abstract
@@ -653,3 +722,7 @@ Work Plan
 .. _`Lurie et. al. (2017)`: https://ui.adsabs.harvard.edu/abs/2017AJ....154..250L/abstract
 
 .. _QLP: https://archive.stsci.edu/hlsp/qlp
+
+.. _`Kepler Data Processing Handbook`: https://ui.adsabs.harvard.edu/abs/2020ksci.rept....9J/abstract 
+
+.. _`BATMAN`: 

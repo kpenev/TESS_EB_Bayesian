@@ -1,0 +1,141 @@
+\fancysection{Technical Approach and Methodology}
+%
+\label{sec:technical_approach}
+
+To a large extent, our analysis plan is based on similar analysis from the
+literature applied to \kepler{} and \tess{} lightcurves
+\citep{Reinhold_et_al_13, Lurie_et_al_17, Windemuth_et_al_19,
+CantoMartins_et_al_20, Justesen_Albrecht_21}, combining the best features of
+each of these analysis and several other improvements of our own designed to
+increasing the reliability of the catalog and allowing us to properly handle
+difficulties with some EBs reported by these prior efforts. Our plans include
+extensive validation procedures to ensure the resulting catalogs are as clean of
+false positives or erroneously determined parameters as possible. Finally,
+parameter uncertainties are a crucial piece of information, of almost equal
+importance to the values of the parameters themselves. Our approach includes an
+effort to thoroughly determine the uncertainties. Since observed properties
+depend on complicated combinations of physical parameters, the uncertainty
+distributions are highly non-Gaussian, and involve complicated correlations. We
+will rely on a Markov chain Monte Carlo analysis to fully characterize these
+uncertainty distributions, and the actual samples as well as summary statistics
+for each EB in our catalog will be provided upon publication.
+
+\subsection{Determining Eclipsing Binary Physical Parameters}
+%
+\label{sec:eb_parameters_technical}
+
+\subsubsection{Lightcurve Preparation}
+%
+\label{sec:params_lc_preparation}
+
+For a selected subset of stars \tess{} downloads pixel stamps with a 2-min
+cadence and full images with a 30-min cadence. The stamps are processed by the
+Science Processing Operations Center (SPOC) pipeline \citep{Jenkins_et_al_16}
+providing  two classes of lightcurves: simple aperture photometry (SAP) and
+pre-search data conditioning (PDC). The PDC lightcurves involve detrending
+against empirically constructed co-trending basis vectors, which sometimes
+modifies real astrophysical signals. For that reason, we will use the SAP
+lightcurves, but include the SPOC co-trending basis vectors in our lightcurve
+model (see \refsec{params_lc_modeling}). As a final check, we will validate our
+results against PDC lightcurves (see \refsec{params_validation}). 
+
+For FFIs, we will use the Quick Look Pipeline (QLP) lightcurves
+\citep{Huang_et_al_20a, Huang_et_al_20b, Kunimoto_et_al_21, Kunimoto_et_al_22}.
+Those also come in two flavors: with and without detrending. Once again we will
+analyze non-detrended lightcurves including SPOC co-trending basis vectors in
+our lightcurve model (\refsec{params_lc_modeling}), as well as validate the
+results against the detrended lightcurves (\refsec{params_validation}).
+
+The first step in our analysis will be to select candidate EB lightcurves. For
+stamp targets, \citep{Prsa_et_al_22} already conducted a thorough search,
+combining multiple detection  methods, including two manual searches by citizen
+scientists \citep{Eisner_et_al_21, Kristiansen_et_al_22}, a list of EB
+candidates selected as \tess{} targets, and several eclipse or periodic signal
+search pipelines \citep{Jenkins_et_al_16, Wheeler_Kipping_19, Kruse_et_al_19,
+IJspeert_et_al_21} to identify 4584 EBs. These will constitute the list of
+sources we will analyze from stamp data. 
+
+There is no equivalent catalog of EBs for FFI lightcurves. Instead, we will
+follow \citep{Justesen_Albrecht_21} who searched the first year of \tess{} stamp
+data for high signal-to-noise EBs. Their search was conducted in several steps.
+First, a Lomb-Scargle periodogram was generated for each lightcurve, and stars
+with no significant power were eliminated. Selected sources were subjected to
+the transit least squares (TLS) algorithm developed by \citep{Hippke_Heller_19},
+again excluding targets with no significant signal. Candidates for which neither
+the eclipse depths, nor the depths of every other eclipse match within
+5-$\sigma$ are also discarded as false positives. For the survivors, the
+detected eclipses are masked and another search is conducted to check for
+secondary eclipses of eccentric binaries which are also checked for consistency
+of their depths. Finally, only high signal-to-noise candidates are kept (primary
+eclipse > 5\% and secondary eclipse > 1\%). \citep{Justesen_Albrecht_21} report
+that this procedure eliminated 98\% of the input sources. However, since we will
+begin with $10^7$ lightcurves, $\sim2\times10^5$ will pass all tests. These are
+too many to examine by eye, as \citep{Justesen_Albrecht_21} did. Instead, we
+will find a maximum likelihood estimate for the system parameters and
+automatically reject binaries for which the residuals between the observed
+lightcurve and the model for the maximum likelihood parameters are too large.
+The exact threshold for rejection will be determined by visual inspection of
+several thousand examples. Since the likelihood function defined below is
+non-linear and likely contains multiple local minima, we will use one of the
+built-in global optimization algorithms of the scipy Python package. We will
+experiment with basin hopping \citep{Wales_Doye_97}, differential evolution
+\citep{Storn_Price_97}, and dual annealing \citep{Xiang_et_al_97} algorithms as
+part of this project, and if no clear winner can be found we will use multiple
+selecting whichever one produces the highest likelihood for each candidate. Even
+after this step, we will end up with several tens of thousands of candidates.
+All surviving EBs will be subjected to full analysis and included in the final
+catalog, but we will manually vet the 5\,000 -- 10\,000 with tightest
+constraints to produce a sub-catalog of highly reliable EBs.
+
+For each lightcurve selected for full analysis, we will suppress variability on
+timescales longer than the orbital period (determined from the maximum
+likelihood optimization above). We will experiment with two approaches: median
+filter with window equal to the orbital period after masking the eclipses and
+folding the lightcurve at the orbital period and median filtering with a window
+width 1\% or less of the primary or secondary eclipse duration, whichever is
+smaller. The filtering and maximum likelihood will be applied iteratively to
+find an orbital period that maximizes the likelihood of the filtered lightcurve.
+
+\subsubsection{Lightcurve Modeling}
+%
+\label{sec:params_lc_modeling}
+
+The most important constraint on the physical parameters of EBs comes from
+comparing predicted lightcurves to what \tess{} observes. We require a model for
+two types of effects: each star blocking some part of the light from its
+companion from reaching us (i.e. the primary and secondary eclipses) and
+out-of-eclipse variability, driven by interactions between the two stars (phase
+curve). For the eclipses, we will use the Python package \tetxtt{batman}
+\citep{Kreidberg_15}, assuming quadratic limb darkening, allowing the limb
+darkening coefficients to vary freely as model parameters. 
+
+Our model for the phase curve must handle ellipsoidal modulations, Doppler
+beaming, and reflection effects.
+
+\subsubsection{Spectral Energy Distribution Modeling}
+%
+\label{sec:params_sed_modeling}
+
+\subsubsection{Bayesian Analysis}
+%
+\label{sec:params_bayesian_analysis}
+
+\subsection{Physical Parameter Validation}
+%
+\label{sec:params_validation}
+
+\subsection{Determining Spins}
+%
+\label{sec:spin_technical}
+
+\subsubsection{Lightcurve Preparation}
+%
+\label{sec:spin_lc_preparation}
+
+\subsection{Candidate Selection and Spin Period Measurements}
+%
+\label{sec:spin_search_and_measurement}
+
+\subsection{Validating Measured Spins}
+%
+\label{sec:spin_validation}
