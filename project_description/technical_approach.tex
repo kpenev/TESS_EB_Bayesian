@@ -96,7 +96,7 @@ width 1\% or less of the primary or secondary eclipse duration, whichever is
 smaller. The filtering and maximum likelihood will be applied iteratively to
 find an orbital period that maximizes the likelihood of the filtered lightcurve.
 
-\subsubsection{Lightcurve Modeling}
+\subsubsection{Lightcurve and Spectral Energy Distribution Modeling Modeling}
 %
 \label{sec:params_lc_modeling}
 
@@ -110,20 +110,6 @@ curve). For the eclipses, we will use the Python package \texttt{batman}
 EB parameters, modeling the eclipse of the primary and secondary stars
 separately. The two models are then added per the corresponding brightness ratio
 of the stars.
-
-In order to build a model, we need the radii of the primary and secondary stars,
-their brigtness ratio, and a limb darkening model. We will assuming quadratic
-limb darkening, and treat the limb darkening coefficients of each stars as model
-parameters to be constrained by observations rather than using theoretical
-models. Without radial velocity observations, there is nothing that constrains
-the masses of the stars in the binary (the lightcurve dependns only on orbital
-period, eccentricity, and orieantion, the ratio of radii, and the semimajor axis
-to primary radius ratio). In order to compensate for the lack of radial velocity
-data, we will instead rely on stellar evolution models to convert the two
-stellar masses, and common age and metallicity for a binary to radii and
-absolute magnitudes in the \tess{} bandpass (as well as other bandpasses when
-modeling the SED in \refsec{params_sed_modeling}). In particular, we will use
-<++>
 
 Our model for the phase curve must handle ellipsoidal modulations, Doppler
 beaming, and reflection effects. Let $\theta$ be the angle between the line of
@@ -152,9 +138,36 @@ high performance computing facilities. In contrast, the proposed modeling is
 $10^3$ to $10^5$ times faster (depending on the binary parameters) making it
 entirely feasible.
 
+The apparent brightness of a system ofter places better constraints on the
+masses than the lightcurve alone, because mass is tightly correlated with
+luminosity.  
+
+In order to build a model, we need the radii of the primary and secondary stars,
+their brigtness ratio, and a limb darkening model. We will assuming quadratic
+limb darkening, and treat the limb darkening coefficients of each stars as model
+parameters to be constrained by observations rather than using theoretical
+models. Without radial velocity observations, there is nothing that constrains
+the masses of the stars in the binary (the lightcurve dependns only on orbital
+period, eccentricity, and orieantion, the ratio of radii, and the semimajor axis
+to primary radius ratio). In order to compensate for the lack of radial velocity
+data, we will instead rely on stellar evolution models to convert the two
+stellar masses, and common age and metallicity for a binary to radii and
+absolute magnitudes in the \tess{} bandpass (as well as other bandpasses when
+modeling the SED in \refsec{params_sed_modeling}). In particular, we will use
+isochrones generated using the Padova and Trieste Stellar Evolutionary Code
+\citep{Bressan_et_al_12, Chen_et_al_14, Chen_et_al_15, Tang_et_al_14,
+Marigo_et_al_17, Pastorelli_et_al_19, Pastorelli_et_al_20}, together with
+bolometric corrections and star-by-star extinction coefficients (properly
+accounting for the spectral dependence of extinction) as in
+\citep{Chen_et_al_19}. \citep{CMD_interface} provides on-demand isochrones for a
+range of stellar properties and we have already implemented high-precision
+interpolation.
+
 \subsubsection{Spectral Energy Distribution Modeling}
 %
 \label{sec:params_sed_modeling}
+
+In order to use the  
 
 \subsubsection{Bayesian Analysis}
 %
