@@ -344,8 +344,8 @@ Methodology:
       listed in the TIC. We include Johnson–Cousins B and V, Two Micron All Sky
       Survey J, H, and K, and Wide-field Infrared Survey Explorer W1 and W2
       magnitudes where available. If no extinction is listed in the TIC, we
-      query the 3D galactic dust map by Green et al. (2019) or the dust map by
-      Schlegel et al. (1998) as the last priority. We convert apparent
+      query the 3D galactic dust map by `Green et al. (2019)`_ or the dust map by
+      `Schlegel et al. (1998)`_ as the last priority. We convert apparent
       magnitudes to absolute magnitudes via the distance modulus. To obtain
       synthetic absolute magnitudes, we use the bolometric correction (BC)
       tables developed for the Bag of Stellar Tracks and Isochrones (BaSTI)
@@ -702,27 +702,32 @@ Work Plan
 
   * Article: 2 months 
 
+.. _`Bailer-Jones et al. (2018)`: https://ui.adsabs.harvard.edu/abs/2018AJ....156...58B
 
-.. _`Prsa et. al. (2022)`: https://ui.adsabs.harvard.edu/abs/2022ApJS..258...16P/abstract
-
-.. _`Kareem et. al. (2022)`: https://ui.adsabs.harvard.edu/abs/2022MNRAS.517.4916E/abstract
+.. _`BATMAN`: https://ui.adsabs.harvard.edu/abs/2015PASP..127.1161K/abstract 
 
 .. _`Canto Martins et. al. (2020)`: https://ui.adsabs.harvard.edu/abs/2020ApJS..250...20C/abstract
 
-.. _`Oelkers et. al. (2018)`: https://ui.adsabs.harvard.edu/abs/2018AJ....155...39O/abstract
-
-.. _`Twicken et. al. (2010)`: https://ui.adsabs.harvard.edu/abs/2010SPIE.7740E..23T/abstract 
-
-.. _`Stumpe et. al. (2012)`: https://ui.adsabs.harvard.edu/abs/2012PASP..124..985S/abstract
-
-.. _W19: https://ui.adsabs.harvard.edu/abs/2019MNRAS.489.1644W/abstract
+.. _`Green et al. (2019)`: https://ui.adsabs.harvard.edu/abs/2019ApJ...887...93G
 
 .. _`J&A`: https://ui.adsabs.harvard.edu/abs/2021ApJ...912..123J/abstract
 
-.. _`Lurie et. al. (2017)`: https://ui.adsabs.harvard.edu/abs/2017AJ....154..250L/abstract
-
-.. _QLP: https://archive.stsci.edu/hlsp/qlp
+.. _`Kareem et. al. (2022)`: https://ui.adsabs.harvard.edu/abs/2022MNRAS.517.4916E/abstract
 
 .. _`Kepler Data Processing Handbook`: https://ui.adsabs.harvard.edu/abs/2020ksci.rept....9J/abstract 
 
-.. _`BATMAN`: 
+.. _`Lurie et. al. (2017)`: https://ui.adsabs.harvard.edu/abs/2017AJ....154..250L/abstract
+
+.. _`Oelkers et. al. (2018)`: https://ui.adsabs.harvard.edu/abs/2018AJ....155...39O/abstract
+
+.. _`Prsa et. al. (2022)`: https://ui.adsabs.harvard.edu/abs/2022ApJS..258...16P/abstract
+
+.. _QLP: https://archive.stsci.edu/hlsp/qlp
+
+.. _`Schlegel et al. (1998)`: https://ui.adsabs.harvard.edu/abs/1998ApJ...500..525S
+
+.. _`Stumpe et. al. (2012)`: https://ui.adsabs.harvard.edu/abs/2012PASP..124..985S/abstract
+
+.. _`Twicken et. al. (2010)`: https://ui.adsabs.harvard.edu/abs/2010SPIE.7740E..23T/abstract 
+
+.. _W19: https://ui.adsabs.harvard.edu/abs/2019MNRAS.489.1644W/abstract
