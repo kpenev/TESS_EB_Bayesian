@@ -3,22 +3,22 @@
 \label{sec:technical_approach}
 
 To a large extent, our analysis plan is based on similar analysis from the
-literature applied to \kepler{} and \tess{} lightcurves
-\citep{Reinhold_et_al_13, Lurie_et_al_17, Windemuth_et_al_19,
-CantoMartins_et_al_20, Justesen_Albrecht_21}, combining the best features of
-each of these analysis and several other improvements of our own designed to
-increasing the reliability of the catalog and allowing us to properly handle
-difficulties with some EBs reported by these prior efforts. Our plans include
-extensive validation procedures to ensure the resulting catalogs are as clean of
-false positives or erroneously determined parameters as possible. Finally,
-parameter uncertainties are a crucial piece of information, of almost equal
-importance to the values of the parameters themselves. Our approach includes an
-effort to thoroughly determine the uncertainties. Since observed properties
-depend on complicated combinations of physical parameters, the uncertainty
-distributions are highly non-Gaussian, and involve complicated correlations. We
-will rely on a Markov chain Monte Carlo analysis to fully characterize these
-uncertainty distributions, and the actual samples as well as summary statistics
-for each EB in our catalog will be provided upon publication.
+literature applied to \kepler{} and \tess{} LCs \citep{Reinhold_et_al_13,
+Lurie_et_al_17, Windemuth_et_al_19, CantoMartins_et_al_20,
+Justesen_Albrecht_21}, combining the best features of each of these analysis and
+several other improvements of our own designed to increasing the reliability of
+the catalog and allowing us to properly handle difficulties with some EBs
+reported by these prior efforts. Our plans include extensive validation
+procedures to ensure the resulting catalogs are as clean of false positives or
+erroneously determined parameters as possible. Finally, parameter uncertainties
+are a crucial piece of information, of almost equal importance to the values of
+the parameters themselves. Our approach includes an effort to thoroughly
+determine the uncertainties. Since observed properties depend on complicated
+combinations of physical parameters, the uncertainty distributions are highly
+non-Gaussian, and involve complicated correlations. We will rely on a Markov
+chain Monte Carlo analysis to fully characterize these uncertainty
+distributions, and the actual samples as well as summary statistics for each EB
+in our catalog will be provided upon publication.
 
 \subsection{Determining Eclipsing Binary Physical Parameters}
 %
@@ -31,50 +31,53 @@ for each EB in our catalog will be provided upon publication.
 For a selected subset of stars \tess{} downloads pixel stamps with a 2-min
 cadence and full images with a 30-min cadence. The stamps are processed by the
 Science Processing Operations Center (SPOC) pipeline \citep{Jenkins_et_al_16}
-providing  two classes of lightcurves: simple aperture photometry (SAP) and
-pre-search data conditioning (PDC). The PDC lightcurves involve detrending
-against empirically constructed co-trending basis vectors, which is specifically
-designed to preserve astrophysical signals while removing systematics. While the
-PDC corrections are not perfect, \citep{Justesen_Albrecht_21} found they are
-well suited for high precision analysis of EBs. We will use the PDC lightcurves
-by default, but for each target we also will begin by finding a maximum
-likelihood model using our default modeling of PDC lightcurves and  a maximum
-likelihood model modeling only the eclipses without the phase curve effects (see
-below) using only the portions of the SAP lightcurves near eclipses (up to 2
-times the eclipse duration) together with a second order polynomial model for
-the out-of-eclipse variability. If the parameters of the two fits differ
-substantially, the target will be flagged for manual inspection and potentially
-re-analysis based on appropriately prepared SAP lightcurve (e.g. using the
-\texttt{Lightkurve} package \citep{Lightkurve_18}).
+providing  two classes of LCs: simple aperture photometry (SAP) and pre-search
+data conditioning (PDC). The PDC LCs involve detrending against empirically
+constructed co-trending basis vectors, which is specifically designed to
+preserve astrophysical signals while removing systematics. While the PDC
+corrections are not perfect, \citep{Justesen_Albrecht_21} found they are well
+suited for high precision analysis of EBs. We will use the PDC LCs by default,
+but for each target we also will begin by finding a maximum likelihood model
+using our default modeling of PDC LCs and  a maximum likelihood model modeling
+only the eclipses without the phase curve effects (see below) using only the
+portions of the SAP LCs near eclipses (up to 2 times the eclipse duration)
+together with a second order polynomial model for the out-of-eclipse
+variability. If the parameters of the two fits differ substantially, the target
+will be flagged for manual inspection and potentially re-analysis based on
+appropriately prepared SAP LC (e.g. using the \texttt{Lightkurve} package
+\citep{Lightkurve_18}).
 
-For FFIs, we will use the Quick Look Pipeline (QLP) lightcurves
+For FFIs, we will use the Quick Look Pipeline (QLP) LCs
 \citep{Huang_et_al_20a, Huang_et_al_20b, Kunimoto_et_al_21, Kunimoto_et_al_22}.
 Those also come in two flavors: with and without detrending. The QLP authors
 themselves caution that the detrending procedure will significantly affect low
-frequency signals. Hence, we begin with non-detrended lightcurves, and adapt the
+frequency signals. Hence, we begin with non-detrended LCs, and adapt the
 QLP detrending procedure for our application by modifying their high-pass filter
 to preserve signals at or below the orbital frequency and applying the
-detrending as part of MCMC after subtracting the EB model lightcurve (see
+detrending as part of MCMC after subtracting the EB model LC (see
 \refsec{params_bayesian_analysis}). To preserve modulations on the orbital
 frequency or faster, we need to modify the minimum spacing allowed between the
 smoothing spline nodes used for detrending to match the orbit. The rest of the
-detrending procedure of the QLP will be preserved.
+detrending procedure of the QLP will be preserved. It should be noted that the
+exact detrending used will not preclude detecting the high signal to noise EBs
+we are targeting. In fact, the yield estimates from \refsec{catalog_size} are
+based on a search \citep{Prsa_et_al_22} that applied no detrending.
 
-The first step in our analysis will be to select candidate EB lightcurves. For
-stamp targets, \citep{Prsa_et_al_22} already conducted a thorough search,
-combining multiple detection  methods, including two manual searches by citizen
-scientists \citep{Eisner_et_al_21, Kristiansen_et_al_22}, a list of EB
-candidates selected as \tess{} targets, and several eclipse or periodic signal
-search pipelines \citep{Jenkins_et_al_16, Wheeler_Kipping_19, Kruse_et_al_19,
-IJspeert_et_al_21} to identify 4584 EBs. These will constitute the list of
-sources we will analyze from stamp data.
+The first step in our analysis will be to select candidate EB LCs. For stamp
+targets, \citep{Prsa_et_al_22} already conducted a thorough search, combining
+multiple detection  methods, including two manual searches by citizen scientists
+\citep{Eisner_et_al_21, Kristiansen_et_al_22}, a list of EB candidates selected
+as \tess{} targets, and several eclipse or periodic signal search pipelines
+\citep{Jenkins_et_al_16, Wheeler_Kipping_19, Kruse_et_al_19, IJspeert_et_al_21}
+to identify 4584 EBs. These will constitute the list of sources we will analyze
+from stamp data.
 
-There is no equivalent catalog of EBs for FFI lightcurves. Instead, we will
-follow \citep{Justesen_Albrecht_21} who searched the first year of \tess{} stamp
-data for high signal-to-noise EBs. Their search was conducted in several steps.
-First, a Lomb-Scargle periodogram was generated for each lightcurve, and stars
-with no significant power were eliminated. Selected sources were subjected to
-the transit least squares (TLS) algorithm developed by \citep{Hippke_Heller_19},
+There is no equivalent catalog of EBs for FFI LCs. Instead, we will follow
+\citep{Justesen_Albrecht_21} who searched the first year of \tess{} stamp data
+for high signal-to-noise EBs. Their search was conducted in several steps.
+First, a Lomb-Scargle periodogram was generated for each LC, and stars with no
+significant power were eliminated. Selected sources were subjected to the
+transit least squares (TLS) algorithm developed by \citep{Hippke_Heller_19},
 again excluding targets with no significant signal. Candidates for which neither
 the eclipse depths, nor the depths of every other eclipse match within
 5-$\sigma$ are also discarded as false positives. For the survivors, the
@@ -83,48 +86,47 @@ secondary eclipses of eccentric binaries which are also checked for consistency
 of their depths. Finally, only high signal-to-noise candidates are kept (primary
 eclipse > 5\% and secondary eclipse > 1\%). \citep{Justesen_Albrecht_21} report
 that this procedure eliminated 98\% of the input sources. However, since we will
-begin with $10^7$ lightcurves, $\sim2\times10^5$ will pass all tests. These are
-too many to examine by eye, as \citep{Justesen_Albrecht_21} did. Instead, we
-will find a maximum likelihood estimate for the system parameters and
-automatically reject binaries for which the residuals between the observed
-lightcurve and the model for the maximum likelihood parameters are too large.
-The exact threshold for rejection will be determined by visual inspection of
-several thousand examples. Since the likelihood function defined below is
-non-linear and likely contains multiple local minima, we will use one of the
-built-in global optimization algorithms of the scipy Python package. We will
-experiment with basin hopping \citep{Wales_Doye_97}, differential evolution
-\citep{Storn_Price_97}, and dual annealing \citep{Xiang_et_al_97} algorithms as
-part of this project, and if no clear winner can be found we will use multiple
-selecting whichever one produces the highest likelihood for each candidate. Even
-after this step, we will end up with several tens of thousands of candidates.
-All surviving EBs will be subjected to full analysis and included in the final
-catalog, but we will manually vet the 5\,000 -- 10\,000 with tightest
-constraints to produce a sub-catalog of highly reliable EBs.
+begin with $10^7$ LCs, $\sim2\times10^5$ will pass all tests. These are too many
+to examine by eye, as \citep{Justesen_Albrecht_21} did. Instead, we will find a
+maximum likelihood estimate for the system parameters and automatically reject
+binaries for which the residuals between the observed LC and the model for the
+maximum likelihood parameters are too large.  The exact threshold for rejection
+will be determined by visual inspection of several thousand examples.  Since the
+likelihood function defined below is non-linear and likely contains multiple
+local minima, we will use one of the built-in global optimization algorithms of
+the \texttt{scipy} Python package. We will experiment with basin hopping
+\citep{Wales_Doye_97}, differential evolution \citep{Storn_Price_97}, and dual
+annealing \citep{Xiang_et_al_97} algorithms as part of this project, and if no
+clear winner can be found we will use multiple selecting whichever one produces
+the highest likelihood for each candidate. Even after this step, we will end up
+with several tens of thousands of candidates.  All surviving EBs will be
+subjected to full analysis and included in the final catalog, but we will
+manually vet the 5\,000 -- 10\,000 with tightest constraints to produce a
+sub-catalog of highly reliable EBs.
 
-\hl{For each lightcurve selected for full analysis, we will suppress variability
-    on timescales longer than the orbital period (determined from the maximum
+\hl{For each LC selected for full analysis, we will suppress variability on
+    timescales longer than the orbital period (determined from the maximum
     likelihood optimization above). We will experiment with two approaches:
     median filter with window equal to the orbital period after masking the
-    eclipses and folding the lightcurve at the orbital period and median
-    filtering with a window width 1\% or less of the primary or secondary
-    eclipse duration, whichever is smaller. The filtering and maximum likelihood
-    will be applied iteratively to find an orbital period that maximizes the
-likelihood of the filtered lightcurve.}
+    eclipses and folding the LC at the orbital period and median filtering with
+    a window width 1\% or less of the primary or secondary eclipse duration,
+    whichever is smaller. The filtering and maximum likelihood will be applied
+iteratively to find an orbital period that maximizes the likelihood of the
+filtered LC.}
 
 \subsubsection{Lightcurve and Spectral Energy Distribution Modeling Modeling}
 %
 \label{sec:params_lc_sed_modeling}
 
 The most important constraint on the physical parameters of EBs comes from
-comparing predicted lightcurves to what \tess{} observes. We require a model for
-two types of effects: each star blocking some part of the light from its
-companion from reaching us (i.e. the primary and secondary eclipses) and
-out-of-eclipse variability, driven by interactions between the two stars (phase
-curve). For the eclipses, we will use the Python package \texttt{batman}
-\citep{Kreidberg_15}. We generate two \texttt{batman} models for a given set of
-EB parameters, modeling the eclipse of the primary and secondary stars
-separately. The two models are then added per the corresponding brightness ratio
-of the stars.
+comparing predicted LCs to what \tess{} observes. We require a model for two
+types of effects: each star blocking some part of the light from its companion
+from reaching us (i.e. the primary and secondary eclipses) and out-of-eclipse
+variability, driven by interactions between the two stars (phase curve). For the
+eclipses, we will use the Python package \texttt{batman} \citep{Kreidberg_15}.
+We generate two \texttt{batman} models for a given set of EB parameters,
+modeling the eclipse of the primary and secondary stars separately. The two
+models are then added per the corresponding brightness ratio of the stars.
 
 Our model for the phase curve must handle ellipsoidal modulations, Doppler
 beaming, and reflection effects. Let $\theta$ be the angle between the line of
@@ -134,28 +136,28 @@ approximation, the ellipsoidal modulations are proportional to
 $\sin(2\theta)/d^3$, the reflection effect is proportional to $\cos\theta/d^2$,
 and the Doppler beaming is proportional to the line of sight velocity of the
 primary star. The proportionality constants of these terms depend on details of
-the stellar atmosphere and tidal love number. In our lightcurve model, we treat
-these constants as model parameters free to be adjusted to match the lightcurve.
-In fact in order to accommodate imperfectly filtered instrumental effects or
-astrophysical variability not related to binary interactions, we also include
-terms proportional to $\sin\theta/d^2$ and $\cos(2\theta)/d^3$.
+the stellar atmosphere and tidal love number. In our LC model, we treat these
+constants as model parameters free to be adjusted to match the LC.  In fact in
+order to accommodate imperfectly filtered instrumental effects or astrophysical
+variability not related to binary interactions, we also include terms
+proportional to $\sin\theta/d^2$ and $\cos(2\theta)/d^3$.
 
 It should be noted that while there are much more sophisticated treatments of
 these effects available, for example by the \texttt{PHOEBE} package, those
 necessarily are much more computationally intensive. For example, generating a
-single EB lightcurve using \texttt{PHOEBE} with sufficient resolution for this
-project  takes several to several tens of seconds using a single thread on a
-contemporary computer. Given that \citep{Windemuth_et_al_19} found it takes
-$\sim10^8$ samples ($10^6$ steps of 128 walker MCMC) for the samples to fully
-converge to the desired posterior distribution, the proposed analysis is
-completely infeasible for tens of thousands of EBs even using state of the art
-high performance computing facilities. In contrast, the proposed modeling is
-$10^3$ to $10^5$ times faster (depending on the binary parameters) making it
-entirely feasible.
+single EB LC using \texttt{PHOEBE} with sufficient resolution for this project
+takes several to several tens of seconds using a single thread on a contemporary
+computer. Given that \citep{Windemuth_et_al_19} found it takes $\sim10^8$
+samples ($10^6$ steps of 128 walker MCMC) for the samples to fully converge to
+the desired posterior distribution, the proposed analysis is completely
+infeasible for tens of thousands of EBs even using state of the art high
+performance computing facilities. In contrast, the proposed modeling is $10^3$
+to $10^5$ times faster (depending on the binary parameters) making it entirely
+feasible.
 
 The apparent brightness of a system often places better constraints on the
-masses than the lightcurve alone, because mass is tightly correlated with
-luminosity. We rely on parallax based distances from Gaia Data Release 2
+masses than the LC alone, because mass is tightly correlated with luminosity. We
+rely on parallax based distances from Gaia Data Release 2
 \citep{Bailer-Jones_et_al_18}. While Gaia DR3 parallaxes are already available
 \citep{GaiaDR3_22}, converting to distance and uncertainty estimates is highly
 non-trivial. If DR3 distance analysis becomes available before or during this
@@ -165,20 +167,20 @@ sufficient for our purposes, and is not the dominant source of uncertainty when
 converting absolute to apparent magnitudes by a significant margin. We will use
 the extinction estimate fro the \tess{} input catalog (TIC) whenever available,
 using the 3D galactic dust map by \citep{Green_et_al_19} as a backup, and the
-dust map by \citep{Schlegel_et_al_98} as a last resort. For lightcurve modeling
-we calculate difference it \tess{} magnitudes of the sources, and SED
-constraints will be based on whichever of the following magnitudes are
-available: Johnson–Cousins B and V, 2MASS J, H, K, nd WISE W1 and W2.
+dust map by \citep{Schlegel_et_al_98} as a last resort. For LC modeling we
+calculate difference it \tess{} magnitudes of the sources, and SED constraints
+will be based on whichever of the following magnitudes are available:
+Johnson–Cousins B and V, 2MASS J, H, K, nd WISE W1 and W2.
 
 In order to build a model, we need the radii of the primary and secondary stars,
 their extinction and reddening corrected apparent magnitudes, and a limb
 darkening model. Without radial velocity observations, the masses of the stars
-are not constrained, because the lightcurve depends only on orbital period,
+are not constrained, because the LC depends only on orbital period,
 eccentricity, and orientation, the ratio of radii, and the semimajor axis to
 primary radius ratio. In order to compensate for the lack of radial velocity
 data, we will instead rely on stellar evolution models to convert the two
 stellar masses, and common age and metallicity for a binary to radii and
-absolute magnitudes in the \tess{} bandpass for lightcurve modeling, and other
+absolute magnitudes in the \tess{} bandpass for LC modeling, and other
 bandpasses for SED modeling (see above). In particular, we will use isochrones
 generated using the Padova and Trieste Stellar Evolutionary Code
 \citep{Bressan_et_al_12, Chen_et_al_14, Chen_et_al_15, Tang_et_al_14,
@@ -209,7 +211,7 @@ observations rather than using theoretical models.
 %
         \toprule
 %
-        $M_1$, $M_2$ & Masses of the two stars\\
+        $M_1 + M_2, \frac{M_2}{M_1}$ & Sum and ratio of stellar masses\\
 %
         $\tau, \left[\frac{Fe}{H}\right]$ & $\log_{10}$(Age) and metallicity of
         the binary\\
@@ -218,26 +220,146 @@ observations rather than using theoretical models.
 %
         $c_i, s_j,\ i,j\in\{1,2\}$ & Coefficients of the phase curve model\\
 %
-        $f_0$ & Flux zero-point\\
+        $P_{orb}, i$ & Orbital period and inclination\\
 %
-        $P_{orb}, e, i, \omega$ & \makecell{Orbital period, eccentricity,
-        inclination,\\ and longitude of periapsis}\\
+        $e\sin\omega, e\cos\omega$ & $e$-eccentricity, $\omega$-longitude of
+        periapsis\\
 %
         d, E(B-V) & Distance to EB and reddening\\
 %
-        \makecell{$\sigma_{SED,sys}, \sigma_{LC,sys}$,\\$\sigma_d,
-        \sigma_{E(B-V)}$} & Floating uncertainties (see text)
+        $f_0$ & Flux zero-point\\
+%
+        \makecell{$\sigma_{SED,sys}, \sigma_{LC,sys}$,\\$\sigma_{E(B-V)}$} &
+        Floating uncertainties (see text)
 %
     \end{tabular}
 %
 \end{wraptable}
 %
-As described above, a full model of the lightcurves and SED requires specifying
-23 parameters: Table \ref{tab:mcmc_params}.
+In defining the likelihood function to use for Bayesian Analysis, we will follow
+\citep{Windemuth_et_al_19} and allow for additional systematic uncertainties in
+the LC and the SED on top of the literature values, and allow the reddening
+uncertainty to be determined from the data rather than attempting to derive a
+formal estimate. Altogether, our complete model has 22 parameters, listed in
+Table \ref{tab:mcmc_params}. We use sum and ratio of masses, as well as
+eccentricity components instead of eccentricity and longitude of periapsis in
+order to reduce the correlation between the sampling parameters.
+
+Our likelihood function ($L$) is identical to Eq. 3 of of
+\citep{Windemuth_et_al_19}, but we use a more complete model for the LC and SED
+to evaluate it. To within a normalization constant:
+%
+\begin{multline*}
+%
+    -2 \ln L
+%
+    =
+%
+    \sum_{i} \left(
+%
+        \frac{ \Delta \mathrm{LC}_i^2 }{ \sigma_{\mathrm{LC},i}^2 +
+        \sigma_{\mathrm{LC}, sys}^2 }
+%
+        +
+%
+        \ln\left(\sigma_{\mathrm{LC},i}^2 + \sigma_{\mathrm{LC}, sys}^2\right)
+%
+    \right)\\
+%
+    +
+%
+    \sum_{j} \left(
+%
+        \frac{ \Delta \mathrm{SED}_j^2 }{ \sigma_{\mathrm{SED},j}^2 +
+        \sigma_{\mathrm{SED}, sys}^2 }
+%
+        +
+%
+        \ln\left(\sigma_{\mathrm{SED},j}^2 + \sigma_{\mathrm{SED}, sys}^2\right)
+%
+    \right)
+%
+    +
+%
+    \left(\frac{\Delta E(B-V)}{\sigma_{E(B-V)}}\right)^2
+%
+    +
+%
+    \ln\sigma_{E(B-V)}^2
+%
+\end{multline*}
+%
+where $\Delta \mathrm{LC}$, $\Delta \mathrm{SED}$, and $\Delta E(B-V)$ are the
+residuals of the LC, SED, and reddening respectively. Adding the $\ln\sigma^2$
+terms ensures that even though uncertainties are allowed to float, the best fit
+solution along with the intuitive estimates for the floating uncertainty
+maximizes the likelihood.
+
+Also following \citep{Windemuth_et_al_19}, we will use Gaussian priors on $d$
+and $E(B-V)$, uniform priors on all other parameters, and additional factors of
+$1/e$ and $10^\tau$ to convert uniform priors on $e\cos\omega$, $e\sin\omega$,
+and $\tau$ to uniform in $e$, $\omega$, and age.
+
+MCMC sampling will be performed using the \texttt{emcee} affine invariant
+ensemble sampler \citep{Foreman-Mackey_et_al_13}, and convergence will be
+determined using autocorrelation times for the model parameters as well as a
+procedure based on \citep{Raftery_Lewis_91} adapted specifically for
+\texttt{emcee} by \citep{Patel_Penev_22} for ensuring quantiles of the
+distribution have converged and are estimated to specified precision.
 
 \subsection{Physical Parameter Validation}
 %
 \label{sec:params_validation}
+
+A battery of validations was already performed for stamp data by
+\citep{Prsa_et_al_22}, who provide our input list of targets for analysis. These
+tests include:
+%
+\begin{description}
+%
+    \item[Centroid motion:] A test of whether the centroid of the target shifts
+        during eclipses, indicating the target may not be the cause of the
+        dimming or the presence of significant additional light.
+%
+    \item[Contamination:] A measure of the light from nearby stars contributing
+        to the target lightcurve.
+%
+    \item[Out-of-transit variability:] The significance with which the expected
+        phase curve effects described in \refsec{params_lc_preparation} are
+        detected for short period EBs (no significant signal is expected at long
+        periods).
+%
+\end{description}
+%
+Along with checking whether the target is a known EB, or has been flagged by the
+TESS transit search pipeline. We will adapt the three tests listed above for FFI
+lightcurves.
+
+We will also carry out three additional validation steps:
+
+\begin{description}
+%
+    \item[\texttt{PHOEBE}:] We will generate a \texttt{PHOEBE} model for each
+        binary using the maximum likelihood parameters from MCMC to check if the
+        LC is consistent and whether the phase curve parameters ($c_i, s_j$ in
+        Table \ref{tab:mcmc_params}) are of the right order of magnitude. We
+        will also use gradient descent starting from the MCMC maximum likelihood
+        parameters to find maximum likelihood parameters for \texttt{PHOEBE}
+        based modeling to check if the simplified treatment decribed above
+        introduces a significant bias in the parameters.
+%
+    \item[Comparison to \citep{Windemuth_et_al_19} \kepler{} EBs:] We will
+        analyze a representative sample of \kepler{} LCs and comparing results
+        to \citep{Windemuth_et_al_19} to validate our algorithms. Additionally,
+        find overlapping detections allowing comparison of our results against
+        independent analysis applied on independent data
+%
+    \item[Comparison to \citep{Justesen_Albrecht_21} \tess{} EBs:] We will
+        compare our results against the \citep{Justesen_Albrecht_21} EBs from
+        the first year of \tess{}.
+
+%
+\end{description}
 
 \subsection{Determining Spins}
 %
