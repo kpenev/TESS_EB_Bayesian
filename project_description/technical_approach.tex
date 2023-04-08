@@ -47,21 +47,21 @@ will be flagged for manual inspection and potentially re-analysis based on
 appropriately prepared SAP LC (e.g. using the \texttt{Lightkurve} package
 \citep{Lightkurve_18}).
 
-For FFIs, we will use the Quick Look Pipeline (QLP) LCs
-\citep{Huang_et_al_20a, Huang_et_al_20b, Kunimoto_et_al_21, Kunimoto_et_al_22}.
-Those also come in two flavors: with and without detrending. The QLP authors
-themselves caution that the detrending procedure will significantly affect low
-frequency signals. Hence, we begin with non-detrended LCs, and adapt the
-QLP detrending procedure for our application by modifying their high-pass filter
-to preserve signals at or below the orbital frequency and applying the
-detrending as part of MCMC after subtracting the EB model LC (see
-\refsec{params_bayesian_analysis}). To preserve modulations on the orbital
-frequency or faster, we need to modify the minimum spacing allowed between the
-smoothing spline nodes used for detrending to match the orbit. The rest of the
-detrending procedure of the QLP will be preserved. It should be noted that the
-exact detrending used will not preclude detecting the high signal to noise EBs
-we are targeting. In fact, the yield estimates from \refsec{catalog_size} are
-based on a search \citep{Prsa_et_al_22} that applied no detrending.
+For FFIs, we will use the Quick Look Pipeline (QLP) LCs \citep{Huang_et_al_20a,
+Huang_et_al_20b, Kunimoto_et_al_21, Kunimoto_et_al_22}.  Those also come in two
+flavors: with and without detrending. The QLP authors themselves caution that
+the detrending procedure will significantly affect low frequency signals. Hence,
+we begin with non-detrended LCs, and adapt the QLP detrending procedure for our
+application by modifying their high-pass filter to preserve signals at or below
+the orbital frequency and applying the detrending as part of the MCMC (see
+\refsec{params_bayesian_analysis}) after subtracting the EB model LC. To
+preserve modulations on the orbital frequency or faster, we need to modify the
+minimum spacing allowed between the smoothing spline nodes used for detrending
+to match the orbit. The rest of the detrending procedure of the QLP will be
+preserved. It should be noted that the exact detrending used will not preclude
+detecting the high signal to noise EBs we are targeting. In fact, the yield
+estimates from \refsec{catalog_size} are based on a search \citep{Prsa_et_al_22}
+that applied no detrending.
 
 The first step in our analysis will be to select candidate EB LCs. For stamp
 targets, \citep{Prsa_et_al_22} already conducted a thorough search, combining
@@ -103,16 +103,6 @@ with several tens of thousands of candidates.  All surviving EBs will be
 subjected to full analysis and included in the final catalog, but we will
 manually vet the 5\,000 -- 10\,000 with tightest constraints to produce a
 sub-catalog of highly reliable EBs.
-
-\hl{For each LC selected for full analysis, we will suppress variability on
-    timescales longer than the orbital period (determined from the maximum
-    likelihood optimization above). We will experiment with two approaches:
-    median filter with window equal to the orbital period after masking the
-    eclipses and folding the LC at the orbital period and median filtering with
-    a window width 1\% or less of the primary or secondary eclipse duration,
-    whichever is smaller. The filtering and maximum likelihood will be applied
-iteratively to find an orbital period that maximizes the likelihood of the
-filtered LC.}
 
 \subsubsection{Lightcurve and Spectral Energy Distribution Modeling Modeling}
 %
@@ -201,10 +191,6 @@ observations rather than using theoretical models.
 %
     \vspace{-\baselineskip}
 %
-    \caption{Model parameters sampled during MCMC}
-%
-    \label{tab:mcmc_params}
-%
     \begin{tabular}{cl}
 %
         \textbf{Parameter} & \textbf{Description}\\
@@ -233,6 +219,10 @@ observations rather than using theoretical models.
         Floating uncertainties (see text)
 %
     \end{tabular}
+%
+    \caption{Model parameters sampled during MCMC \vspace{-\baselineskip}}
+%
+    \label{tab:mcmc_params}
 %
 \end{wraptable}
 %
@@ -295,6 +285,14 @@ terms ensures that even though uncertainties are allowed to float, the best fit
 solution along with the intuitive estimates for the floating uncertainty
 maximizes the likelihood.
 
+As already mentioned in \refsec{params_lc_preparation}, when analyzing FFIs, we
+will calculate $\Delta \mathrm{LC}$ by first subtracting the LC model for a
+given sample, and then applying the QLP detrending procedure. This approach
+guards against the detrending potentially modifying the EB LC modulations. Since
+the detrending procedure is much less computationally intensive than building
+the LC model, this will not significantly increase the required computing
+resources.
+
 Also following \citep{Windemuth_et_al_19}, we will use Gaussian priors on $d$
 and $E(B-V)$, uniform priors on all other parameters, and additional factors of
 $1/e$ and $10^\tau$ to convert uniform priors on $e\cos\omega$, $e\sin\omega$,
@@ -307,59 +305,91 @@ procedure based on \citep{Raftery_Lewis_91} adapted specifically for
 \texttt{emcee} by \citep{Patel_Penev_22} for ensuring quantiles of the
 distribution have converged and are estimated to specified precision.
 
-\subsection{Physical Parameter Validation}
+\subsection{Physical Parameter Validation and Determining Selection Effects}
 %
 \label{sec:params_validation}
 
 A battery of validations was already performed for stamp data by
 \citep{Prsa_et_al_22}, who provide our input list of targets for analysis. These
 tests include:
-%
-\begin{description}
-%
-    \item[Centroid motion:] A test of whether the centroid of the target shifts
-        during eclipses, indicating the target may not be the cause of the
-        dimming or the presence of significant additional light.
-%
-    \item[Contamination:] A measure of the light from nearby stars contributing
-        to the target lightcurve.
-%
-    \item[Out-of-transit variability:] The significance with which the expected
-        phase curve effects described in \refsec{params_lc_preparation} are
-        detected for short period EBs (no significant signal is expected at long
-        periods).
-%
-\end{description}
-%
+
+\textit{\underline{Centroid motion:}} A test of whether the centroid of the
+target shifts during eclipses, indicating the target may not be the cause of the
+dimming or the presence of significant additional light.
+
+\textit{\underline{Contamination:}} A measure of the light from nearby stars
+contributing to the target lightcurve.
+
+\textit{\underline{Out-of-transit variability:}} The significance with which the
+expected phase curve effects described in \refsec{params_lc_preparation} are
+detected for short period EBs (no significant signal is expected at long
+periods).
+
 Along with checking whether the target is a known EB, or has been flagged by the
 TESS transit search pipeline. We will adapt the three tests listed above for FFI
 lightcurves.
 
 We will also carry out three additional validation steps:
 
-\begin{description}
-%
-    \item[\texttt{PHOEBE}:] We will generate a \texttt{PHOEBE} model for each
-        binary using the maximum likelihood parameters from MCMC to check if the
-        LC is consistent and whether the phase curve parameters ($c_i, s_j$ in
-        Table \ref{tab:mcmc_params}) are of the right order of magnitude. We
-        will also use gradient descent starting from the MCMC maximum likelihood
-        parameters to find maximum likelihood parameters for \texttt{PHOEBE}
-        based modeling to check if the simplified treatment decribed above
-        introduces a significant bias in the parameters.
-%
-    \item[Comparison to \citep{Windemuth_et_al_19} \kepler{} EBs:] We will
-        analyze a representative sample of \kepler{} LCs and comparing results
-        to \citep{Windemuth_et_al_19} to validate our algorithms. Additionally,
-        find overlapping detections allowing comparison of our results against
-        independent analysis applied on independent data
-%
-    \item[Comparison to \citep{Justesen_Albrecht_21} \tess{} EBs:] We will
-        compare our results against the \citep{Justesen_Albrecht_21} EBs from
-        the first year of \tess{}.
+\textit{\underline{\texttt{PHOEBE}}:} We will generate a \texttt{PHOEBE} model
+for each binary using the maximum likelihood parameters from MCMC to check if
+the LC is consistent and whether the phase curve parameters ($c_i, s_j$ in Table
+\ref{tab:mcmc_params}) are of the right order of magnitude. We will also use
+gradient descent starting from the MCMC maximum likelihood parameters to find
+maximum likelihood parameters for \texttt{PHOEBE} based modeling to check if the
+simplified treatment described above introduces a significant bias in the
+parameters.
 
-%
-\end{description}
+\textit{\underline{Comparison to \citep{Prsa_et_al_22} \tess{} EBs:}} We will
+use the \citep{Prsa_et_al_22} EBs for the list of targets to analyze from the
+\tess{} stamp data. Since they applied a very different analysis algorithm than
+we propose and analyzed non-detrended lightcurves, comparing the binary
+parameters will serve to validate our analysis and highlight potential pitfalls
+we may need to address once confronted with the full dataset. This will also
+allow us to gauge the improvement resulting from doubling or tripling the number
+of observations.
+
+\textit{\underline{Comparison to \citep{Justesen_Albrecht_21} \tess{} EBs:}}
+Another direct comparison between results from  identical We will compare our
+results against the \citep{Justesen_Albrecht_21} EBs from the first year of
+\tess{}. This will be another valuable test of our approach, since these authors
+built their LC model without reference to stellar evolution, and included
+stellar evolution and SED modeling as a post-processing step.
+
+\textit{\underline{Comparison to \citep{Windemuth_et_al_19} \kepler{} EBs:}}
+This will be the most stringent validation of our results. We will analyze a
+representative sample of \kepler{} LCs and comparing results to
+\citep{Windemuth_et_al_19} to validate our algorithms. Additionally, we will
+find overlapping detections allowing comparison of our results against
+independent analysis applied on independent data.
+
+These comparisons will be performed both for the stamp and the FFI EBs we will
+analyze. They will allow robust determination of the reliability of the proposed
+analysis and serve to quantify the completeness and the selection effects our
+processing imposes on the final collection.
+
+Since the \citep{Windemuth_et_al_19} \kepler{} EBs are based on observations
+much better time coverage and photometric precision, comparison against the
+latter dataset is the best option to empirically constrain the sensitivity of
+our EB detection procedure allowing the resulting catalog to be used for
+statistical studies of EB populations. In order to facilitate that, we will
+maintain a flag for each binary in the final catalog of whether it was selected
+as a candidate by the automated selection algorithm described in
+\refsec{params_lc_preparation} and also provide as a separate data product the
+disposition of each LC according to the automated search (whether selected for
+analysis or not), as well as flags for the subsequent rejection steps employed.
+
+Fully characterizing the completeness of the proposed analysis is beyond the
+scope of this proposal. It would require detailed injection-recovery simulations
+in a carefully prepared collection of lightcurves of non-binary stars with very
+similar astrophysical variability and instrumental effects as the true binary
+population in the \tess{} sample (not the one we detect). Such an effort will be
+on par with the work already described above and may be pursued in future
+proposals if it can be justified. However, we will make every effort to
+facilitate such characterization by other groups. In our data management plan
+(\refsec{dmp}) we describe how we will ensure all our steps are easily
+reproducible by independent scientists with very minimal effort, allowing them
+to build a proper injection-recovery pipeline if desired.
 
 \subsection{Determining Spins}
 %
