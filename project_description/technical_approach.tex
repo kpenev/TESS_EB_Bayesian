@@ -399,6 +399,23 @@ to build a proper injection-recovery pipeline if desired.
 %
 \label{sec:spin_lc_preparation}
 
+For detecting rotational modulation from high cadence stamp-based photometry, we
+will follow many successful analyses in the literature which have all concluded
+that the best approach is to use PDC detrended LCs. For FFI based LCs however,
+the QLP detrending is likely to eliminate the rotational variability if the spin
+period exceeds 10 days or so. As a result, we will use the raw lightcurves, but
+apply a battery of validation tests to reject false signals (see
+\refsec{spin_validation}). Preliminary tests show that the proposed validations
+successfully reject the vast majority of false signals.
+
+As each bright (T<13.5) stamp target will also have a QLP lightcurve, comparing
+to the spins from PDC detrended stamp LCs to those of the same stars from FFIs
+will provide a precise and accurate measurement of the false alarm rate. If that
+is high in spite of the many validations, we will re-introduce the QLP
+detrending but just like for the EB physical parameter analysis, modified to
+preserve frequencies up to a limit. The limit will be tuned to the highest value
+that achieves acceptably low false alarm rate.
+
 \subsection{Candidate Selection and Spin Period Measurements}
 %
 \label{sec:spin_search_and_measurement}
