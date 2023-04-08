@@ -283,7 +283,8 @@ where $\Delta \mathrm{LC}$, $\Delta \mathrm{SED}$, and $\Delta E(B-V)$ are the
 residuals of the LC, SED, and reddening respectively. Adding the $\ln\sigma^2$
 terms ensures that even though uncertainties are allowed to float, the best fit
 solution along with the intuitive estimates for the floating uncertainty
-maximizes the likelihood.
+maximizes the likelihood. Also following \citep{Windemuth_et_al_19}, we will use
+Gaussian priors on $d$ and $E(B-V)$, uniform priors on all other parameters.
 
 As already mentioned in \refsec{params_lc_preparation}, when analyzing FFIs, we
 will calculate $\Delta \mathrm{LC}$ by first subtracting the LC model for a
@@ -292,11 +293,6 @@ guards against the detrending potentially modifying the EB LC modulations. Since
 the detrending procedure is much less computationally intensive than building
 the LC model, this will not significantly increase the required computing
 resources.
-
-Also following \citep{Windemuth_et_al_19}, we will use Gaussian priors on $d$
-and $E(B-V)$, uniform priors on all other parameters, and additional factors of
-$1/e$ and $10^\tau$ to convert uniform priors on $e\cos\omega$, $e\sin\omega$,
-and $\tau$ to uniform in $e$, $\omega$, and age.
 
 MCMC sampling will be performed using the \texttt{emcee} affine invariant
 ensemble sampler \citep{Foreman-Mackey_et_al_13}, and convergence will be
@@ -334,10 +330,12 @@ We will also carry out three additional validation steps:
 \textit{\underline{\texttt{PHOEBE}}:} We will generate a \texttt{PHOEBE} model
 for each binary using the maximum likelihood parameters from MCMC to check if
 the LC is consistent and whether the phase curve parameters ($c_i, s_j$ in Table
-\ref{tab:mcmc_params}) are of the right order of magnitude. We will also use
-gradient descent starting from the MCMC maximum likelihood parameters to find
-maximum likelihood parameters for \texttt{PHOEBE} based modeling to check if the
-simplified treatment described above introduces a significant bias in the
+\ref{tab:mcmc_params}) are of the right order of magnitude. If not manual
+inspection will be performed to determine if this is falsely selected target or
+perhaps a genuine EB with rotational modulattions due to a synchronously
+spinning primary star. We will also use gradient descent starting from the MCMC
+maximum likelihood parameters to find maximum likelihood parameters for
+\texttt{PHOEBE} based modeling to check if our treatment introduces bias in the
 parameters.
 
 \textit{\underline{Comparison to \citep{Prsa_et_al_22} \tess{} EBs:}} We will
@@ -414,11 +412,125 @@ will provide a precise and accurate measurement of the false alarm rate. If that
 is high in spite of the many validations, we will re-introduce the QLP
 detrending but just like for the EB physical parameter analysis, modified to
 preserve frequencies up to a limit. The limit will be tuned to the highest value
-that achieves acceptably low false alarm rate.
+that achieves appropriately low false alarm rate.
+
+Searching for periodic signals in EB LCs, indicative of rotational modulation,
+needs to overcome the fact that the eclipses are likely going to be by far the
+dominant periodic signal, and for short period binaries the phase curve effects
+(\refsec{params_lc_sed_modeling}) will also introduce periodicities. Each EB
+lightcurve will be prepared in two different ways, each of which will be
+subected to the three period search methods below to produce six versions of the
+periodogram to serve as each other's cross checks (see
+\refsec{spin_search_and_measurement}). The first method will simply mask out the
+eclipses using the maximum likelihood model from above with appropirate padding
+based on the uncertanties. For long period binaries, where phase curve effects
+are negligible, this will produce lightcurves that simply combine the light of
+two (approximately) isolated stars. The second mothod will subtract the maximum
+likelihood LC model for the binary. This has the advantage of suppressing all
+binary effects from the lightcurve, however the maximum likelihood parameters
+will not be exactly equale to the actual physical parameters and hence small
+residuals are likely to remain in the LC. We will account for this when
+determining the significance to which a potential spin signal is detected by
+sampling EB LC models corresponding to the MCMC samples (see
+\refsec{spin_search_and_measurement}).
 
 \subsection{Candidate Selection and Spin Period Measurements}
 %
 \label{sec:spin_search_and_measurement}
+
+Finding EBs exhibiting rotational modulations and measuring their spin will rely
+on three independent analyses, each applied to two differently prepared versions
+of the LC (see \refsec{spin_lc_preparation}):
+
+\textit{\underline{The autocorrelation functoin (ACF)}} calculates the
+correlation of the lightcurve with a time shifted version of itself vs. the time
+shift. We will apply the smoothing procedure used by \citep{McQuillan_et_al_13,
+Lurie_et_al_17}, where the ACF is convolved with a Gaussian to smooth out high
+frequency noise. The first peak of the ACF usually corresponds to the rotation
+period, or in rare cases of approximately diametrically opposed (groups of)
+spots half the period. In the latter case the second peak usually has higher
+amplitude. Subsequent peaks of decreasing amplitude occur at integer multiples
+of the spin period. The ACF only measures self-similarity in the LC. As a result
+it remains reliable in the face of gradual changes in the amplitude and period
+of the rotational modulation (as the star spot pattern on the stellar surface
+evolves).  \citep{McQuillan_et_al_13} also argue the highest peak of the ADF is
+a more robust measure of the true spin period than LSP (see below), which may
+produce a higher peak at a multiple of the period if multiple spots (or groups
+of spots) are present.
+
+\textit{\underline{The Lomb-Scargle Periodogram (LSP)}} can be thought of
+as least squares fit for the amplitude of a signal of a single frequency as a
+function of the frequency. LSP have an advantage over ACF in that the are much
+more sensitive to multiple rotation period signals (e.g. from the two stars, or
+from differential rotation on one star). We will follow the procedure of
+\citep{Rappaport_et_al_14, Lurie_et_al_17} for identifying multiple rotation
+periods. Describing the procedure in detail in a page limited proposal is
+impractical, but roughly, groups of peaks are identified after smoothing the
+periodogram, and sub-peaks are identified in an appropriately defined
+neighborhood of each peak group. Conditions are imposed on the peak heights to
+select only significant peaks.
+
+\textit{\underline{The Wavelet Transform (WT) and global wavelet spectrum
+(GWS)}} is a method to estimate the power spectrum of a signal as a function of
+time (see for example \citep{Grossmann_Morlet_84}), producing wavet maps giving
+the spectral power vs frequency and time. Because WT is time depnedent, it is
+robust against the pattern of spots on the stellar surface evolving with time.
+It is also a powerful techniques for correctly distinguishing the true rotation
+period vs its aliases in the presence of multiple dark features on the surface
+\citep{Bravo_et_al_14}. Finally, integrating the wavelet map over time gives us
+another periodogram, known as the GWS, the peaks of which can be directly
+compared to the ACF and LSP in an automated fashion, and like the LSP it is
+sensitive to multiple periods present in the lightcurve.
+
+We will begin the spin analysis by calculating ACF, LSP, and GWS as descibed
+above. For the stamp EBs, it is feasible to examine all LCs manually (per
+\refsec{catalog_size} we expect fewer than 2\,000 targets) and we plan to do so
+in order to get a thorough understanding of the systematics, false positives,
+and other features of the data. For FFIs however, where we expect up to few
+$\times10^4$ targets, we will apply automated pre-selection to reduce the number
+of targets for visual inspection.
+
+For the smoothed ACF we will eliminate any targets showing monotonic decrease
+for periods shorter than 20d for targets for which \tess{} sectors do not
+overlap, and 30d if at least two consecutive sectors contirubet observations for
+that target. As a sector is observed for 27 days, it is very unlikely that
+periods beyond these cutoffs would be reliably detected. We will also eliminate
+ACF for which the peak pattern changes dramatically between the two methods for
+eliminating the binary effects described above. For targets sulviving this
+initial cut, we will calculate a bootstrap false alarm probability by randomly
+shuffling the LC points, and for ACF calculated from LC from which a full EB
+model was subtracted, also using randomly selected samples of binary parameters
+and calculating the fraction of these randomly realized LCs for which the most
+prominent peak exceeds the prominence in the original ACF.
+
+LSP has a formally defined false alarm probability for peaks of given height,
+which we will use to drop low significance peaks from manual review, considering
+only peaks within the period cutoffs mentioned above. We will also eliminate
+peaks for which the false alarm rate differs too much between the two methods
+for removing the binary signal. While not all the assumptions behing calculating
+the false alarm rate are satisfied for our LCs, it is a lower limit to the real
+rate so this will preserve all high significance signals.
+
+WT, will be calculated only for systems passing one of the above two tests. If
+the candidate peroid from the above is not detected in the GWS, the system will
+also be discarded. Surviving systems will be flagged for manual review.
+
+The entire automated analysis above will be performed separately for each
+contiguous portion of the LC, as well as the entire LC combining all available
+observations. For example all consecutive sectors during year 1 contributing
+points for a target will be analyzed separately from consecutive sectors in year
+3, and then all observations will be analyzed together. A target will continue
+to manual review if it survives the rejection process for at least one of these.
+
+During manual review, we will discard systems where the variability does not
+appear to be caused by spot modulations (see Fig. 1 of \ref{Lurie_et_al_17} for
+example LCs showing several different kinds of periodic variability). During the
+manual review, we will also manually flag systems for which the automated period
+determination has erroneously selected an alias of the period. The final catalog
+will include the periods detected by all analyses of all versions of the
+lightcurve, including the multiple peak groups and sub-periods from LSP or WT
+which have been interpreted as indicative of differential rotation or rotations
+of both stars \citep{Rappaport_et_al_14, Reinhold_Gizon_15, Lurie_et_al_17}.
 
 \subsection{Validating Measured Spins}
 %

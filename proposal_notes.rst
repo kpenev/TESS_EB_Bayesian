@@ -478,7 +478,7 @@ Methodology:
 
   * Options for dealing with binary effects:
 
-    * Mask out eclipses: still leaves phase curve effectsat orbital frequency
+    * Mask out eclipses: still leaves phase curve effects at orbital frequency
 
     * Subtract full orbital model
 
