@@ -458,8 +458,8 @@ a more robust measure of the true spin period than LSP (see below), which may
 produce a higher peak at a multiple of the period if multiple spots (or groups
 of spots) are present.
 
-\textit{\underline{The Lomb-Scargle Periodogram (LSP)}} can be thought of
-as least squares fit for the amplitude of a signal of a single frequency as a
+\textit{\underline{The Lomb-Scargle Periodogram (LSP)}} can be thought of as
+least squares fit for the amplitude of a signal of a single frequency as a
 function of the frequency. LSP have an advantage over ACF in that the are much
 more sensitive to multiple rotation period signals (e.g. from the two stars, or
 from differential rotation on one star). We will follow the procedure of
@@ -467,8 +467,8 @@ from differential rotation on one star). We will follow the procedure of
 periods. Describing the procedure in detail in a page limited proposal is
 impractical, but roughly, groups of peaks are identified after smoothing the
 periodogram, and sub-peaks are identified in an appropriately defined
-neighborhood of each peak group. Conditions are imposed on the peak heights to
-select only significant peaks.
+neighborhood of each peak group. Conditions are imposed on the peak prominence
+(height relative to the adjacent minima) to select only significant peaks.
 
 \textit{\underline{The Wavelet Transform (WT) and global wavelet spectrum
 (GWS)}} is a method to estimate the power spectrum of a signal as a function of
@@ -486,9 +486,13 @@ We will begin the spin analysis by calculating ACF, LSP, and GWS as descibed
 above. For the stamp EBs, it is feasible to examine all LCs manually (per
 \refsec{catalog_size} we expect fewer than 2\,000 targets) and we plan to do so
 in order to get a thorough understanding of the systematics, false positives,
-and other features of the data. For FFIs however, where we expect up to few
-$\times10^4$ targets, we will apply automated pre-selection to reduce the number
-of targets for visual inspection.
+and other features of the data and to tweak the automated procedure described
+below if necessary. For FFIs however, where we expect up to few $\times10^4$
+targets, we will apply automated pre-selection to reduce the number of targets
+for visual inspection. The same procedure will be applied to the stamp LCs and
+the results will be added to the catalog, but for those, we will manually
+examine the results of the three analyses methods combined with the different LC
+versions regardless of whether the target passes the automated selection.
 
 For the smoothed ACF we will eliminate any targets showing monotonic decrease
 for periods shorter than 20d for targets for which \tess{} sectors do not
@@ -509,7 +513,8 @@ only peaks within the period cutoffs mentioned above. We will also eliminate
 peaks for which the false alarm rate differs too much between the two methods
 for removing the binary signal. While not all the assumptions behing calculating
 the false alarm rate are satisfied for our LCs, it is a lower limit to the real
-rate so this will preserve all high significance signals.
+rate so this will preserve all high significance signals. Surviving binaries
+will be subjected to the bootstrap procedure already described for ACF.
 
 WT, will be calculated only for systems passing one of the above two tests. If
 the candidate peroid from the above is not detected in the GWS, the system will
@@ -535,3 +540,34 @@ of both stars \citep{Rappaport_et_al_14, Reinhold_Gizon_15, Lurie_et_al_17}.
 \subsection{Validating Measured Spins}
 %
 \label{sec:spin_validation}
+
+There is already significant number of validation steps built into the procedure
+for selecting targets for manual inspection described above, ensuring only
+significant signals are reproted and that they are robust against the LC
+preparation and period measurement technique. The final manually examination of
+the ACF and periodograms, along side the LC itself will guard against other
+periodic signals being misstakenly interpreted as rotational modulaton.
+
+In addition, our automated procedure will be validated against the
+\citep{CantoMartins_et_al_20} analysis of 1\,000 TOIs which resulted in the
+detection of 287 stars with unambiguous rotation. While these stars are not EBs,
+comparison of the results will test all steps except the EB modulation removal
+and will help us fine-tune various rejection thresholds and other parameters in
+the processing before applying it to the orders of magnitude larger datatests we
+will target.
+
+We will also directly compare the rotation periods detected by us to the
+\citep{Lurie_et_al_17} EB spin detections using \kepler{} LCs, which will
+overlap with our detections for their brightest targets. <++> of the Lurie EB
+spins are brighter than <++> and have spin periods < 13.5 days, all of these
+should be detectable by our analysis. Since the \citep{Lurie_et_al_17} catalog
+is based on the much longer time coverage and much better photometric precision
+\kepler{} data, the comparsion will allow us to validate our precedures, period
+measurements, and will allow us to estimate the completeness of our calatog.
+
+We also expect to have a large number of common detections with
+\citep{Oelkers_et_al_18} who used KELT observations to detect stellar rotation.
+While they did not specifically target EBs, undoubtedly some of their
+$6.2\times10^4$ stars with ``likely'' rotation periods will correspond to our
+EBs. They specifically targetted sources from the \tess{} Input Catalog, so
+matching to our targes will be unambiguous.
