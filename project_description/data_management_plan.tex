@@ -19,10 +19,13 @@ Below we outline our plans for making the data and software products generated
 as part of this proposal long-term publicly accessible. We rely on well
 established repositories and dissemination mechanisms specifically designed for
 hosting scientific products long-term and broadly used by the astrophysics
-community. As the lead author on the articles, it will be the responsibility of
-the graduate student to implement the policy described below (with help from the
-PI) and the PI is responsible for verifying this plan is fully executed prior to
-the final publication of each article.
+community. We plan for articles to be submitted to the AAS Journals, they will
+be uploaded to the astro-ph arXiv immediately upon acceptance, as well as to the
+NASA PubSpace satisfying the requirement for articles to be publicly available
+at the time of publication. As the lead author on the articles, it will be the
+responsibility of the graduate student to implement the policy described below
+(with help from the PI) and the PI is responsible for verifying this plan is
+fully executed prior to the final publication of each article.
 
 \subsection{Analysis Results}
 %
@@ -36,16 +39,17 @@ parameter catalogs will be accompanied by an archive of appropriately thinned
 and burn-in discarded MCMC samples. In order to remain consistent with
 \citep{Windemuth_et_al_19}, which is the most similar catalog of EB physical
 parameters in the literature, but based on \kepler{} data we will host all
-products of this research as zenodo \citep{<++>} datasets linked with the
-article and software. In addition, consistent with prior spin catalogs (e.g.
-\citep{<++>}), all products except the MCMC samples, including the EB physical
-parameters with error bars, will also be made available as VizieR \citep{<++>}
-records associated with the article. This will ensure that users wishing to
-perform combined analysis of similar existing catalogs to ours will be able to
-use the same input interface to access all relevant datasets. Datasets will be
-accompanied by detailed description of each column, including units. Both zenodo
-records get automatically assigned Digital Object Identifiers (DOI) and VizieR
-records are associated with an article hence also with a DOI.
+products of this research as zenodo \citep{zenodo} datasets linked with the
+article and software. In addition, consistent with all prior spin catalogs
+mentioned in this proposal (e.g.  \citep{Lurie_et_al_17, Oelkers_et_al_18,
+CantoMartins_et_al_20}), all products except the MCMC samples, including the EB
+physical parameters with error bars, will also be made available as VizieR
+\citep{vizier} records associated with the article. This will ensure that users
+wishing to perform combined analysis of similar existing catalogs to ours will
+be able to use the same input interface to access all relevant datasets.
+Datasets will be accompanied by detailed description of each column, including
+units. Both zenodo records get automatically assigned Digital Object Identifiers
+(DOI) and VizieR records are associated with an article hence also with a DOI.
 
 \textit{\underline{The two EB physical parameter catalogs}} will include: the
 TIC identifier for each EB; maximum likelihood value, 2.7-th percentile, 16-th
@@ -54,11 +58,11 @@ in Table \ref{tab:mcmc_params}; the absolute magnitudes interpolated from the
 stellar evolution models for each of the stars in the binary used for SED
 modeling; and the observed magnitudes the SED model was compared to. This
 amounts to a total of 152 floating point values and an integer (the TIC) for
-each EB. In ASCII CSV format, this amounts to a file of size  $<10$\,MB for the
-stamp-based EBs and $<200$\,MB for the FFI-based catalog uncompressed and at least
-a factor of 10 smaller when compressed, or a factor of two smaller if
-uncompressed binary format is used (e.g. a FITS table). These files are well
-within size limits for all the repositories mentioned above.
+each EB. In ASCII machine readable table format, this amounts to a file of size
+$<10$\,MB for the stamp-based EBs and $<200$\,MB for the FFI-based catalog
+uncompressed and at least a factor of 10 smaller when compressed, or a factor of
+two smaller if uncompressed binary format is used (e.g. a FITS table). These
+files are well within size limits for all the repositories mentioned above.
 
 \textit{\underline{The two EB spin catalogs}} will include: TIC identifier, the
 period, height, and prominence (height above surrounding minima) of each of the
@@ -85,9 +89,9 @@ for zenodo datasets and thus will pose no problem for public distribution.
 \label{sec:dmp_software}
 
 All software developed for this project will be installable as a python package
-using the \texttt{PIP} package installer \citep{<++>} for \texttt{Python}. Code
+using the \texttt{PIP} package installer \citep{pip} for \texttt{Python}. Code
 development will occur on GitHub, with documentation managed using the standard
-python documentation generator \texttt{SPHINX} \citep{<++>}. Documentation will
+python documentation generator \texttt{SPHINX} \citep{SPHINX}. Documentation will
 include full implementation documentation (using standard python docstrings),
 installation instructions, and detailed usage examples and explanations provided
 as \texttt{Jupyter} notebooks for fast and easy experimentation. All software
