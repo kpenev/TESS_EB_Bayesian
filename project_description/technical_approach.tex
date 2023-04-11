@@ -160,7 +160,7 @@ using the 3D galactic dust map by \citep{Green_et_al_19} as a backup, and the
 dust map by \citep{Schlegel_et_al_98} as a last resort. For LC modeling we
 calculate difference it \tess{} magnitudes of the sources, and SED constraints
 will be based on whichever of the following magnitudes are available:
-Johnson–Cousins B and V, 2MASS J, H, K, nd WISE W1 and W2.
+Johnson–Cousins B and V, 2MASS J, H, K, and WISE W1 and W2.
 
 In order to build a model, we need the radii of the primary and secondary stars,
 their extinction and reddening corrected apparent magnitudes, and a limb
@@ -197,6 +197,8 @@ observations rather than using theoretical models.
 %
         \toprule
 %
+        $t_0$ & Time of primary eclipse\\
+%
         $M_1 + M_2, \frac{M_2}{M_1}$ & Sum and ratio of stellar masses\\
 %
         $\tau, \left[\frac{Fe}{H}\right]$ & $\log_{10}$(Age) and metallicity of
@@ -230,7 +232,7 @@ In defining the likelihood function to use for Bayesian Analysis, we will follow
 \citep{Windemuth_et_al_19} and allow for additional systematic uncertainties in
 the LC and the SED on top of the literature values, and allow the reddening
 uncertainty to be determined from the data rather than attempting to derive a
-formal estimate. Altogether, our complete model has 22 parameters, listed in
+formal estimate. Altogether, our complete model has 23 parameters, listed in
 Table \ref{tab:mcmc_params}. We use sum and ratio of masses, as well as
 eccentricity components instead of eccentricity and longitude of periapsis in
 order to reduce the correlation between the sampling parameters.
@@ -325,7 +327,14 @@ Along with checking whether the target is a known EB, or has been flagged by the
 TESS transit search pipeline. We will adapt the three tests listed above for FFI
 lightcurves.
 
-We will also carry out three additional validation steps:
+We will also carry out four additional validation steps:
+
+\textit{\underline{Comparison between stamp and FFI results:}} As all stamps are
+also part of FFIs, an additional validation will be carried out by comparing the
+parameters extracted from stamps to those for the same targets using FFI LCs.
+This will serve as a test of our lightcurve preparation procedure allowing us to
+fine-tune our LC dentrending procedure and highlight differences in sensitivity
+to EB modulations between the two sets of LCs.
 
 \textit{\underline{\texttt{PHOEBE}}:} We will generate a \texttt{PHOEBE} model
 for each binary using the maximum likelihood parameters from MCMC to check if
@@ -385,9 +394,9 @@ population in the \tess{} sample (not the one we detect). Such an effort will be
 on par with the work already described above and may be pursued in future
 proposals if it can be justified. However, we will make every effort to
 facilitate such characterization by other groups. In our data management plan
-(\refsec{dmp}) we describe how we will ensure all our steps are easily
-reproducible by independent scientists with very minimal effort, allowing them
-to build a proper injection-recovery pipeline if desired.
+(\refsec{dmp_software}) we describe how we will ensure all our steps are easily
+reproducible by independent scientists with minimal effort, allowing them to
+build a proper injection-recovery pipeline if desired.
 
 \subsection{Determining Spins}
 %
@@ -544,9 +553,12 @@ of both stars \citep{Rappaport_et_al_14, Reinhold_Gizon_15, Lurie_et_al_17}.
 There is already significant number of validation steps built into the procedure
 for selecting targets for manual inspection described above, ensuring only
 significant signals are reproted and that they are robust against the LC
-preparation and period measurement technique. The final manually examination of
-the ACF and periodograms, along side the LC itself will guard against other
-periodic signals being misstakenly interpreted as rotational modulaton.
+preparation and period measurement technique. As descibed abeve, comparing spins
+from stamp-based LCs to FFI-based LCs will help determine the false alarm rate
+and completeness of our FFI spin catalog, and help us fine-tune detrending if
+deemed necessary. The final manually examination of the ACF and periodograms,
+along side the LC itself will guard against other periodic signals being
+misstakenly interpreted as rotational modulaton.
 
 In addition, our automated procedure will be validated against the
 \citep{CantoMartins_et_al_20} analysis of 1\,000 TOIs which resulted in the

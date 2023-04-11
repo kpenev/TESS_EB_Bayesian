@@ -6,6 +6,7 @@
 from os import path
 
 import numpy
+from astroquery.mast import Catalogs
 from astropy.io import fits
 import pandas
 from scipy import stats
@@ -93,6 +94,56 @@ def report_prsa_statistics(prsa_fname):
               (mode, (1-hemispheres[deep]).sum(), hemispheres[deep].sum()))
 
 
+def get_lurie_tic_info(lurie_fname, lurie_tic_fname):
+    """Return a pandas dataframe of TIC info for all Lurie sources."""
+
+    if path.exists(lurie_tic_fname):
+        return numpy.load(lurie_tic_fname)
+
+    with fits.open(lurie_fname, 'readonly') as lurie_f:
+        lurie_kic = lurie_f[1].data['KIC']
+
+    lurie_kic = lurie_kic[numpy.logical_and(lurie_kic != 9777987,
+                                            lurie_kic != 10879213)]
+
+    numpy_result = None
+    for row_i, kic_id in enumerate(lurie_kic):
+        tic_row = numpy.array(Catalogs.query_object('KIC' + str(kic_id),
+                                                    catalog='TIC',
+                                                    radius=1e-2)[0])
+        if numpy_result is None:
+            dtype = numpy.dtype([
+                (name, ('<U10' if name =='KIC' else tic_row.dtype[name]))
+                for name in tic_row.dtype.names
+            ])
+            numpy_result = numpy.empty(shape=lurie_kic.shape,
+                                       dtype=dtype)
+            print('Created result with dytpe: ' + repr(numpy_result.dtype))
+        numpy_result[row_i] = tic_row
+        if str(tic_row['KIC']) == '':
+            numpy_result[row_i]['KIC'] = numpy.array(str(kic_id))
+            print('Manually filling in KIC ID: %s -> %s'
+                  %
+                  (repr(kic_id), repr(numpy_result[row_i]['KIC'])))
+
+
+        if int(numpy_result[row_i]['KIC']) != kic_id:
+            print(
+                'Bad catalog result for KIC %d: %s -> %s' %
+                (
+                    kic_id,
+                    repr(tic_row['KIC']),
+                    repr(numpy_result[row_i]['KIC'])
+                )
+            )
+            exit(1)
+
+
+        print('Progress: %d/%d' % (row_i, lurie_kic.size), end='\n')
+
+    numpy.save(lurie_tic_fname, numpy_result)
+    return numpy_result
+
 def report_w19_precision(w19_fname):
     """Report the 1-sigma confidence interval for each W19 parameter."""
 
@@ -104,9 +155,12 @@ def main():
                          'data')
     fnames = dict(
         lurie=path.join(data_dir, 'lurie.fits'),
+        lurie_tic=path.join(data_dir, 'lurie_tic.npy'),
         w19=path.join(data_dir, 'w19_maxlike_pars.dat'),
         prsa=path.join(data_dir, 'prsa_ebs.fits')
     )
+    print(repr(get_lurie_tic_info(fnames['lurie'], fnames['lurie_tic'])))
+    exit(1)
     report_w19_lurie_crossmatch(fnames['lurie'], fnames['w19'])
     report_prsa_statistics(fnames['prsa'])
 

@@ -1,3 +1,105 @@
 \fancysection{Open Science and Data Management Plan}
 %
 \label{sec:dmp}
+
+%Open Science and Data Management Plan that clearly describes the final products
+%of the investigation, and how those products will be made available to the
+%community. Although not strictly required, the use of open-source code in
+%developing tools/algorithms as part of an ADAP investigation is strongly
+%encouraged. The public release of those tools/algorithms is required (see last
+%bullet in Section 1.1 and links therein). If the products are to be ingested
+%and curated at an existing astrophysics archive (see list in Section 1.2
+%above), the cost of any required support for the proposed activity from the
+%relevant archive must be included in the proposal budget. Proposers are also
+%strongly encouraged to include a letter of acknowledgement from the NASA
+%archive in the separate “Expertise and Resources Not Anonymized” document (see
+%Section 2).
+
+Below we outline our plans for making the data and software products generated
+as part of this proposal long-term publicly accessible. We rely on well
+established repositories and dissemination mechanisms specifically designed for
+hosting scientific products long-term and broadly used by the astrophysics
+community. As the lead author on the articles, it will be the responsibility of
+the graduate student to implement the policy described below (with help from the
+PI) and the PI is responsible for verifying this plan is fully executed prior to
+the final publication of each article.
+
+\subsection{Analysis Results}
+%
+\label{sec:dmp_results}
+
+The primary result of this effort will be 4 catalogs: physical parameters of EBs
+from stamp and FFI based LCs and spin measurements for the EBs in each of the
+two catalogs. In addition, in order to provide the fully characterized
+uncertainty distribution of the extracted physical parameters, the two physical
+parameter catalogs will be accompanied by an archive of appropriately thinned
+and burn-in discarded MCMC samples. In order to remain consistent with
+\citep{Windemuth_et_al_19}, which is the most similar catalog of EB physical
+parameters in the literature, but based on \kepler{} data we will host all
+products of this research as zenodo \citep{<++>} datasets linked with the
+article and software. In addition, consistent with prior spin catalogs (e.g.
+\citep{<++>}), all products except the MCMC samples, including the EB physical
+parameters with error bars, will also be made available as VizieR \citep{<++>}
+records associated with the article. This will ensure that users wishing to
+perform combined analysis of similar existing catalogs to ours will be able to
+use the same input interface to access all relevant datasets. Datasets will be
+accompanied by detailed description of each column, including units. Both zenodo
+records get automatically assigned Digital Object Identifiers (DOI) and VizieR
+records are associated with an article hence also with a DOI.
+
+\textit{\underline{The two EB physical parameter catalogs}} will include: the
+TIC identifier for each EB; maximum likelihood value, 2.7-th percentile, 16-th
+percentile, 84-th percentile, and 97.3-rd percentile for each parameter listed
+in Table \ref{tab:mcmc_params}; the absolute magnitudes interpolated from the
+stellar evolution models for each of the stars in the binary used for SED
+modeling; and the observed magnitudes the SED model was compared to. This
+amounts to a total of 152 floating point values and an integer (the TIC) for
+each EB. In ASCII CSV format, this amounts to a file of size  $<10$\,MB for the
+stamp-based EBs and $<200$\,MB for the FFI-based catalog uncompressed and at least
+a factor of 10 smaller when compressed, or a factor of two smaller if
+uncompressed binary format is used (e.g. a FITS table). These files are well
+within size limits for all the repositories mentioned above.
+
+\textit{\underline{The two EB spin catalogs}} will include: TIC identifier, the
+period, height, and prominence (height above surrounding minima) of each of the
+periods identified by the period search algorithm for each of the analysis
+methods, as well flags indicating the result of the automated rotational
+modulation search and manual review. The resulting size of this catalog will be
+approximately 4 times smaller than the physical parameter catalog (we will
+provide results for each binary).
+
+\textit{\underline{The EB physical parameters MCMC samples}} are by far the
+largest data product to be produced by this effort. Providing all samples
+generated is impractical, as \citep{Windemuth_et_al_19} found that for some EBs
+$\sim10^8$ samples ($10^6$ MCMC steps of 128 walkers) are required for
+convergence. On the other hand, they also found that thinning the MCMC chains to
+$\sim5000$ samples is sufficient to allow reproducing the posterior distribution
+to high precision. Using the same data format as \citep{Windemuth_et_al_19}
+(compressed numpy arrays) in order to preserve interoperability, this amounts to
+$\approx$750 KB per EB, or $<2$\,GB for the stamp-based MCMC samples, and
+$<20$\,GB for the FFI-based MCMC samples. Both are well within the 50 GB limit
+for zenodo datasets and thus will pose no problem for public distribution.
+
+\subsection{Software}
+%
+\label{sec:dmp_software}
+
+All software developed for this project will be installable as a python package
+using the \texttt{PIP} package installer \citep{<++>} for \texttt{Python}. Code
+development will occur on GitHub, with documentation managed using the standard
+python documentation generator \texttt{SPHINX} \citep{<++>}. Documentation will
+include full implementation documentation (using standard python docstrings),
+installation instructions, and detailed usage examples and explanations provided
+as \texttt{Jupyter} notebooks for fast and easy experimentation. All software
+developed will be distributed under an MIT license, allowing all uses, only
+limiting liability. In order to ensure usability by others, we will require one
+of the PI's students not involved in the project and without help from anyone to
+be able to install the software and prepare a small sample of lightcurves (e.g.
+10 of them) for analysis. For EB parameters they will also generate an LC model
+for the maximum likelihood parameters of the corresponding EB, and run the MCMC
+sampler for a small number of steps. For the spin analysis they will generate
+and plot the ACF, LSP, WT map, and GSP. Each task will be required to take no
+more than 30 min to accomplish, including reading the documentation for the
+first time. The exact versions of the software used in each article will be
+distributed as zenodo archives which come with a DOI and will be associated with
+the article and the corresponding datasets.
