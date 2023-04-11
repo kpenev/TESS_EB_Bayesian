@@ -38,6 +38,8 @@ def report_w19_lurie_crossmatch(lurie_fname, w19_fname):
 def get_hemisphere(sectors):
     """Return hemisphere list of sectors belongs to (0-south, 1-north)."""
 
+    if sectors.rstrip(',') == '':
+        return -1
     sectors = numpy.array([int(s) for s in sectors.rstrip(',').split(',')],
                           dtype=int)
     if sectors.min() <= 13 or sectors.min() > 26:
@@ -60,16 +62,17 @@ def get_hemisphere(sectors):
     return 1
 
 
-def report_prsa_statistics(prsa_fname):
+def report_prsa_statistics(prsa_fname, lurie_tic_info):
     """Report how many Prsa binaries fall in various categories."""
 
     with fits.open(prsa_fname, 'readonly') as prsa_f:
         data = prsa_f[1].data[:]
 
-    data = data[data['Sectors'] != '']
     hemispheres = numpy.array(
         [get_hemisphere(s) for s in data['Sectors']]
     )
+    data = data[hemispheres >= 0]
+    hemispheres = hemispheres[hemispheres >= 0]
     print('%d / %d Prsa EBs from S / N hemisphere'
           %
           ((1-hemispheres).sum(), hemispheres.sum()))
@@ -80,6 +83,9 @@ def report_prsa_statistics(prsa_fname):
     print('%d / %d Detached Prsa EBs from S / N hemisphere'
           %
           ((1-hemispheres).sum(), hemispheres.sum()))
+
+
+    prsa_tics = numpy.array([int(tic) for tic in data['TIC']])
 
     for mode in ['pf', '2g']:
         deep = numpy.logical_and(
@@ -93,9 +99,19 @@ def report_prsa_statistics(prsa_fname):
               %
               (mode, (1-hemispheres[deep]).sum(), hemispheres[deep].sum()))
 
+        prsa_tics_in_lurie = lurie_tic_info.index.intersection(prsa_tics[deep])
+        print('From %s: %d deep detached Prsa TICs in Lurie: '
+              %
+              (mode, prsa_tics_in_lurie.size))
 
-def get_lurie_tic_info(lurie_fname, lurie_tic_fname):
-    """Return a pandas dataframe of TIC info for all Lurie sources."""
+
+    prsa_tics_in_lurie = lurie_tic_info.index.intersection(prsa_tics)
+    print('Total %d detached Prsa TICs in Lurie: ' % prsa_tics_in_lurie.size)
+
+
+
+def get_raw_lurie_tic_info(lurie_fname, lurie_tic_fname):
+    """Return a numpy record array of TIC info for all Lurie sources."""
 
     if path.exists(lurie_tic_fname):
         return numpy.load(lurie_tic_fname)
@@ -144,6 +160,17 @@ def get_lurie_tic_info(lurie_fname, lurie_tic_fname):
     numpy.save(lurie_tic_fname, numpy_result)
     return numpy_result
 
+
+def get_lurie_tic_info(*args, **kwargs):
+    """Format the Lurie TIC data to pandas dataframe."""
+
+    raw_data = get_raw_lurie_tic_info(*args, **kwargs)
+    return pandas.DataFrame.from_records(
+        raw_data,
+        index=raw_data['ID'].astype(int)
+    )
+
+
 def report_w19_precision(w19_fname):
     """Report the 1-sigma confidence interval for each W19 parameter."""
 
@@ -159,10 +186,10 @@ def main():
         w19=path.join(data_dir, 'w19_maxlike_pars.dat'),
         prsa=path.join(data_dir, 'prsa_ebs.fits')
     )
-    print(repr(get_lurie_tic_info(fnames['lurie'], fnames['lurie_tic'])))
-    exit(1)
+    lurie_tic_info = get_lurie_tic_info(fnames['lurie'], fnames['lurie_tic'])
+
     report_w19_lurie_crossmatch(fnames['lurie'], fnames['w19'])
-    report_prsa_statistics(fnames['prsa'])
+    report_prsa_statistics(fnames['prsa'], lurie_tic_info)
 
 
 if __name__ == '__main__':
