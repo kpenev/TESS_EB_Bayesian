@@ -8,6 +8,7 @@ from os import path
 import numpy
 from astroquery.mast import Catalogs
 from astropy.io import fits
+from astropy.table import Table
 import pandas
 from scipy import stats
 
@@ -22,10 +23,10 @@ def report_w19_lurie_crossmatch(lurie_fname, w19_fname):
     kic_with_spin = lurie_data['KIC'][lurie_data['Class'] == 'sp']
     kic_with_fast_spin = lurie_data['KIC'][
         numpy.logical_and(lurie_data['Class'] == 'sp',
-                          lurie_data['P1max']<13.5)
+                          lurie_data['P1min']<13.5)
     ]
     print(
-        'Out of %d W19 EBs %d also have spin, %d with P1max < 13.5d'
+        'Out of %d W19 EBs %d also have spin, %d with P1min < 13.5d'
         %
         (
             w19_data.index.size,
@@ -171,6 +172,31 @@ def get_lurie_tic_info(*args, **kwargs):
     )
 
 
+def report_expected_ffi_lurie_spins(lurie_fname, lurie_tic_info):
+    """Report how many of the Lurie binaries are bright fast rotators."""
+
+    with fits.open(lurie_fname, 'readonly') as lurie_f:
+        lurie_data = Table(lurie_f[1].data).to_pandas().set_index('KIC')
+
+    lurie_tic_info = lurie_tic_info.set_index(lurie_tic_info['KIC'].astype(int))
+    print('Lurie data index: ' + repr(lurie_data.index))
+    print('TIC info index: ' + repr(lurie_tic_info.index))
+    lurie_data = lurie_data.merge(lurie_tic_info,
+                                  left_index=True,
+                                  right_index=True)
+    print('Lurie data:\n' + repr(lurie_data))
+    print(
+        '%d Lurie EBs have T<13.5 and P1 < 13.5'
+        %
+        numpy.logical_and(
+            lurie_data['Tmag'] < 13.5,
+            lurie_data['P1min'] < 13.5
+        ).sum()
+    )
+
+
+
+
 def report_w19_precision(w19_fname):
     """Report the 1-sigma confidence interval for each W19 parameter."""
 
@@ -187,6 +213,7 @@ def main():
         prsa=path.join(data_dir, 'prsa_ebs.fits')
     )
     lurie_tic_info = get_lurie_tic_info(fnames['lurie'], fnames['lurie_tic'])
+    report_expected_ffi_lurie_spins(fnames['lurie'], lurie_tic_info)
 
     report_w19_lurie_crossmatch(fnames['lurie'], fnames['w19'])
     report_prsa_statistics(fnames['prsa'], lurie_tic_info)
