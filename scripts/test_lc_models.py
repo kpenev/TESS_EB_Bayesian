@@ -108,7 +108,8 @@ def parse_command_line():
         '--num-parallel-processes',
         type=int,
         default=16,
-        help='How many multiprocessing processes to use.'
+        help='How many multiprocessing processes to use. Ignored if '
+        '--show-model-plots is enabled.'
     )
     parser.add_argument(
         '--plot-vs',
@@ -498,15 +499,18 @@ def explore_batman_approximation(param_grids,
     for _ in range(num_parallel_processes):
         param_queue.put('STOP')
 
-    workers = [
-        Process(
-            target=calc_approximation_diff,
-            args=(param_queue, result_queue, show_model_plots)
-        )
-        for _ in range(num_parallel_processes)
-    ]
-    for process in workers:
-        process.start()
+    if num_parallel_processes == 1 or show_model_plots:
+        calc_approximation_diff(param_queue, result_queue, show_model_plots)
+    else:
+        workers = [
+            Process(
+                target=calc_approximation_diff,
+                args=(param_queue, result_queue, show_model_plots)
+            )
+            for _ in range(num_parallel_processes)
+        ]
+        for process in workers:
+            process.start()
     with open(progress_fname, 'ab') as progress_f:
         for _ in range(num_jobs):
             result = result_queue.get()
