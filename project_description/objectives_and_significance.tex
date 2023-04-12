@@ -18,9 +18,6 @@ binaries that will:
     \item Detect ellipsoidal variations, reflected light, and Doppler beaming
         effects
 %
-    \item Measure eclipsing timing variability (ETV) (e.g. produced by apsidal
-        precession or extra objects in the system).
-%
 \end{enumerate}
 
 The proposed catalog will provide the required input for numerous investigations
@@ -54,21 +51,21 @@ In addition to tides, binary stars, especially in combination with spin
 measurements, provide a unique laboratory for testing a host of additional
 stellar physics, like providing direct tests of stellar evolution and
 asteroseismology \citep[e.g.][]{Gaulme_et_al_16, delBurgo_AllendePrieto_18,
-Garrido_et_al_19}, magnetic breaking \citep[e.g.][]{ElBadry_et_al_22}, limb
-darkening and stellar atmospheres modeling \citep[e.g.][]{Southworth_et_al_07,
-Zola_et_al_15, Matson_et_al_16}, stellar differential rotation and magnetic
-activity \citep[e.g.][]{Reinhold_et_al_13, Jermyn_et_al_20a, Jermyn_et_al_20b}.
-In addition to observational signatures probing the surface of the star,
-measurements of apsidal precession can constrain the tidal love number and
-hence provide one of very few direct probes of internal stellar structure.
+Garrido_et_al_19, Cruz_et_al_22}, magnetic breaking
+\citep[e.g.][]{ElBadry_et_al_22}, limb darkening and stellar atmospheres
+modeling \citep[e.g.][]{Southworth_et_al_07, Zola_et_al_15, Matson_et_al_16},
+stellar differential rotation and magnetic activity
+\citep[e.g.][]{Reinhold_et_al_13, Jermyn_et_al_20a, Jermyn_et_al_20b}.  In
+addition to observational signatures probing the surface of the star,
+measurements of apsidal precession can constrain the tidal love number and hence
+provide one of very few direct probes of internal stellar structure.
 
 Apart from stellar physics, EBs are the most common source of false positive
 signals in transiting exoplanet searches and understanding their properties and
-prevalence is crucial to interpreting exoplanet observations
-\citep[e.g.][]{}<++>. Eclipsing binaries are also important inputs to fields that
-at first glance appear unrelated, like Spectral synthesis for galaxy science
-\citep[e.g.][]{Eldridge_et_al_17} or even studying the galactic dark matter
-\citep[e.g.][]{Chakrabarti_22}.
+prevalence is crucial to interpreting exoplanet observations. Eclipsing binaries
+are also important inputs to fields that at first glance appear unrelated, like
+Spectral synthesis for galaxy science \citep[e.g.][]{Eldridge_et_al_17} or even
+studying the galactic dark matter \citep[e.g.][]{Chakrabarti_22}.
 
 \subsection{Comparison to Existing EB Catalogs}
 %
@@ -85,33 +82,36 @@ dramatically limits the attainable precision of the inferred physical
 parameters. For example, both \tess{} and \kepler{} lightcurves (LCs) allow
 measuring the time of primary and secondary eclipse with sufficient precision to
 determine $e\cos\omega$ (orbital eccentricity times cosine of the longitude of
-periapsis) to a precision of $10^{-4}$ and often much better, where as typical
-uncertainties from ground based data are orders of magnitude larger
-\citep[c.f.][]{}<++>. Space-based photometry offers similar boost in precision
-in the determination of most of the physical parameters of the systems.
-Furthermore, effects often not detectable from the ground are easily detectable
-from space (e.g. ellipsoidal variations, Doppler boosting etc.) which in turn
-provide crucial new constraints on the binary parameters and enable new science
-use cases.
+periapsis) to a precision of $10^{-4}$ and often much better
+\citep{Windemuth_et_al_19, Justesen_Albrecht_21}, where as typical uncertainties
+from ground based data are orders of magnitude larger. Space-based photometry
+offers similar boost in precision in the determination of most of the physical
+parameters of the systems.  Furthermore, effects often not detectable from the
+ground are easily detectable from space (e.g. ellipsoidal variations, Doppler
+boosting etc. \citep{Engel_et_al_20, Green_et_al_23}) which in turn provide
+crucial new constraints on the binary parameters and enable new science use
+cases.
 
-On the other hand, this effort will produce the largest and best characterized
-collection of EBs from space photometry to date. Thanks to the full sky coverage
-of \tess{}, those will be the brightest EBs available, making followup
-observations of individual systems as easy as possible should any be necessary
-for a particular application. We compare our expected results to the state of
-the art \tess{} and \kepler{} catalogs available in the literature below.
+On the other hand, this effort will produce the largest fully characterized
+collection of EBs from space photometry to date (while larger datasets exist,
+they lack the thorough characterization of the physical parameters and spins
+proposed). Thanks to the full sky coverage of \tess{}, those will be the
+brightest EBs available, making followup observations of individual systems as
+easy as possible should any be necessary for a particular application. We
+compare our expected results to the state of the art \tess{} and \kepler{}
+catalogs available in the literature below.
 
 \citep{Prsa_et_al_22} and \citep{Justesen_Albrecht_21} both used \tess{}
 photometry to search for eclipsing binary stars and \citep{Justesen_Albrecht_21}
 combined photometry with SED information to find maximum likelihood parameters
 for each binary. Our proposal would improve on both efforts in four crucial
-ways.  First, both studies made no attempt to provide error bars for the
-extracted system parameters. We propose to apply Bayesian analysis (BA) to fully
-characterize the uncertainty distributions of the parameters allowed by the
-observational data.  This is a crucial requirement for many of the applications
-described above so that for example uncertainties in the inferred tidal
-dissipation can be characterized, or any suggested tension between stellar
-structure and evolution or stellar atmosphere models can be quantified. Second,
+ways.  First, neither study provides error bars for the extracted system
+parameters. We propose to apply Bayesian analysis (BA) to fully characterize the
+uncertainty distributions of the parameters allowed by the observational data.
+This is a crucial requirement for many of the applications described above so
+that for example uncertainties in the inferred tidal dissipation can be
+characterized, or any suggested tension between stellar structure and evolution
+or stellar atmosphere models can be quantified. Second,
 \citep{Justesen_Albrecht_21} only used data from the first 13 sectors from
 \tess{}, while \citep{Prsa_et_al_22} used 26. In contrast, up to March 20, 2023
 \tess{} had completed observations of 62 sectors, revisiting the same locations
@@ -124,16 +124,17 @@ positives from automatically selected EB or rotational variability candidates,
 and provide much larger leverage for detecting eclipse timing variations.
 Third, both prior studies relied only on \tess{} 2-min cadence stamp data. While
 we also plan to begin by focusing on stamp data, we will also fully exploit the
-FFIs, increasing the number of LCs searched by a factor of $\sim50$, and
-hence by a comparable (though likely somewhat smaller) factor the number of
-expected detections. Finally, none of the existing \tess{} EB collections come
-with spin measurements. While efforts to measure spins using \tess{} photometry
-exist \citep[e.g.]{}<++>, none focused on eclipsing binaries, which require
-specialized analysis to disentangle the rotational variability from the eclipses
-and other binary driven variability. Spin measurements are very valuable for the
-tidal studies described above, enabling the cross-checks and validations
-described, and are required for many of the other applications (studies of
-magnetic breaking, differential rotation, magnetic activity etc.).
+FFIs, increasing the number of LCs searched by a factor of $\sim50$, and hence
+by a comparable (though likely somewhat smaller) factor the number of expected
+detections. Finally, none of the existing \tess{} EB collections come with spin
+measurements. While efforts to measure spins using \tess{} photometry exist
+\citep[e.g.][]{CantoMartins_et_al_20, Holcomb_et_al_22}, none focused on
+eclipsing binaries, which require specialized analysis to disentangle the
+rotational variability from the eclipses and other binary driven variability.
+Spin measurements are very valuable for the tidal studies described above,
+enabling the cross-checks and validations described, and are required for many
+of the other applications (studies of magnetic breaking, differential rotation,
+magnetic activity etc.).
 
 A combination of two studies of \kepler{} EBs comes closest to the catalog we
 plan to create: \citep{Windemuth_et_al_19} who combined photometry and SED and
