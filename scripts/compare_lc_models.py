@@ -172,7 +172,11 @@ def parse_command_line():
     return parser.parse_args()
 
 
-def fit_phase_curve(lc_residuals, rvs, depth, distance):
+def fit_phase_curve(lc_residuals,
+                    rvs,
+                    depth,
+                    distance,
+                    extra_lc_components=None):
     """
     Fit for the free parameters of a BEER-like model.
 
@@ -203,12 +207,22 @@ def fit_phase_curve(lc_residuals, rvs, depth, distance):
         distance(array):    The distance between the primary and the center of
             mass at the evaluation times.
 
+        extra_lc_components(array):    Additional terms to include in the LC
+            model. Should have size (lc_residuals.size, N) for N additional
+            terms.
+
     Returns:
         array:
             Best fit model of the lightcurve residuals.
     """
 
-    lhs = numpy.empty((lc_residuals.size, 6))
+    assert (extra_lc_components is None
+            or
+            extra_lc_components.shape[0] == lc_residuals.size)
+    lhs = numpy.empty((
+        lc_residuals.size,
+        6 + (0 if extra_lc_components is None else extra_lc_components.shape[1])
+    ))
     los_angle = numpy.arccos(depth / distance)
     lhs[:, 0] = rvs
     lhs[:, 1] = numpy.cos(2.0 * los_angle) / distance**3
@@ -218,8 +232,10 @@ def fit_phase_curve(lc_residuals, rvs, depth, distance):
     lhs[:, 4] = numpy.sin(los_angle) / distance**2
 
     lhs[:, 5] = 1.0
+    if extra_lc_components is not None:
+        lhs[:, 6 + i:] = extra_lc_components
     coef = lstsq(lhs, lc_residuals)[0]
-    return lhs.dot(coef)
+    return lhs.dot(coef), coef[-extra_lc_components.shape[1]:]
 
 
 def fit_beer(lc_phases, lc_residuals):
@@ -294,8 +310,11 @@ def calc_max_lc_difference(phoebe_binary,
     phoebe_lc = (
         phoebe_binary.get('fluxes@lc01@phoebe01@latest@lc@model').get_value()
     )
-    batman_lc = get_batman_lc(phoebe_binary,
-                              secondary_flux_fraction=secondary_flux_fraction)
+    batman_lc = get_batman_lc(
+        phoebe_binary,
+        phoebe_binary.get('times@'+dataset + '@lc@dataset').get_value(),
+        secondary_flux_fraction=secondary_flux_fraction
+    )
 
     batman_residuals = phoebe_lc - batman_lc
     beer_lc = fit_beer(

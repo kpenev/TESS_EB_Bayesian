@@ -119,18 +119,32 @@ modeling the eclipse of the primary and secondary stars separately. The two
 models are then added per the corresponding brightness ratio of the stars.
 
 Our model for the phase curve must handle ellipsoidal modulations, Doppler
-beaming, and reflection effects. Let $\theta$ be the angle between the line of
-sight direction and the line connecting the centers of the two stars in the
-binary, and $d$ be the separation between the two stars. To an excellent
-approximation, the ellipsoidal modulations are proportional to
-$\sin(2\theta)/d^3$, the reflection effect is proportional to $\cos\theta/d^2$,
-and the Doppler beaming is proportional to the line of sight velocity of the
-primary star. The proportionality constants of these terms depend on details of
-the stellar atmosphere and tidal love number. In our LC model, we treat these
-constants as model parameters free to be adjusted to match the LC.  In fact in
-order to accommodate imperfectly filtered instrumental effects or astrophysical
-variability not related to binary interactions, we also include terms
-proportional to $\sin\theta/d^2$ and $\cos(2\theta)/d^3$.
+beaming, and reflection effects. We will use the eccentric BEER model (eBEER)
+\citep{Engel_et_al_20}, which the authors show is able to capture the phase
+curve effets to better than 10\,ppm, much superior to the \tess{} precision.
+Hence, the phase curve model will not introduce significant model uncertainties
+compared to the observational ones. The eBEER model introduces 4 additional
+parameters to the LC model, that parameterize the response of each star to
+heating by its neighbour and the ratio of doppler beaming to radial velocity.
+While the eBERR model begins to lose precision at extreme eccentricities since
+it ignores higher order orbital harmonics, in practice this limitation is never
+relevant because at short periods EBs are tidally circularized and at long
+periods the phase curve effects are negligible. Binaries that are simultaneously
+short period and highly eccentricy need some mechanism to excite the
+eccentricty (e.g. third body), in which case many aspects of the proposed
+analysis break down.
+
+%Let $\theta$ be the angle between the line of sight direction and the line
+%connecting the centers of the two stars in the binary, and $d$ be the separation
+%between the two stars. Doppler beaming is proportional to the line of sight
+%velocity of the primary star, and to leading order the ellipsoidal modulations
+%are proportional to $\sin(2\theta)/d^3$, and the reflection effect is
+%proportional to $\cos\theta/d^2$. The proportionality constants of these terms
+%depend on details of the stellar atmosphere and tidal love number. In our LC
+%model, we treat these constants as model parameters free to be adjusted to match
+%the LC. In fact in order to accommodate imperfectly filtered instrumental
+%effects or astrophysical variability not related to binary interactions, we also
+%include terms proportional to $\sin\theta/d^2$ and $\cos(2\theta)/d^3$.
 
 It should be noted that while there are much more sophisticated treatments of
 these effects available, for example by the \texttt{PHOEBE} package, those
@@ -206,7 +220,7 @@ observations rather than using theoretical models.
 %
         $u_{ij},\ i,j\in\{1,2\}$ & Limb darkening coefficients\\
 %
-        $c_i, s_j,\ i,j\in\{1,2\}$ & Coefficients of the phase curve model\\
+        $\alpha_{ij},\ i,j\in\{1,2\}$ & Coefficients of the phase curve model\\
 %
         $P_{orb}, i$ & Orbital period and inclination\\
 %
