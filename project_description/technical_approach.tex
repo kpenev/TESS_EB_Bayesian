@@ -60,8 +60,8 @@ minimum spacing allowed between the smoothing spline nodes used for detrending
 to match the orbit. The rest of the detrending procedure of the QLP will be
 preserved. It should be noted that the exact detrending used will not preclude
 detecting the high signal to noise EBs we are targeting. In fact, the yield
-estimates from \refsec{catalog_size} are based on a search \citep{Prsa_et_al_22}
-that applied no detrending.
+estimates from \refsec{catalog_size} are based on the \citep{Prsa_et_al_22}
+search which applied no detrending.
 
 The first step in our analysis will be to select candidate EB LCs. For stamp
 targets, \citep{Prsa_et_al_22} already conducted a thorough search, combining
@@ -84,27 +84,27 @@ the eclipse depths, nor the depths of every other eclipse match within
 detected eclipses are masked and another search is conducted to check for
 secondary eclipses of eccentric binaries which are also checked for consistency
 of their depths. Finally, only high signal-to-noise candidates are kept (primary
-eclipse > 5\% and secondary eclipse > 1\%). \citep{Justesen_Albrecht_21} report
-that this procedure eliminated 98\% of the input sources. However, since we will
-begin with $10^7$ LCs, $\sim2\times10^5$ will pass all tests. These are too many
-to examine by eye, as \citep{Justesen_Albrecht_21} did. Instead, we will find a
-maximum likelihood estimate for the system parameters and automatically reject
-binaries for which the residuals between the observed LC and the model for the
-maximum likelihood parameters are too large.  The exact threshold for rejection
-will be determined by visual inspection of several thousand examples.  Since the
-likelihood function defined below is non-linear and likely contains multiple
-local minima, we will use one of the built-in global optimization algorithms of
-the \texttt{scipy} Python package. We will experiment with basin hopping
-\citep{Wales_Doye_97}, differential evolution \citep{Storn_Price_97}, and dual
-annealing \citep{Xiang_et_al_97} algorithms as part of this project, and if no
-clear winner can be found we will use multiple selecting whichever one produces
-the highest likelihood for each candidate. Even after this step, we will end up
-with several tens of thousands of candidates.  All surviving EBs will be
-subjected to full analysis and included in the final catalog, but we will
-manually vet the 5\,000 -- 10\,000 with tightest constraints to produce a
-sub-catalog of highly reliable EBs.
+eclipse $>5$\% and secondary eclipse $>1$\%). \citep{Justesen_Albrecht_21}
+report that this procedure eliminated 98\% of the input sources. However, since
+we will begin with $10^7$ LCs, $\sim2\times10^5$ will pass all tests. These are
+too many to examine by eye, as \citep{Justesen_Albrecht_21} did. Instead, we
+will find a maximum likelihood estimate for the system parameters and
+automatically reject binaries for which the residuals between the observed LC
+and the model for the maximum likelihood parameters are too large.  The exact
+threshold for rejection will be determined by visual inspection of several
+hundred examples.  Since the likelihood function defined below is non-linear
+and likely contains multiple local minima, we will use one of the built-in
+global optimization algorithms of the \texttt{scipy} Python package. We will
+experiment with basin hopping \citep{Wales_Doye_97}, differential evolution
+\citep{Storn_Price_97}, and dual annealing \citep{Xiang_et_al_97} algorithms as
+part of this project, and if no clear winner can be found we will use multiple
+selecting whichever one produces the highest likelihood for each candidate. Even
+after this step, we will end up with several tens of thousands of candidates.
+All surviving EBs will be subjected to full analysis and included in the final
+catalog, but we will manually vet the 5\,000 -- 10\,000 with tightest
+constraints to produce a sub-catalog of highly reliable EBs.
 
-\subsubsection{Lightcurve and Spectral Energy Distribution Modeling Modeling}
+\subsubsection{Lightcurve and Spectral Energy Distribution Modeling}
 %
 \label{sec:params_lc_sed_modeling}
 
@@ -119,18 +119,32 @@ modeling the eclipse of the primary and secondary stars separately. The two
 models are then added per the corresponding brightness ratio of the stars.
 
 Our model for the phase curve must handle ellipsoidal modulations, Doppler
-beaming, and reflection effects. Let $\theta$ be the angle between the line of
-sight direction and the line connecting the centers of the two stars in the
-binary, and $d$ be the separation between the two stars. To an excellent
-approximation, the ellipsoidal modulations are proportional to
-$\sin(2\theta)/d^3$, the reflection effect is proportional to $\cos\theta/d^2$,
-and the Doppler beaming is proportional to the line of sight velocity of the
-primary star. The proportionality constants of these terms depend on details of
-the stellar atmosphere and tidal love number. In our LC model, we treat these
-constants as model parameters free to be adjusted to match the LC.  In fact in
-order to accommodate imperfectly filtered instrumental effects or astrophysical
-variability not related to binary interactions, we also include terms
-proportional to $\sin\theta/d^2$ and $\cos(2\theta)/d^3$.
+beaming, and reflection effects. We will use the eccentric BEER model (eBEER)
+\citep{Engel_et_al_20}, which the authors show is able to capture the phase
+curve effets to better than 10\,ppm, much superior to the \tess{} precision.
+Hence, the phase curve model will not introduce significant model uncertainties
+compared to the observational ones. The eBEER model introduces 4 additional
+parameters to the LC model, that parameterize the response of each star to
+heating by its neighbour and the ratio of doppler beaming to radial velocity.
+While the eBERR model begins to lose precision at extreme eccentricities since
+it ignores higher order orbital harmonics, in practice this limitation is never
+relevant because at short periods EBs are tidally circularized and at long
+periods the phase curve effects are negligible. Binaries that are simultaneously
+short period and highly eccentricy need some mechanism to excite the
+eccentricty (e.g. third body), in which case many aspects of the proposed
+analysis break down.
+
+%Let $\theta$ be the angle between the line of sight direction and the line
+%connecting the centers of the two stars in the binary, and $d$ be the separation
+%between the two stars. Doppler beaming is proportional to the line of sight
+%velocity of the primary star, and to leading order the ellipsoidal modulations
+%are proportional to $\sin(2\theta)/d^3$, and the reflection effect is
+%proportional to $\cos\theta/d^2$. The proportionality constants of these terms
+%depend on details of the stellar atmosphere and tidal love number. In our LC
+%model, we treat these constants as model parameters free to be adjusted to match
+%the LC. In fact in order to accommodate imperfectly filtered instrumental
+%effects or astrophysical variability not related to binary interactions, we also
+%include terms proportional to $\sin\theta/d^2$ and $\cos(2\theta)/d^3$.
 
 It should be noted that while there are much more sophisticated treatments of
 these effects available, for example by the \texttt{PHOEBE} package, those
@@ -139,11 +153,11 @@ single EB LC using \texttt{PHOEBE} with sufficient resolution for this project
 takes several to several tens of seconds using a single thread on a contemporary
 computer. Given that \citep{Windemuth_et_al_19} found it takes $\sim10^8$
 samples ($10^6$ steps of 128 walker MCMC) for the samples to fully converge to
-the desired posterior distribution, the proposed analysis is completely
-infeasible for tens of thousands of EBs even using state of the art high
-performance computing facilities. In contrast, the proposed modeling is $10^3$
-to $10^5$ times faster (depending on the binary parameters) making it entirely
-feasible.
+the desired posterior distribution, the proposed analysis is not practical for
+tens of thousands of EBs even using state of the art high performance computing
+facilities. In contrast, the proposed modeling is $10^3$ to $10^5$ times faster
+(depending on the binary parameters) making it entirely feasible (see Facilities
+and Equipment).
 
 The apparent brightness of a system often places better constraints on the
 masses than the LC alone, because mass is tightly correlated with luminosity. We
@@ -165,11 +179,11 @@ Johnson–Cousins B and V, 2MASS J, H, K, and WISE W1 and W2.
 In order to build a model, we need the radii of the primary and secondary stars,
 their extinction and reddening corrected apparent magnitudes, and a limb
 darkening model. Without radial velocity observations, the masses of the stars
-are not constrained, because the LC depends only on orbital period,
-eccentricity, and orientation, the ratio of radii, and the semimajor axis to
-primary radius ratio. In order to compensate for the lack of radial velocity
-data, we will instead rely on stellar evolution models to convert the two
-stellar masses, and common age and metallicity for a binary to radii and
+are not constrained from photometry, because the LC depends only on orbital
+period, eccentricity, and orientation, the ratio of radii, and the semimajor
+axis to primary radius ratio. In order to compensate for the lack of radial
+velocity data, we will instead rely on stellar evolution models to convert the
+two stellar masses, and common age and metallicity for a binary to radii and
 absolute magnitudes in the \tess{} bandpass for LC modeling, and other
 bandpasses for SED modeling (see above). In particular, we will use isochrones
 generated using the Padova and Trieste Stellar Evolutionary Code
@@ -179,7 +193,7 @@ bolometric corrections and star-by-star extinction coefficients (properly
 accounting for the spectral dependence of extinction) as in
 \citep{Chen_et_al_19}. \citep{CMD_interface} provides on-demand isochrones for a
 range of stellar properties and we have already implemented high-precision
-interpolation. We will assuming quadratic limb darkening, and treat the limb
+interpolation. We will assume quadratic limb darkening, and treat the limb
 darkening coefficients of each stars as model parameters to be constrained by
 observations rather than using theoretical models.
 
@@ -206,7 +220,7 @@ observations rather than using theoretical models.
 %
         $u_{ij},\ i,j\in\{1,2\}$ & Limb darkening coefficients\\
 %
-        $c_i, s_j,\ i,j\in\{1,2\}$ & Coefficients of the phase curve model\\
+        $\alpha_{ij},\ i,j\in\{1,2\}$ & Coefficients of the phase curve model\\
 %
         $P_{orb}, i$ & Orbital period and inclination\\
 %
@@ -222,7 +236,7 @@ observations rather than using theoretical models.
 %
     \end{tabular}
 %
-    \caption{Model parameters sampled during MCMC \vspace{-\baselineskip}}
+    \caption{Model parameters sampled during MCMC }
 %
     \label{tab:mcmc_params}
 %
@@ -323,9 +337,13 @@ expected phase curve effects described in \refsec{params_lc_preparation} are
 detected for short period EBs (no significant signal is expected at long
 periods).
 
+\textit{\underline{Comparison between sectors:}} Separate maximum likelihood fit
+will be carried out on the LCs of each \tess{} sector LC. If results differ
+significantly, the target will be flagged for manual inspection.
+
 Along with checking whether the target is a known EB, or has been flagged by the
-TESS transit search pipeline. We will adapt the three tests listed above for FFI
-lightcurves.
+TESS transit search pipeline. We will also adapt the three tests listed above
+for FFI lightcurves.
 
 We will also carry out four additional validation steps:
 
@@ -348,20 +366,19 @@ maximum likelihood parameters to find maximum likelihood parameters for
 parameters.
 
 \textit{\underline{Comparison to \citep{Prsa_et_al_22} \tess{} EBs:}} We will
-use the \citep{Prsa_et_al_22} EBs for the list of targets to analyze from the
-\tess{} stamp data. Since they applied a very different analysis algorithm than
-we propose and analyzed non-detrended lightcurves, comparing the binary
+use the 4\,584 \citep{Prsa_et_al_22} EBs for the list of targets to analyze from
+the \tess{} stamp data. Since they applied a very different analysis algorithm
+than we propose and analyzed non-detrended lightcurves, comparing the binary
 parameters will serve to validate our analysis and highlight potential pitfalls
 we may need to address once confronted with the full dataset. This will also
 allow us to gauge the improvement resulting from doubling or tripling the number
 of observations.
 
-\textit{\underline{Comparison to \citep{Justesen_Albrecht_21} \tess{} EBs:}}
-Another direct comparison between results from  identical We will compare our
-results against the \citep{Justesen_Albrecht_21} EBs from the first year of
-\tess{}. This will be another valuable test of our approach, since these authors
-built their LC model without reference to stellar evolution, and included
-stellar evolution and SED modeling as a post-processing step.
+\textit{\underline{Comparison to \citep{Justesen_Albrecht_21} \tess{} EBs:}} We
+will compare our results against the \citep{Justesen_Albrecht_21} EBs from the
+first year of \tess{}. This will be another valuable test of our approach, since
+these authors built their LC model without reference to stellar evolution, and
+included stellar evolution and SED modeling as a post-processing step.
 
 \textit{\underline{Comparison to \citep{Windemuth_et_al_19} \kepler{} EBs:}}
 This will be the most stringent validation of our results. We will analyze a
@@ -376,7 +393,7 @@ analysis and serve to quantify the completeness and the selection effects our
 processing imposes on the final collection.
 
 Since the \citep{Windemuth_et_al_19} \kepler{} EBs are based on observations
-much better time coverage and photometric precision, comparison against the
+with much better time coverage and photometric precision, comparison against the
 latter dataset is the best option to empirically constrain the sensitivity of
 our EB detection procedure allowing the resulting catalog to be used for
 statistical studies of EB populations. In order to facilitate that, we will
@@ -415,7 +432,7 @@ apply a battery of validation tests to reject false signals (see
 \refsec{spin_validation}). Preliminary tests show that the proposed validations
 successfully reject the vast majority of false signals.
 
-As each bright (T<13.5) stamp target will also have a QLP lightcurve, comparing
+As each bright ($T<13.5$) stamp target will also have a QLP lightcurve, comparing
 to the spins from PDC detrended stamp LCs to those of the same stars from FFIs
 will provide a precise and accurate measurement of the false alarm rate. If that
 is high in spite of the many validations, we will re-introduce the QLP
@@ -462,14 +479,14 @@ amplitude. Subsequent peaks of decreasing amplitude occur at integer multiples
 of the spin period. The ACF only measures self-similarity in the LC. As a result
 it remains reliable in the face of gradual changes in the amplitude and period
 of the rotational modulation (as the star spot pattern on the stellar surface
-evolves).  \citep{McQuillan_et_al_13} also argue the highest peak of the ADF is
+evolves).  \citep{McQuillan_et_al_13} also argue the highest peak of the ACF is
 a more robust measure of the true spin period than LSP (see below), which may
 produce a higher peak at a multiple of the period if multiple spots (or groups
 of spots) are present.
 
 \textit{\underline{The Lomb-Scargle Periodogram (LSP)}} can be thought of as
 least squares fit for the amplitude of a signal of a single frequency as a
-function of the frequency. LSP have an advantage over ACF in that the are much
+function of the frequency. LSP has an advantage over ACF in that it is much
 more sensitive to multiple rotation period signals (e.g. from the two stars, or
 from differential rotation on one star). We will follow the procedure of
 \citep{Rappaport_et_al_14, Lurie_et_al_17} for identifying multiple rotation
@@ -504,17 +521,18 @@ examine the results of the three analyses methods combined with the different LC
 versions regardless of whether the target passes the automated selection.
 
 For the smoothed ACF we will eliminate any targets showing monotonic decrease
-for periods shorter than 20d for targets for which \tess{} sectors do not
-overlap, and 30d if at least two consecutive sectors contribute observations for
-that target. As a sector is observed for 27 days, it is very unlikely that
-periods beyond these cutoffs would be reliably detected. We will also eliminate
-ACF for which the peak pattern changes dramatically between the two methods for
-eliminating the binary effects described above. For targets surviving this
-initial cut, we will calculate a bootstrap false alarm probability by randomly
-shuffling the LC points, and for ACF calculated from LC from which a full EB
-model was subtracted, also using randomly selected samples of binary parameters
-and calculating the fraction of these randomly realized LCs for which the most
-prominent peak exceeds the prominence in the original ACF.
+(i.e no periodicity is detected) for periods shorter than 20d  for targets for
+which \tess{} sectors do not overlap, and 30d if at least two consecutive
+sectors contribute observations for that target. As a sector is observed for 27
+days, it is very unlikely that periods beyond these cutoffs would be reliably
+detected. We will also eliminate ACF for which the peak pattern changes
+dramatically between the two methods for eliminating the binary effects
+described above. For targets surviving this initial cut, we will calculate a
+bootstrap false alarm probability by randomly shuffling the LC points, and for
+ACF calculated from LC from which a full EB model was subtracted, also using
+randomly selected samples of binary parameters and calculating the fraction of
+these randomly realized LCs for which the most prominent peak exceeds the
+prominence in the original ACF.
 
 LSP has a formally defined false alarm probability for peaks of given height,
 which we will use to drop low significance peaks from manual review, considering
@@ -556,7 +574,7 @@ significant signals are reported and that they are robust against the LC
 preparation and period measurement technique. As described above, comparing spins
 from stamp-based LCs to FFI-based LCs will help determine the false alarm rate
 and completeness of our FFI spin catalog, and help us fine-tune detrending if
-deemed necessary. The final manually examination of the ACF and periodograms,
+deemed necessary. The final manual examination of the ACF and periodograms,
 along side the LC itself will guard against other periodic signals being
 mistakenly interpreted as rotational modulation.
 
@@ -571,14 +589,14 @@ will target.
 We will also directly compare the rotation periods detected by us to the
 \citep{Lurie_et_al_17} EB spin detections using \kepler{} LCs, which will
 overlap with our detections for their brightest targets. 177 of the Lurie EB
-spins are bright ($T<13.5$) and have spin periods < 13.5 days, all of these
+spins are bright ($T<13.5$) and have spin periods $<13.5$\,days, most of these
 should be detectable by our FFI analysis, and \citep{Prsa_et_al_22} found 86 of
 those to be well detached and 48 to also have deep transits, placing them within
 our expected the high precision catalog. Since the \citep{Lurie_et_al_17}
 catalog is based on the much longer time coverage and much better photometric
 precision \kepler{} data, the comparison will allow us to validate our
 procedures, period measurements, and will allow us to estimate the completeness
-of our catalog.
+of our catalog, as allowed by the limited number of overlapping targets.
 
 We also expect to have a large number of common detections with
 \citep{Oelkers_et_al_18} who used KELT observations to detect stellar rotation.

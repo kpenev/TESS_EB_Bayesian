@@ -61,23 +61,27 @@ amounts to a total of 152 floating point values and an integer (the TIC) for
 each EB. In ASCII machine readable table format, this amounts to a file of size
 $<10$\,MB for the stamp-based EBs and $<200$\,MB for the FFI-based catalog
 uncompressed and at least a factor of 10 smaller when compressed, or a factor of
-two smaller if uncompressed binary format is used (e.g. a FITS table). These
-files are well within size limits for all the repositories mentioned above.
+two smaller if uncompressed binary format is used (e.g. a FITS table). As
+explained in \refsec{params_validation}, we will also provide the disposition of
+each lightcurve from the automated EB search. This table will also not exceed
+200\,MB in size uncomprresed (much smaller with compression). These files are
+well within size limits for all the repositories mentioned above.
 
 \textit{\underline{The two EB spin catalogs}} will include: TIC identifier, the
 period, height, and prominence (height above surrounding minima) of each of the
 periods identified by the period search algorithm for each of the analysis
 methods, as well flags indicating the result of the automated rotational
 modulation search and manual review. The resulting size of this catalog will be
-approximately 4 times smaller than the physical parameter catalog (we will
-provide results for each binary).
+approximately 4 times smaller than the physical parameter catalog, as we we will
+include all binaries, even those without detected spin periods to allow
+statistical studies.
 
 \textit{\underline{The EB physical parameters MCMC samples}} are by far the
 largest data product to be produced by this effort. Providing all samples
 generated is impractical, as \citep{Windemuth_et_al_19} found that for some EBs
 $\sim10^8$ samples ($10^6$ MCMC steps of 128 walkers) are required for
 convergence. On the other hand, they also found that thinning the MCMC chains to
-$\sim5000$ samples is sufficient to allow reproducing the posterior distribution
+$\sim5\,000$ samples is sufficient to allow reproducing the posterior distribution
 to high precision. Using the same data format as \citep{Windemuth_et_al_19}
 (compressed numpy arrays) in order to preserve interoperability, this amounts to
 $\approx$750 KB per EB, or $<2$\,GB for the stamp-based MCMC samples, and
