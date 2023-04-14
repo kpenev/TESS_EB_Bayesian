@@ -12,3 +12,4 @@ data_fnames = dict(
     cmd_isochrone=path.join(data_dir, 'cmd_isochrone_1Gyr_with_TESSmag.dat')
 )
 
+plot_dir = path.join(path.dirname(data_dir), 'project_description', 'figures')
