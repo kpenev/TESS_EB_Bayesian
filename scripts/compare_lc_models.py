@@ -233,7 +233,7 @@ def fit_phase_curve(lc_residuals,
 
     lhs[:, 5] = 1.0
     if extra_lc_components is not None:
-        lhs[:, 6 + i:] = extra_lc_components
+        lhs[:, 6:] = extra_lc_components
     coef = lstsq(lhs, lc_residuals)[0]
     return lhs.dot(coef), coef[-extra_lc_components.shape[1]:]
 

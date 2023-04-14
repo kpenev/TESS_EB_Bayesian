@@ -135,20 +135,17 @@ def set_batman_component_params(batman_params,
         batman_params.u = value
 
 
-def get_batman_lc(phoebe_binary, dataset='lc01', secondary_flux_fraction=None):
+def get_batman_lc(phoebe_binary,
+                  times,
+                  *,
+                  dataset='lc01',
+                  secondary_flux_fraction=None):
     """Use BATMAN to approximate the LC of the given binary."""
 
     params = get_common_batman_params(phoebe_binary)
     set_batman_component_params(params, phoebe_binary, 'primary', dataset)
 
-    model = batman.TransitModel(
-        params,
-        phoebe_binary.get('times@'
-                          +
-                          dataset
-                          +
-                          '@phoebe01@latest@lc@model').get_value()
-    )
+    model = batman.TransitModel(params, times)
 
     flux = model.light_curve(params)
 
@@ -160,6 +157,8 @@ def get_batman_lc(phoebe_binary, dataset='lc01', secondary_flux_fraction=None):
             /
             phoebe_binary['primary@teff'].get_value('K')
         )**4 / params.rp**2
+    elif secondary_flux_fraction == 'split':
+        return flux, model.light_curve(params)
 
     flux += model.light_curve(params) * secondary_flux_fraction
 

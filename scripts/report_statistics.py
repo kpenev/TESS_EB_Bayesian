@@ -10,7 +10,8 @@ from astroquery.mast import Catalogs
 from astropy.io import fits
 from astropy.table import Table
 import pandas
-from scipy import stats
+
+from data_fnames import data_fnames
 
 def report_w19_lurie_crossmatch(lurie_fname, w19_fname):
     """Count how many KIC from W19 also have measured spin period by Lurie."""
@@ -110,7 +111,6 @@ def report_prsa_statistics(prsa_fname, lurie_tic_info):
     print('Total %d detached Prsa TICs in Lurie: ' % prsa_tics_in_lurie.size)
 
 
-
 def get_raw_lurie_tic_info(lurie_fname, lurie_tic_fname):
     """Return a numpy record array of TIC info for all Lurie sources."""
 
@@ -125,9 +125,13 @@ def get_raw_lurie_tic_info(lurie_fname, lurie_tic_fname):
 
     numpy_result = None
     for row_i, kic_id in enumerate(lurie_kic):
+        #False positive
+        #pylint: disable=no-member
         tic_row = numpy.array(Catalogs.query_object('KIC' + str(kic_id),
                                                     catalog='TIC',
                                                     radius=1e-2)[0])
+        #pylint: enable=no-member
+
         if numpy_result is None:
             dtype = numpy.dtype([
                 (name, ('<U10' if name =='KIC' else tic_row.dtype[name]))
@@ -153,7 +157,7 @@ def get_raw_lurie_tic_info(lurie_fname, lurie_tic_fname):
                     repr(numpy_result[row_i]['KIC'])
                 )
             )
-            exit(1)
+            return None
 
 
         print('Progress: %d/%d' % (row_i, lurie_kic.size), end='\n')
@@ -195,28 +199,15 @@ def report_expected_ffi_lurie_spins(lurie_fname, lurie_tic_info):
     )
 
 
-
-
-def report_w19_precision(w19_fname):
-    """Report the 1-sigma confidence interval for each W19 parameter."""
-
-
 def main():
     """Avoid polluting the global namespace."""
 
-    data_dir = path.join(path.dirname(path.dirname(path.abspath(__file__))),
-                         'data')
-    fnames = dict(
-        lurie=path.join(data_dir, 'lurie.fits'),
-        lurie_tic=path.join(data_dir, 'lurie_tic.npy'),
-        w19=path.join(data_dir, 'w19_maxlike_pars.dat'),
-        prsa=path.join(data_dir, 'prsa_ebs.fits')
-    )
-    lurie_tic_info = get_lurie_tic_info(fnames['lurie'], fnames['lurie_tic'])
-    report_expected_ffi_lurie_spins(fnames['lurie'], lurie_tic_info)
+    lurie_tic_info = get_lurie_tic_info(data_fnames['lurie'],
+                                        data_fnames['lurie_tic'])
+    report_expected_ffi_lurie_spins(data_fnames['lurie'], lurie_tic_info)
 
-    report_w19_lurie_crossmatch(fnames['lurie'], fnames['w19'])
-    report_prsa_statistics(fnames['prsa'], lurie_tic_info)
+    report_w19_lurie_crossmatch(data_fnames['lurie'], data_fnames['w19'])
+    report_prsa_statistics(data_fnames['prsa'], lurie_tic_info)
 
 
 if __name__ == '__main__':
