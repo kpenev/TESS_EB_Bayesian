@@ -3,6 +3,7 @@
 """Create a plot comparing model to actual data for a single LC."""
 
 from os import path
+from multiprocessing import Pool
 
 from matplotlib import pyplot
 import numpy
@@ -14,7 +15,7 @@ import phoebe
 
 from general_purpose_python_modules.cmd_utils import CMDInterpolator
 
-from download_lcs import get_astroquery as get_lc
+from download_lcs import get_astroquery as get_lc, get_eb_params
 from data_fnames import data_fnames
 from phoebe_to_batman import get_batman_lc
 from compare_lc_models import fit_phase_curve
@@ -46,14 +47,6 @@ def parse_command_line():
         default='phoebe_models.npy'
     )
     return parser.parse_args()
-
-
-def get_ja_params(tic):
-    """Return the information for the given TIC in the J&A catalog."""
-
-    with fits.open(data_fnames['ja21'], 'readonly') as ja_file:
-        params = ja_file[1].data[:]
-    return params[params['TIC'] == tic]
 
 
 def get_phobe_binary(params, cmd_interpolator):
@@ -229,12 +222,18 @@ def get_lc_model(params, lightcurve, phoebe_model, cmd_interpolator):
         phoebe_binary['ld_func@lc01@' + component].set_value('quadratic')
 
     print('\t\tGenerating BATMAN LC')
-    batman_lc = get_batman_lc(
-        phoebe_binary,
-        lightcurve['TIME'],
-        secondary_flux_fraction=('split' if params['fp'] == 'fit'
-                                 else params['fp'])
-    )
+    with Pool(processes=1) as pool:
+        batman_lc = pool.starmap(
+            get_batman_lc,
+            [
+                (
+                    phoebe_binary,
+                    lightcurve['TIME'],
+                    'lc01',
+                    ('split' if params['fp'] == 'fit' else params['fp'])
+                )
+            ]
+        )[0]
 
     if params['fp'] == 'fit':
         extra_lc_components = numpy.vstack(batman_lc).T
@@ -382,10 +381,10 @@ def fit_lc_model(initial_params,
 def main(config):
     """Avoid polluting global namespace."""
 
-    params = get_ja_params(config.tic)
+    params = get_eb_params(config.tic)
     params = {k: params[k] if k=='TIC' else float(params[k])
               for k in params.dtype.names}
-    lightcurve = get_lc(config.tic, config.lc_provenance)
+    lightcurve = get_lc(config.tic, 6, config.lc_provenance)
     lightcurve = lightcurve[
         numpy.logical_and(numpy.isfinite(lightcurve['TIME']),
                           numpy.isfinite(lightcurve['PDCSAP_FLUX']))

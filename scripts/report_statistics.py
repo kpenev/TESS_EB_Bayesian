@@ -109,6 +109,7 @@ def report_prsa_statistics(prsa_fname, lurie_tic_info):
 
     prsa_tics_in_lurie = lurie_tic_info.index.intersection(prsa_tics)
     print('Total %d detached Prsa TICs in Lurie: ' % prsa_tics_in_lurie.size)
+    print(repr(prsa_tics_in_lurie))
 
 
 def get_raw_lurie_tic_info(lurie_fname, lurie_tic_fname):

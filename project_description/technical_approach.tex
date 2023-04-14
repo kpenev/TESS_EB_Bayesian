@@ -47,6 +47,24 @@ will be flagged for manual inspection and potentially re-analysis based on
 appropriately prepared SAP LC (e.g. using the \texttt{Lightkurve} package
 \citep{Lightkurve_18}).
 
+\begin{figure}
+%
+    \includegraphics[width=\textwidth]{tic0000000033419790_s000006_qlp_spoc_comparison.pdf}
+%
+    \caption{
+%
+        Example LC of a short-period ($P_{orb}=2.02$\,d) EB TIC 33419790 from
+        \tess{} sector 6 observations. Light grey points: SPOC PDC detrended LC
+        from stamp data, circles: QLP non-detrended SAP LC from FFIs, crosses:
+        SPOC LC binned to the FFI cadence. Left panels show the full LC (top)
+        and difference between QLP and binned SPOC (bottom). Right panels zoom
+        in on a single orbital period, with bottom panel zooming in to show the
+        phase curve.
+%
+    }
+%
+\end{figure}
+%
 For FFIs, we will use the Quick Look Pipeline (QLP) LCs \citep{Huang_et_al_20a,
 Huang_et_al_20b, Kunimoto_et_al_21, Kunimoto_et_al_22}.  Those also come in two
 flavors: with and without detrending. The QLP authors themselves caution that
@@ -54,20 +72,19 @@ the detrending procedure will significantly affect low frequency signals. Hence,
 we begin with non-detrended LCs, and adapt the QLP detrending procedure for our
 application by modifying their high-pass filter to preserve signals at or below
 the orbital frequency and applying the detrending as part of the MCMC (see
-\refsec{params_bayesian_analysis}) after subtracting the EB model LC. To
+\refsec{params_bayesian_analysis}) after subtracting the EB model LC.  To
 preserve modulations on the orbital frequency or faster, we need to modify the
 minimum spacing allowed between the smoothing spline nodes used for detrending
 to match the orbit. The rest of the detrending procedure of the QLP will be
 preserved. It should be noted that the exact detrending used will not preclude
-detecting the high signal to noise EBs we are targeting. In fact, the yield
+detecting the high signal to noise EBs we are targeting.  In fact, the yield
 estimates from \refsec{catalog_size} are based on the \citep{Prsa_et_al_22}
-search which applied no detrending. Fig. \ref{fig:QLP_FFI_comparison} compares
-the PDC stamp-based LC and undetrended QLP lightcurve from FFIs of a 2-d EB (TIC
-33419790) for a single sector. The out of eclipse LC exhibits strong ellipsoidal
-variatons, and to much smaller extent a mix of reflection and boosting effects.
-While instrumental trends are visible in the the QLP LC, they will not
-significantly distort results for the high precision sample defined in
-\refsec{catalog_size}.
+search which applied no detrending. Fig.  \ref{fig:QLP_FFI_comparison} compares
+the PDC stamp-based LC and undetrended QLP lightcurve from FFIs of a 2-d EB for
+a single sector. The out of eclipse LC exhibits strong ellipsoidal variatons,
+and to much smaller extent a mix of reflection and boosting effects.  While
+instrumental trends are visible in the the QLP LC, they will not significantly
+distort results for the high precision sample defined in \refsec{catalog_size}.
 
 The first step in our analysis will be to select candidate EB LCs. For stamp
 targets, \citep{Prsa_et_al_22} already conducted a thorough search, combining
