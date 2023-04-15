@@ -49,7 +49,7 @@ appropriately prepared SAP LC (e.g. using the \texttt{Lightkurve} package
 
 \begin{figure}
 %
-    \includegraphics[width=\textwidth]{tic0000000033419790_s000006_qlp_spoc_comparison.pdf}
+    \includegraphics[width=\textwidth]{tic0000000033419790_s000006_qlp_spoc_comparison}
 %
     \caption{
 %
@@ -81,12 +81,13 @@ to match the orbit. The rest of the detrending procedure of the QLP will be
 preserved. It should be noted that the exact detrending used will not preclude
 detecting the high signal to noise EBs we are targeting.  In fact, the yield
 estimates from \refsec{catalog_size} are based on the \citep{Prsa_et_al_22}
-search which applied no detrending. Fig.  \ref{fig:pure_EB_example} compares
-the PDC stamp-based LC and undetrended QLP lightcurve from FFIs of a 2-d EB for
-a single sector. The out of eclipse LC exhibits strong ellipsoidal variatons,
-and to much smaller extent a mix of reflection and boosting effects.  While
-instrumental trends are visible in the the QLP LC, they will not significantly
-distort results for the high precision sample defined in \refsec{catalog_size}.
+search which applied no detrending. Fig.  \fig{pure_EB_example} compares the PDC
+stamp-based LC and undetrended QLP lightcurve from FFIs of a 2-d EB for a single
+sector. The out of eclipse LC exhibits strong ellipsoidal variatons, and to much
+smaller extent a mix of reflection and boosting effects.  While instrumental
+trends remain in the QLP LC, they are well below the level of the target signal
+for our high precision sample (defined in \refsec{catalog_size}), and will not
+significantly distort the results.
 
 The first step in our analysis will be to select candidate EB LCs. For stamp
 targets, \citep{Prsa_et_al_22} already conducted a thorough search, combining
@@ -488,16 +489,28 @@ that achieves appropriately low false alarm rate.
 Searching for periodic signals in EB LCs, indicative of rotational modulation,
 needs to overcome the fact that the eclipses are likely going to be by far the
 dominant periodic signal, and for short period binaries the phase curve effects
-(\refsec{params_lc_sed_modeling}) will also introduce periodicities. Each EB
-lightcurve will be prepared in two different ways, each of which will be
-subjected to the three period search methods below to produce six versions of the
-periodogram to serve as each other's cross checks (see
+(\refsec{params_lc_sed_modeling}) will also introduce periodicities.
+\fig{EB_rotation_example} shows the stamp-based and FFI-based LCs of a binary
+where all three typef of effects are present (eclipses, phase curve varability,
+and rotational modulations). In this example, due to the short orbital period,
+tidas have synchronized the rotation to the orbit, so all effects have very
+simiar dominant frequency, though the rotational modulation pattern changes
+on a longer timescale. Our ability to disentangle these effects will be
+dramatically boosted by the fact that similar observations will be available a
+year later, in some cases a third time, and more for targets where sectors
+overlap. On year timescales, the binary effects will not change, but rotationa
+variability will likely not look anything like pattern observed in the first
+\tess{} sector.
+
+Each EB lightcurve will be prepared in two different ways, each of which will be
+subjected to the three period search methods below to produce six versions of
+the periodogram to serve as each other's cross checks (see
 \refsec{spin_search_and_measurement}). The first method will simply mask out the
 eclipses using the maximum likelihood model from above with appropriate padding
 based on the uncertainties. For long period binaries, where phase curve effects
 are negligible, this will produce lightcurves that simply combine the light of
-two (approximately) isolated stars. The second method will subtract the maximum
-likelihood LC model for the binary. This has the advantage of suppressing all
+two (approximately) isolated stars.  The second method will subtract the maximum
+likelihood LC model for the binary.  This has the advantage of suppressing all
 binary effects from the lightcurve, however the maximum likelihood parameters
 will not be exactly equal to the actual physical parameters and hence small
 residuals are likely to remain in the LC. We will account for this when
