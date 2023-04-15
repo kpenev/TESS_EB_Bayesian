@@ -63,6 +63,8 @@ appropriately prepared SAP LC (e.g. using the \texttt{Lightkurve} package
 %
     }
 %
+    \label{fig:pure_EB_example}
+%
 \end{figure}
 %
 For FFIs, we will use the Quick Look Pipeline (QLP) LCs \citep{Huang_et_al_20a,
@@ -79,7 +81,7 @@ to match the orbit. The rest of the detrending procedure of the QLP will be
 preserved. It should be noted that the exact detrending used will not preclude
 detecting the high signal to noise EBs we are targeting.  In fact, the yield
 estimates from \refsec{catalog_size} are based on the \citep{Prsa_et_al_22}
-search which applied no detrending. Fig.  \ref{fig:QLP_FFI_comparison} compares
+search which applied no detrending. Fig.  \ref{fig:pure_EB_example} compares
 the PDC stamp-based LC and undetrended QLP lightcurve from FFIs of a 2-d EB for
 a single sector. The out of eclipse LC exhibits strong ellipsoidal variatons,
 and to much smaller extent a mix of reflection and boosting effects.  While
@@ -445,6 +447,26 @@ build a proper injection-recovery pipeline if desired.
 \subsubsection{Lightcurve Preparation}
 %
 \label{sec:spin_lc_preparation}
+
+\begin{figure}
+%
+    \includegraphics[width=\textwidth]{tic0000000027767184_s000014_qlp_spoc_comparison}
+%
+    \caption{
+%
+        Example LC of a short-period EB TIC 27767184 from \tess{} sector 14
+        observations. Light grey points: SPOC PDC detrended LC from stamp data,
+        circles: QLP non-detrended SAP LC from FFIs, crosses: SPOC LC binned to
+        the FFI cadence. Left panels show the full LC (top) and zoomed in on the
+        out of eclipse variations (bottom). Right panels zoom in on a single
+        orbital period.
+%
+    }
+%
+    \label{fig:EB_rotation_example}
+%
+\end{figure}
+%
 
 For detecting rotational modulation from high cadence stamp-based photometry, we
 will follow many successful analyses in the literature which have all concluded
