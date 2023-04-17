@@ -22,18 +22,11 @@ def parse_command_line():
         ignore_unknown_config_file_keys=False
     )
     parser.add_argument(
-        '--tic-sector',
+        '--tic',
         type=int,
-        nargs=2,
-        default=(27767184, 14),
+        default=27767184,
         help='The TIC identifier and sector of the LC to generate periodograms '
         'for.'
-    )
-    parser.add_argument(
-        '--lightcurve-provenance',
-        choices=['SPOC', 'QLP'],
-        default='SPOC',
-        help='The pipeline to get the lightcurve for.'
     )
     parser.add_argument(
         '--acf-fname', '--acf',
@@ -63,6 +56,7 @@ def parse_command_line():
     parser.add_argument(
         '--match-resolution',
         type=float,
+        nargs=2,
         default=1.0 / 48.0,
         help='The resolution at which to bin the LC to match transits'
     )
@@ -144,113 +138,292 @@ def match_lc_segment(target_fluxes,
     return target_fluxes * shift_scale[0] + shift_scale[1]
 
 
+def iterate_orbit_slice(lightcurve,
+                        bin_times,
+                        orbital_period,
+                        flux_column,
+                        reference_time,
+                        *,
+                        include_partial=True,
+                        average=numpy.nanmean):
+    """Split LC in orbits, iterate returning slice of LC and binned flux."""
+
+    min_norb = int((numpy.floor if include_partial else numpy.ceil)(
+        (lightcurve['TIME'][0] - reference_time) / orbital_period
+    ))
+    max_norb = int((numpy.ceil if include_partial else numpy.floor)(
+        (lightcurve['TIME'][-1] - reference_time) / orbital_period
+    ))
+    print('Norb range: ' + repr((min_norb, max_norb)))
+    orbit_splits = numpy.searchsorted(
+        lightcurve['TIME'],
+        (
+            numpy.arange(min_norb, max_norb + 1, dtype=float) * orbital_period
+            +
+            reference_time
+        )
+    )
+    for norb in range(max_norb-min_norb):
+        if orbit_splits[norb] == orbit_splits[norb + 1]:
+            continue
+
+        binned_fluxes = bin_lightcurve(
+            lightcurve[flux_column][orbit_splits[norb]:orbit_splits[norb + 1]],
+            (
+                lightcurve['TIME'][orbit_splits[norb]:orbit_splits[norb + 1]]
+                - (norb + min_norb)* orbital_period
+                - reference_time
+            ),
+            bin_times,
+            average=average
+        )
+        yield (
+            lightcurve[orbit_splits[norb]:orbit_splits[norb + 1]],
+            binned_fluxes,
+            (norb + min_norb) * orbital_period + reference_time
+        )
+
+
 def get_reference(first_lc, match_resolution, orbital_period, flux_column):
     """Return a full orbital period of flux to match eclipses to."""
 
     match_times = numpy.arange(0, orbital_period, match_resolution)
-    pyplot.plot(first_lc['TIME'], first_lc[flux_column])
-    pyplot.show()
-    for norb in range(
-            int((first_lc['TIME'][-1] - first_lc['TIME'][0]) // orbital_period)
-    ):
-        try_lc_portion = (
-            (first_lc['TIME'] - first_lc['TIME'][0]) // orbital_period
-            ==
-            norb
-        )
-
-        print('Norb: ' + repr(norb))
-        match_fluxes = bin_lightcurve(
-            first_lc[flux_column][try_lc_portion],
-            (
-                first_lc['TIME'][try_lc_portion]
-                - norb * orbital_period
-                - first_lc['TIME'][0]
-            ),
-            match_times,
-            average=numpy.nanmean
-        )
+    for _, match_fluxes, _ in iterate_orbit_slice(first_lc,
+                                                  match_times,
+                                                  orbital_period,
+                                                  flux_column,
+                                                  first_lc['TIME'][0],
+                                                  include_partial=False):
         if numpy.isfinite(match_fluxes).all():
             break
 
-    assert numpy.isfinite(match_fluxes).all()
-    pyplot.plot(match_times, match_fluxes)
-    pyplot.show()
+    #Assumption is that at least one period is available in first LC.
+    #pylint: disable=undefined-loop-variable
     return match_times, match_fluxes
+    #pylint: enable=undefined-loop-variable
 
 
-def get_folded_binned_lc(match_times, match_flixes, lightcurve_dict, params):
+def get_folded_matched_lc(lightcurve_dict,
+                         params,
+                         match_resolution,
+                         flux_column):
     """Match eclipses in each orbital period segment of each LC to reference."""
 
-    first_obs_time = lightcurve_dict[min(lightcurve_dict.keys())]['TIME'][0]
-    for lightcurve in lightcurve_dict.values():
-        pass
+    first_lc = lightcurve_dict[min(lightcurve_dict.keys())]
+    match_times, match_fluxes = get_reference(first_lc,
+                                              match_resolution,
+                                              float(params['Per']),
+                                              flux_column)
+
+    eclipse_mask = get_eclipse_mask(match_times + first_lc['TIME'][0],
+                                  params,
+                                  1.0)
+    print('Will use %d points to solve for scale and shift.'
+          %
+          eclipse_mask.sum())
+    assert numpy.isfinite(match_fluxes).all()
+
+
+    sum_binned_fluxes = numpy.zeros(match_fluxes.shape)
+    num_summed_fluxes = numpy.zeros(match_fluxes.shape, dtype=int)
+    while True:
+        result_fluxes = numpy.empty(0)
+        result_times = numpy.empty(0)
+        for lightcurve in [lightcurve_dict[14]]:
+            lightcurve = numpy.copy(lightcurve)
+            time = numpy.copy(lightcurve['TIME'][:-2])
+            lightcurve = lightcurve[2:]
+            lightcurve['TIME'] = time
+            lightcurve = lightcurve[
+                numpy.logical_and(
+                    numpy.isfinite(lightcurve['TIME']),
+                    numpy.isfinite(lightcurve[flux_column])
+                )
+            ]
+
+            match_lhs = numpy.empty((match_times.size, 2))
+            match_lhs[:, 1] = 1.0
+            for lc_portion, match_lhs[:, 0], slice_tstart in iterate_orbit_slice(
+                    lightcurve,
+                    match_times,
+                    params['Per'],
+                    flux_column,
+                    first_lc['TIME'][0],
+                    average=numpy.mean
+            ):
+
+                finite = numpy.isfinite(match_lhs[:, 0])
+                match_mask = numpy.logical_and(eclipse_mask, finite)
+                shift_scale = lstsq(match_lhs[match_mask],
+                                    match_fluxes[match_mask])[0]
+                sum_binned_fluxes[finite] += match_lhs.dot(shift_scale)[finite]
+                num_summed_fluxes[finite] += 1
+
+                result_times = numpy.append(
+                    result_times,
+                    lc_portion['TIME'] - slice_tstart
+                )
+                result_fluxes = numpy.append(
+                    result_fluxes,
+                    shift_scale[0] * lc_portion[flux_column] + shift_scale[1]
+                )
+#                pyplot.plot(
+#                    lc_portion['TIME'] - slice_tstart,
+#                    shift_scale[0] * lc_portion[flux_column] + shift_scale[1],
+#                    zorder=10
+#                )
+#        pyplot.legend()
+#        pyplot.show()
+        rms_ref_change = numpy.sqrt(
+            numpy.mean(
+                numpy.square(
+                    match_fluxes
+                    -
+                    sum_binned_fluxes / num_summed_fluxes
+                )
+            )
+        ) / match_fluxes.mean()
+        print('RMS ref change: ' + repr(rms_ref_change))
+        if rms_ref_change < 1e-5:
+            break
+        match_fluxes = sum_binned_fluxes / num_summed_fluxes
+
+    pyplot.plot(match_times,
+                match_fluxes,
+                '-k',
+                label='reference',
+                zorder=100)
+    pyplot.show()
+
+    sorter = numpy.argsort(result_times)
+    return result_times[sorter], result_fluxes[sorter]
 
 
 def main(config):
     """Avoid polluting global namespace."""
 
-    lightcurve_dict = get_lc(config.tic_sector[0], 'all',
-                             provenance=config.lightcurve_provenance)
-    print('LC dict: ' + repr(lightcurve_dict))
-    params = get_eb_params(config.tic_sector[0], 'prsa')
+    lightcurve_dict = get_lc(config.tic, 'all', 'SPOC')
+    params = get_eb_params(config.tic, 'prsa')
 
     print('Params:\n' + '\n'.join(['%s: %s' % (p, repr(params[p]))
                                    for p in params.dtype.names]))
-    flux_column = 'SAP_FLUX'
-    if config.lightcurve_provenance == 'SPOC':
-        flux_column = 'PDC' + flux_column
-    all_fluxes = numpy.empty(0)
-    all_times = numpy.empty(0)
 
-
-    match_times, match_fluxes = get_reference(
-        lightcurve_dict[min(lightcurve_dict.keys())],
+    reference_time = lightcurve_dict[min(lightcurve_dict.keys())]['TIME'][0]
+    folded_spoc_times, folded_spoc_fluxes = get_folded_matched_lc(
+        lightcurve_dict,
+        params,
         config.match_resolution,
-        params['Per'],
-        flux_column
+        'PDCSAP_FLUX'
     )
 
+    lightcurve_dict = get_lc(config.tic, 'all', 'QLP')
+    print('Available sectiors: ' + repr(lightcurve_dict.keys()))
+
     for sector, lightcurve in lightcurve_dict.items():
+        if sector <= 15:
+            continue
         lightcurve = lightcurve[
             numpy.logical_and(
                 numpy.isfinite(lightcurve['TIME']),
-                numpy.isfinite(lightcurve[flux_column])
+                numpy.isfinite(lightcurve['SAP_FLUX'])
             )
         ]
-        out_of_eclipse = numpy.logical_not(get_eclipse_mask(lightcurve['TIME'],
-                                                            params))
 
-        all_fluxes = numpy.append(all_fluxes, lightcurve[flux_column])
-        all_times = numpy.append(all_times, lightcurve['TIME'])
+        corrected_flux = numpy.copy(lightcurve['SAP_FLUX'])
+        min_norb = int(numpy.floor((lightcurve['TIME'][0] - reference_time)
+                                   /
+                                   params['Per']))
+        max_norb = int(numpy.ceil((lightcurve['TIME'][-1] - reference_time)
+                                  /
+                                  params['Per']))
+        orbit_splits = numpy.searchsorted(
+            lightcurve['TIME'],
+            (
+                numpy.arange(min_norb, max_norb + 1, dtype=float)
+                *
+                params['Per']
+                +
+                reference_time
+            )
+        )
+        for norb in range(max_norb - min_norb):
+            lightcurve_slice = lightcurve[orbit_splits[norb]
+                                          :
+                                          orbit_splits[norb + 1]]
 
-        #pyplot.plot(lightcurve['TIME'], lightcurve[flux_column], '.k')
-        pyplot.plot(lightcurve['TIME'][out_of_eclipse],
-                    lightcurve[flux_column][out_of_eclipse], '.g')
+            binned_folded_flux = numpy.ones(
+                (orbit_splits[norb + 1] - orbit_splits[norb], 2)
+            )
+            binned_folded_flux[:, 0] = bin_lightcurve(
+                folded_spoc_fluxes,
+                folded_spoc_times,
+                (
+                    lightcurve_slice['TIME']
+                    -
+                    reference_time
+                    -
+                    (norb  + min_norb) * params['Per']
+                ),
+                average=numpy.nanmean
+            )
+            assert numpy.isfinite(binned_folded_flux).all()
+            assert numpy.isfinite(lightcurve_slice['SAP_FLUX']).all()
+            eclipse_mask = get_eclipse_mask(lightcurve_slice['TIME'],
+                                            params,
+                                            1.0)
+            if eclipse_mask.sum():
+                shift_scale = lstsq(
+                    binned_folded_flux[eclipse_mask],
+                    lightcurve_slice['SAP_FLUX'][eclipse_mask]
+                )[0]
+                corrected_flux[
+                    orbit_splits[norb]
+                    :
+                    orbit_splits[norb + 1]
+                ] /= binned_folded_flux.dot(shift_scale)
+            else:
+                corrected_flux[
+                    orbit_splits[norb]
+                    :
+                    orbit_splits[norb + 1]
+                ] = numpy.nan
+
+        corrected_flux[numpy.abs(corrected_flux - 1) > 0.03] = numpy.nan
+        usable = numpy.logical_and(
+            numpy.logical_not(get_eclipse_mask(lightcurve['TIME'], params)),
+            numpy.isfinite(corrected_flux)
+        )
+
+#        pyplot.plot(lightcurve['TIME'], lightcurve['SAP_FLUX'], label='raw')
+#        pyplot.plot(lightcurve['TIME'][usable],
+#                    corrected_flux[usable],
+#                    label='corrected')
+#        pyplot.legend()
+#        pyplot.suptitle('Sector: ' + repr(sector))
+#        pyplot.show()
 
         lomb_scargle = numpy.empty((3, 1000))
         lomb_scargle[0] = numpy.linspace(0.1, 10, 1000)
         lomb_scargle[1] = LombScargle(
             lightcurve['TIME'],
-            lightcurve[flux_column]
-        ).power(frequency=1.0 / lomb_scargle[0])
-        lomb_scargle[2] = LombScargle(
-            lightcurve['TIME'][out_of_eclipse],
-            lightcurve[flux_column][out_of_eclipse]
+            lightcurve['SAP_FLUX']
         ).power(frequency=1.0 / lomb_scargle[0])
 
-        #pyplot.plot(lomb_scargle[0], lomb_scargle[1], '-r', label='raw')
-#        pyplot.plot(lomb_scargle[0],
-#                    lomb_scargle[2],
-#                    '-',
-#                    label='Sector %d' % sector)
+        lomb_scargle[2] = LombScargle(
+            lightcurve['TIME'][usable],
+            corrected_flux[usable]
+        ).power(frequency=1.0 / lomb_scargle[0])
+
+#        pyplot.plot(lomb_scargle[0], lomb_scargle[1], '-r', label='raw')
+        pyplot.plot(lomb_scargle[0],
+                    lomb_scargle[2],
+                    '-',
+                    label='Sector ' + repr(sector))
+#        pyplot.show()
     pyplot.axvline(params['Per'], color='black')
     pyplot.axvline(params['Per'] / 2, color='black')
     pyplot.legend()
 
-    pyplot.show()
-
-    pyplot.plot(all_times % params['Per'], all_fluxes, ',k')
     pyplot.show()
 
 

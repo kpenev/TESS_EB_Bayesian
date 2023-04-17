@@ -14,7 +14,7 @@ from astropy.io import fits
 import numpy
 from scipy.linalg import lstsq
 
-from data_fnames import plot_dir, data_fnames
+from data_fnames import data_fnames
 
 #def get_lightkurve(tic, plot=False):
 #    """Return the lightcurve using lightkurve interface."""
@@ -203,7 +203,6 @@ def bin_lightcurve(fluxes,
         times,
         0.5 * (bin_times[1:] + bin_times[:-1])
     ) + exposure_shift
-    print('Split indices: ' + repr(split_indices))
 
     assert split_indices.size == bin_times.size - 1
     binned_flux = numpy.empty(bin_times.size)
@@ -288,126 +287,6 @@ def match_lightcurves(qlp_lc, spoc_lc, spoc_flux, exposure_shift=0):
         enter = False
 
     return qlp_lc, binned_spoc_flux, unbinned_spoc_flux
-
-
-def plot_spoc_qlp_comparison(tic,
-                             sector,
-                             zoom_y,
-                             *,
-                             exposure_shift=0,
-                             bottom_left='diff'):
-    """Create a plot comparing SPOC PDCSAP LC to QLP un-detrended LC."""
-
-    spoc_flux = 'PDCSAP_FLUX'
-
-    qlp_lc = get_astroquery(tic, sector, 'QLP')
-    spoc_lc = get_astroquery(tic, sector, 'SPOC')
-    params = get_eb_params(tic)
-    first_eclipse = params['t1']
-    if len(params) == 0:
-        params = get_eb_params(tic, 'prsa')
-        first_eclipse = params['BJD0']
-
-    print('Params: ' + repr(params))
-
-    spoc_lc = spoc_lc[
-        numpy.logical_and(
-            numpy.isfinite(spoc_lc['TIME']),
-            numpy.isfinite(spoc_lc[spoc_flux])
-        )
-    ]
-    time_offset = 100 * (spoc_lc['TIME'][0] // 100)
-    qlp_lc['TIME'] -= time_offset
-    spoc_lc['TIME'] -= time_offset
-    first_eclipse -= time_offset
-
-    qlp_lc, binned_spoc_flux, unbinned_spoc_flux = match_lightcurves(
-        qlp_lc,
-        spoc_lc,
-        spoc_flux,
-        exposure_shift
-    )
-
-    figure, axes = pyplot.subplots(
-        nrows=2,
-        ncols=2,
-        sharex='col',
-        sharey=('row' if bottom_left == 'zoomy' else False),
-        gridspec_kw=dict(hspace=0,
-                         wspace=0.05,
-                         height_ratios=[1.0, 1.0],
-                         width_ratios=[1.0, 0.6],
-                         left=0.1,
-                         bottom=0.17,
-                         top=0.89,
-                         right=0.93),
-        figsize=[6.4, 2.5]
-    )
-    label = True
-    flux_axes = [axes[0, 0], axes[0, 1], axes[1, 1]]
-    if bottom_left == 'zoomy':
-        flux_axes.append(axes[1, 0])
-    for plot_ax in flux_axes:
-        plot_ax.plot(spoc_lc['TIME'],
-                     unbinned_spoc_flux,
-                     '.',
-                     markeredgecolor='lightgrey',
-                     markerfacecolor='lightgrey',
-                     label=('SPOC ' + spoc_flux[:-5] if label else None))
-        plot_ax.plot(qlp_lc['TIME'],
-                     binned_spoc_flux[:, 0],
-                     'xr',
-                     label=('binned SPOC ' + spoc_flux[:-5] if label else None))
-        plot_ax.plot(qlp_lc['TIME'],
-                     qlp_lc['SAP_FLUX'],
-                     '.g',
-                     markersize=2,
-                     label=('QLP SAP' if label else None))
-        label = False
-    axes[0, 0].set_ylabel('Flux')
-
-    axes[0, 1].set_xlim(80.5, 80.5 + params['Per'])
-#    axes[0, 1].set_yticks([])
-
-    zoom_x_min = 0.4 * spoc_lc['TIME'][0] + 0.6 * spoc_lc['TIME'][-1]
-    zoom_x_min = (
-        ((zoom_x_min - first_eclipse) // params['Per'] + 0.25)
-        *
-        params['Per']
-        +
-        first_eclipse
-    )
-    axes[1, 1].set_xlim(zoom_x_min, zoom_x_min + params['Per'])
-    axes[1, 1].set_ylim(zoom_y)
-    axes[1, 1].tick_params(axis='y', left=False, right=True)
-
-    axes[0, 1].yaxis.tick_right()
-    axes[1, 1].yaxis.tick_right()
-
-    pyplot.figlegend(ncol=3, loc='upper center', borderaxespad=0)
-
-    if bottom_left == 'diff':
-        axes[1, 0].plot(qlp_lc['TIME'],
-                        binned_spoc_flux[:, 0] - qlp_lc['SAP_FLUX'],
-                        '.k',
-                        label='SPOC PDCSAP - QLP SAP')
-#    pyplot.ylim(-1.5e-3, 2e-3)
-    figure.suptitle('BJD - %d [days]' % (2457000 + time_offset),
-                    horizontalalignment='center',
-                    verticalalignment='bottom',
-                    x=0.5,
-                    y=0.0)
-    axes[1, 0].legend(markerscale=0,
-                      frameon=True,
-                      facecolor='white',
-                      edgecolor='none')
-
-    pyplot.savefig(
-        path.join(
-            plot_dir,
-            'tic%016d_s%06d_qlp_spoc_comparison.pdf' % (tic, sector)
-        )
-    )
 
 
 def main():
