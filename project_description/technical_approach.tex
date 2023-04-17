@@ -478,12 +478,12 @@ build a proper injection-recovery pipeline if desired.
 
 For detecting rotational modulation from high cadence stamp-based photometry, we
 will follow many successful analyses in the literature which have all concluded
-that the best approach is to use PDC detrended LCs. For FFI based LCs however,
-the QLP detrending is likely to eliminate the rotational variability if the spin
-period exceeds 10 days or so. As a result, we will use the raw lightcurves, but
-apply a battery of validation tests to reject false signals (see
-\refsec{spin_validation}). Preliminary tests show that the proposed validations
-successfully reject the vast majority of false signals.
+that the best approach is to use PDC detrended LCs
+\citep[c.f.][]{Lurie_et_al_17, Lu_et_al_20, CantoMartins_et_al_20}. For FFI
+based LCs however, the QLP detrending is likely to eliminate the rotational
+variability if the spin period exceeds 10 days or so. As a result, we will use
+the raw lightcurves, but apply a battery of validation tests to reject false
+signals (see \refsec{spin_validation}).
 
 As each bright ($T<13.5$) stamp target will also have a QLP lightcurve, comparing
 to the spins from PDC detrended stamp LCs to those of the same stars from FFIs
@@ -498,14 +498,14 @@ needs to overcome the fact that the eclipses are likely going to be by far the
 dominant periodic signal, and for short period binaries the phase curve effects
 (\refsec{params_lc_sed_modeling}) will also introduce periodicities.
 \fig{EB_rotation_example} shows the stamp-based and FFI-based LCs of a binary
-where all three typef of effects are present (eclipses, phase curve varability,
+where all three types of effects are present (eclipses, phase curve variability,
 and rotational modulations). In this example, due to the short orbital period,
-tidas have synchronized the rotation to the orbit, so all effects have very
-simiar dominant frequency, though the rotational modulation pattern changes
+tides have synchronized the rotation to the orbit, so all effects have very
+similar dominant frequency, though the rotational modulation pattern changes
 on a longer timescale. Our ability to disentangle these effects will be
 dramatically boosted by the fact that similar observations will be available a
 year later, in some cases a third time, and more for targets where sectors
-overlap. On year timescales, the binary effects will not change, but rotationa
+overlap. On year timescales, the binary effects will not change, but rotational
 variability will likely not look anything like pattern observed in the first
 \tess{} sector.
 
@@ -563,15 +563,15 @@ neighborhood of each peak group. Conditions are imposed on the peak prominence
 
 \textit{\underline{The Wavelet Transform (WT) and global wavelet spectrum
 (GWS)}} is a method to estimate the power spectrum of a signal as a function of
-time (see for example \citep{Grossmann_Morlet_84}), producing wavet maps giving
-the spectral power vs frequency and time. Because WT is time dependent, it is
-robust against the pattern of spots on the stellar surface evolving with time.
-It is also a powerful techniques for correctly distinguishing the true rotation
-period vs its aliases in the presence of multiple dark features on the surface
-\citep{Bravo_et_al_14}. Finally, integrating the wavelet map over time gives us
-another periodogram, known as the GWS, the peaks of which can be directly
-compared to the ACF and LSP in an automated fashion, and like the LSP it is
-sensitive to multiple periods present in the lightcurve.
+time (see for example \citep{Grossmann_Morlet_84}), producing wavelet maps
+giving the spectral power vs frequency and time. Because WT is time dependent,
+it is robust against the pattern of spots on the stellar surface evolving with
+time.  It is also a powerful techniques for correctly distinguishing the true
+rotation period vs its aliases in the presence of multiple dark features on the
+surface \citep{Bravo_et_al_14}. Finally, integrating the wavelet map over time
+gives us another periodogram, known as the GWS, the peaks of which can be
+directly compared to the ACF and LSP in an automated fashion, and like the LSP
+it is sensitive to multiple periods present in the lightcurve.
 
 We will begin the spin analysis by calculating ACF, LSP, and GWS as described
 above. For the stamp EBs, it is feasible to examine all LCs manually (per
@@ -653,15 +653,16 @@ will target.
 
 We will also directly compare the rotation periods detected by us to the
 \citep{Lurie_et_al_17} EB spin detections using \kepler{} LCs, which will
-overlap with our detections for their brightest targets. 177 of the Lurie EB
-spins are bright ($T<13.5$) and have spin periods $<13.5$\,days, most of these
-should be detectable by our FFI analysis, and \citep{Prsa_et_al_22} found 86 of
-those to be well detached and 48 to also have deep transits, placing them within
-our expected the high precision catalog. Since the \citep{Lurie_et_al_17}
-catalog is based on the much longer time coverage and much better photometric
-precision \kepler{} data, the comparison will allow us to validate our
-procedures, period measurements, and will allow us to estimate the completeness
-of our catalog, as allowed by the limited number of overlapping targets.
+overlap with our detections for their brightest targets. 177 of the
+\citep{Lurie_et_al_17} EB spins are bright ($T<13.5$) and have spin periods
+$<13.5$\,days, most of these should be detectable by our FFI analysis, and
+\citep{Prsa_et_al_22} found 86 of those to be well detached and 48 to also have
+deep transits, placing them within our expected the high precision catalog.
+Since the \citep{Lurie_et_al_17} catalog is based on the much longer time
+coverage and much better photometric precision \kepler{} data, the comparison
+will allow us to validate our procedures, period measurements, and will allow us
+to estimate the completeness of our catalog, as allowed by the limited number of
+overlapping targets.
 
 We also expect to have a large number of common detections with
 \citep{Oelkers_et_al_18} who used KELT observations to detect stellar rotation.
