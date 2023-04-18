@@ -7,6 +7,9 @@ from configargparse import ArgumentParser, DefaultsFormatter
 from astropy.timeseries import LombScargle
 import numpy
 from scipy.linalg import lstsq
+from scipy import signal
+from scipy.optimize import minimize
+from scipy.interpolate import interp1d
 
 from download_lcs import get_astroquery as get_lc, get_eb_params, bin_lightcurve
 
@@ -243,7 +246,11 @@ def get_folded_matched_lc(lightcurve_dict,
 
             match_lhs = numpy.empty((match_times.size, 2))
             match_lhs[:, 1] = 1.0
-            for lc_portion, match_lhs[:, 0], slice_tstart in iterate_orbit_slice(
+            for (
+                    lc_portion,
+                    match_lhs[:, 0],
+                    slice_tstart
+            ) in iterate_orbit_slice(
                     lightcurve,
                     match_times,
                     params['Per'],
@@ -299,11 +306,10 @@ def get_folded_matched_lc(lightcurve_dict,
     return result_times[sorter], result_fluxes[sorter]
 
 
-def main(config):
-    """Avoid polluting global namespace."""
+def get_periodogram_data(config, params):
+    """Return versions of the available LCs ready for peroid analysis."""
 
     lightcurve_dict = get_lc(config.tic, 'all', 'SPOC')
-    params = get_eb_params(config.tic, 'prsa')
 
     print('Params:\n' + '\n'.join(['%s: %s' % (p, repr(params[p]))
                                    for p in params.dtype.names]))
@@ -319,9 +325,8 @@ def main(config):
     lightcurve_dict = get_lc(config.tic, 'all', 'QLP')
     print('Available sectiors: ' + repr(lightcurve_dict.keys()))
 
+    result = dict()
     for sector, lightcurve in lightcurve_dict.items():
-        if sector <= 15:
-            continue
         lightcurve = lightcurve[
             numpy.logical_and(
                 numpy.isfinite(lightcurve['TIME']),
@@ -389,11 +394,86 @@ def main(config):
                 ] = numpy.nan
 
         corrected_flux[numpy.abs(corrected_flux - 1) > 0.03] = numpy.nan
-        usable = numpy.logical_and(
-            numpy.logical_not(get_eclipse_mask(lightcurve['TIME'], params)),
-            numpy.isfinite(corrected_flux)
+        remove_eclipse_mask = numpy.logical_not(
+            get_eclipse_mask(lightcurve['TIME'], params)
+        )
+        usable = numpy.logical_and(remove_eclipse_mask,
+                                   numpy.isfinite(corrected_flux))
+        result[sector] = dict(
+            times=lightcurve['TIME'],
+            raw_flux=lightcurve['SAP_FLUX'],
+            corrected_flux=corrected_flux,
+            remove_eclipse_mask=remove_eclipse_mask,
+            usable_corrected_mask=usable
         )
 
+    return result
+
+
+def resample_lc(times, fluxes):
+    """Return given LC with uniform sampling using linear interpolation."""
+
+    def time_sampling_residual(offset_step):
+        """Rms between uniform sampled time and observations ignoring gaps."""
+
+        if (
+            offset_step[1] <= 0
+            or
+            offset_step[0] > times[0]
+            or
+            offset_step[0] < times[0] - offset_step[1]
+        ):
+            return numpy.nan
+
+        nsteps = (int(numpy.ceil((times[-1] - offset_step[0]) / offset_step[1]))
+                  +
+                  1)
+        uniform_times = (
+            offset_step[0]
+            +
+            offset_step[1] * numpy.arange(nsteps, dtype=float)
+        )
+        neighbors = numpy.searchsorted(uniform_times, times)
+        return numpy.sqrt(
+            numpy.minimum(
+                numpy.square(uniform_times[neighbors] - times),
+                numpy.square(uniform_times[neighbors - 1] - times),
+            ).sum()
+        )
+
+    assert numpy.isfinite(times).all()
+    timestep_guess = numpy.median(times[1:] - times[:-1])
+    time_offset, time_step = minimize(
+        time_sampling_residual,
+        (times[0] - timestep_guess, timestep_guess),
+        method='Nelder-Mead'
+    ).x
+
+    nsteps = (int(numpy.ceil((times[-1] - time_offset) / time_step)) + 1)
+    resampled_times = (
+        time_offset
+        +
+        time_step * numpy.arange(nsteps, dtype=float)
+    )
+    resampled_times = resampled_times[
+        numpy.logical_and(resampled_times >= times[0],
+                          resampled_times <= times[-1])
+    ]
+    resampled_fluxes = interp1d(
+        times,
+        fluxes,
+        assume_sorted=True,
+    )(
+        resampled_times
+    )
+    return resampled_times, resampled_fluxes, time_step
+
+
+def make_lsp_figures(periodogram_data, params):
+    """Create plots of Lomb-Sacrgle periodograms."""
+
+    periodograms = dict()
+    for sector, sector_data in periodogram_data.items():
 #        pyplot.plot(lightcurve['TIME'], lightcurve['SAP_FLUX'], label='raw')
 #        pyplot.plot(lightcurve['TIME'][usable],
 #                    corrected_flux[usable],
@@ -402,30 +482,148 @@ def main(config):
 #        pyplot.suptitle('Sector: ' + repr(sector))
 #        pyplot.show()
 
-        lomb_scargle = numpy.empty((3, 1000))
+#        if sector <= 15:
+#            continue
+
+        lomb_scargle = numpy.empty((4, 1000))
         lomb_scargle[0] = numpy.linspace(0.1, 10, 1000)
+
         lomb_scargle[1] = LombScargle(
-            lightcurve['TIME'],
-            lightcurve['SAP_FLUX']
+            sector_data['times'],
+            sector_data['raw_flux'] - numpy.mean(sector_data['raw_flux'])
         ).power(frequency=1.0 / lomb_scargle[0])
 
         lomb_scargle[2] = LombScargle(
-            lightcurve['TIME'][usable],
-            corrected_flux[usable]
+            sector_data['times'][sector_data['remove_eclipse_mask']],
+            (
+                sector_data['raw_flux'][sector_data['remove_eclipse_mask']]
+                -
+                numpy.mean(
+                    sector_data['raw_flux'][sector_data['remove_eclipse_mask']]
+                )
+            )
         ).power(frequency=1.0 / lomb_scargle[0])
+
+        lomb_scargle[3] = LombScargle(
+            sector_data['times'][sector_data['usable_corrected_mask']],
+            (
+                sector_data[
+                    'corrected_flux'
+                ][
+                    sector_data['usable_corrected_mask']
+                ]
+                -
+                numpy.mean(
+                    sector_data[
+                        'corrected_flux'
+                    ][
+                        sector_data['usable_corrected_mask']
+                    ]
+                )
+            )
+        ).power(frequency=1.0 / lomb_scargle[0])
+
+        periodograms[sector] = lomb_scargle
+
 
 #        pyplot.plot(lomb_scargle[0], lomb_scargle[1], '-r', label='raw')
         pyplot.plot(lomb_scargle[0],
                     lomb_scargle[2],
                     '-',
-                    label='Sector ' + repr(sector))
-#        pyplot.show()
-    pyplot.axvline(params['Per'], color='black')
-    pyplot.axvline(params['Per'] / 2, color='black')
-    pyplot.legend()
+                    label='no eclispe Sector ' + repr(sector))
 
-    pyplot.show()
+        pyplot.plot(lomb_scargle[0],
+                    lomb_scargle[3],
+                    '-',
+                    label='corrected Sector ' + repr(sector))
 
+        for i in range(1, 10):
+            pyplot.axvline(params['Per'] / i,
+                           color='black')
+            pyplot.text(
+                x=params['Per'] / i,
+                y=pyplot.ylim()[1],
+                s=('Porb' + ('' if i==1 else ' / ' + str(i))),
+                verticalalignment='bottom',
+                horizontalalignment='center'
+            )
+
+        pyplot.legend()
+        pyplot.show()
+
+
+def plot_wavelet_map(times,
+                     fluxes,
+                     time_step,
+                     orbital_period,
+                     title,
+                     *,
+                     wavelet_order=6):
+    """Calculate and display the wavelet map."""
+
+    wavelet_periods = numpy.linspace(0.1, 10, 100)
+    wavelet_widths = (wavelet_order
+                      *
+                      wavelet_periods
+                      /
+                      time_step
+                      /
+                      (2.0 * numpy.pi))
+    wavelet_map = signal.cwt(fluxes - numpy.mean(fluxes),
+                             signal.morlet2,
+                             wavelet_widths,
+                             w=wavelet_order)
+    pyplot.pcolormesh(times,
+                      wavelet_periods,
+                      numpy.abs(wavelet_map),
+                      cmap='viridis',
+                      shading='gouraud')
+    pyplot.axhline(y=orbital_period, color='black')
+    pyplot.title(title)
+
+
+def make_wavelet_figures(periodogram_data, params, wavelet_order=6):
+    """Create plots of Wavelet maps."""
+
+    for sector, sector_data in periodogram_data.items():
+        print('Sector: ' + repr(sector))
+        valid_points = numpy.logical_and(
+            sector_data['remove_eclipse_mask'],
+            sector_data['raw_flux'] > 0.98
+        )
+        times, fluxes, time_step = resample_lc(
+            sector_data['times'][valid_points],
+            sector_data['raw_flux'][valid_points]
+        )
+        pyplot.subplot(121)
+        plot_wavelet_map(times,
+                         fluxes,
+                         time_step,
+                         params['Per'],
+                         'Transits masked',
+                         wavelet_order=wavelet_order)
+        times, fluxes, time_step = resample_lc(
+            sector_data['times'][sector_data['usable_corrected_mask']],
+            sector_data['corrected_flux'][sector_data['usable_corrected_mask']]
+        )
+        pyplot.subplot(122)
+        plot_wavelet_map(times,
+                         fluxes,
+                         time_step,
+                         params['Per'],
+                         'Corrected',
+                         wavelet_order=wavelet_order)
+        pyplot.suptitle('Sector: ' + repr(sector))
+        pyplot.show()
+
+
+def main(config):
+    """Avoid polluting global namespace."""
+
+    params = get_eb_params(config.tic, 'prsa')
+    periodogram_data = get_periodogram_data(config, params)
+    make_lsp_figures(periodogram_data, params)
+    make_wavelet_figures(periodogram_data, params)
 
 if __name__ == '__main__':
     main(parse_command_line())
