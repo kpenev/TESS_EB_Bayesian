@@ -29,10 +29,11 @@ in our catalog will be provided upon publication.
 \label{sec:params_lc_preparation}
 
 For a selected subset of stars \tess{} downloads pixel stamps with a 2-min
-cadence and full images with a 30-min cadence. The stamps are processed by the
-Science Processing Operations Center (SPOC) pipeline \citep{Jenkins_et_al_16}
-providing  two classes of LCs: simple aperture photometry (SAP) and pre-search
-data conditioning (PDC). The PDC LCs involve detrending against empirically
+cadence and full images with a 30-min cadence during the standard mission and
+10-min cadence for the extended mission. The stamps are processed by the Science
+Processing Operations Center (SPOC) pipeline \citep{Jenkins_et_al_16} providing
+two classes of LCs: simple aperture photometry (SAP) and pre-search data
+conditioning (PDC). The PDC LCs involve detrending against empirically
 constructed co-trending basis vectors, which is specifically designed to
 preserve astrophysical signals while removing systematics. While the PDC
 corrections are not perfect, \citep{Justesen_Albrecht_21} found they are well
@@ -234,9 +235,9 @@ observations rather than using theoretical models.
 %
 \label{sec:params_bayesian_analysis}
 
-\begin{wraptable}{l}{0.6\textwidth}
+\begin{table}
 %
-    \vspace{-\baselineskip}
+%    \vspace{-\baselineskip}
 %
     \begin{tabular}{cl}
 %
@@ -264,7 +265,7 @@ observations rather than using theoretical models.
 %
         $f_0$ & Flux zero-point\\
 %
-        \makecell{$\sigma_{SED,sys}, \sigma_{LC,sys}$,\\$\sigma_{E(B-V)}$} &
+        $\sigma_{SED,sys}, \sigma_{LC,sys}$,$\sigma_{E(B-V)}$ &
         Floating uncertainties (see text)
 %
     \end{tabular}
@@ -273,7 +274,7 @@ observations rather than using theoretical models.
 %
     \label{tab:mcmc_params}
 %
-\end{wraptable}
+\end{table}
 %
 In defining the likelihood function to use for Bayesian Analysis, we will follow
 \citep{Windemuth_et_al_19} and allow for additional systematic uncertainties in
