@@ -13,12 +13,12 @@ lightcurves produced by the Quick Look Pipeline processing of full frame images.
 SED information will be constructed through a combination of distance and
 photometry measurements from other surveys, like Gaia, 2MASS, WISE and others.
 
-We expect to generate a catalog of thousands of well characterized EBs with well
-understood selection effects and fully characterized probability distributions
-for their orbital (orbital period, eccentricity, inclination etc.)
-and stellar (masses, metallicities, ages, spins) parameters. 
+We expect to generate a catalog of thousands of well characterized EBs with
+fully characterized probability distributions for their orbital (orbital period,
+eccentricity, inclination etc.) and stellar (masses, metallicities, ages, spins)
+parameters. 
 
-Such catalogues provide the basis for a large number of investigations,
+Such a catalogue will provide the basis for a large number of investigations,
 including direct calibration and tests of stellar evolution and stellar
 atmosphere modeling, investigation of stellar winds and angular momentum
 evolution, characterization of the most important source of false positives for
