@@ -5,9 +5,9 @@
 To a large extent, our analysis plan is based on similar analysis from the
 literature applied to \kepler{} and \tess{} LCs \citep{Reinhold_et_al_13,
 Lurie_et_al_17, Windemuth_et_al_19, CantoMartins_et_al_20,
-Justesen_Albrecht_21}, combining the best features of each of these analysis and
-several other improvements of our own designed to increasing the reliability of
-the catalog and allowing us to properly handle difficulties with some EBs
+Justesen_Albrecht_21}, combining the best features of each of these analyses and
+several other improvements of our own, designed to increase the reliability of
+the catalog, and allowing us to properly handle difficulties with some EBs
 reported by these prior efforts. Our plans include extensive validation
 procedures to ensure the resulting catalogs are as clean of false positives or
 erroneously determined parameters as possible. Finally, parameter uncertainties
@@ -38,15 +38,13 @@ constructed co-trending basis vectors, which is specifically designed to
 preserve astrophysical signals while removing systematics. While the PDC
 corrections are not perfect, \citep{Justesen_Albrecht_21} found they are well
 suited for high precision analysis of EBs. We will use the PDC LCs by default,
-but for each target we also will begin by finding a maximum likelihood model
-using our default modeling of PDC LCs and  a maximum likelihood model modeling
-only the eclipses without the phase curve effects (see below) using only the
+but for each target we also will also find a maximum likelihood model for the
 portions of the SAP LCs near eclipses (up to 2 times the eclipse duration)
-together with a second order polynomial model for the out-of-eclipse
-variability. If the parameters of the two fits differ substantially, the target
-will be flagged for manual inspection and potentially re-analysis based on
-appropriately prepared SAP LC (e.g. using the \texttt{Lightkurve} package
-\citep{Lightkurve_18}).
+together with a second order polynomial model for the out-of-eclipse variability
+instead of modeling the phase curve effects (see below). If the parameters of
+the two fits differ substantially, the target will be flagged for manual
+inspection and potentially for re-analysis based on appropriately prepared SAP
+LC (e.g. using the \texttt{Lightkurve} package \citep{Lightkurve_18}).
 
 \begin{figure}
 %
@@ -77,7 +75,7 @@ we begin with non-detrended LCs, and adapt the QLP detrending procedure for our
 application by modifying their high-pass filter to preserve signals at or below
 the orbital frequency and applying the detrending as part of the MCMC (see
 \refsec{params_bayesian_analysis}) after subtracting the EB model LC.  To
-preserve modulations on the orbital frequency or faster, we need to modify the
+preserve modulations at the orbital frequency or faster, we need to modify the
 minimum spacing allowed between the smoothing spline nodes used for detrending
 to match the orbit. The rest of the detrending procedure of the QLP will be
 preserved. It should be noted that the exact detrending used will not preclude
@@ -149,24 +147,24 @@ models are then added per the corresponding brightness ratio of the stars.
 Our model for the phase curve must handle ellipsoidal modulations, Doppler
 beaming, and reflection effects. We will use the eccentric BEER model (eBEER)
 \citep{Engel_et_al_20}, which the authors show is able to capture the phase
-curve effets to better than 10\,ppm, much superior to the \tess{} precision.
+curve effects to better than 10\,ppm, much superior to the \tess{} precision.
 Hence, the phase curve model will not introduce significant model uncertainties
 compared to the observational ones. The eBEER model introduces 4 additional
 parameters to the LC model, that parameterize the response of each star to
-heating by its neighbour and the ratio of doppler beaming to radial velocity.
-While the eBERR model begins to lose precision at extreme eccentricities since
+heating by its neighbour and the ratio of Doppler beaming to radial velocity.
+While the eBEER model begins to lose precision at extreme eccentricities since
 it ignores higher order orbital harmonics, in practice this limitation is never
 relevant because at short periods EBs are tidally circularized and at long
 periods the phase curve effects are negligible. Binaries that are simultaneously
-short period and highly eccentricy need some mechanism to excite the eccentricty
-(e.g. third body), in which case many aspects of the proposed analysis break
-down. In the zomed-in plots in \fig{pure_EB_example} we plot a best fit
-simplified version of \texttt{batman} + eBEER model, where we included only the
-leading terms of the phase curve effects, and assumed a circular orbit (as is
-likely to be the case for a 2-day orbital period binary). As can be seen even
-this very simplified version of the model reproduces the observations to within
-the \tess{} precision even for such a high signal-to-noise short EB with strong
-phase curve modulations.
+short period and highly eccentricity need some mechanism to excite the
+eccentricity (e.g. third body), in which case many aspects of the proposed
+analysis break down. In the zoomed-in plots in \fig{pure_EB_example} we plot a
+best fit simplified version of \texttt{batman} + eBEER model, where we included
+only the leading terms of the phase curve effects, and assumed a circular orbit
+(as is likely to be the case for a 2-day orbital period binary). As can be seen
+even this very simplified version of the model reproduces the observations to
+within the \tess{} precision even for such a high signal-to-noise short EB with
+strong phase curve modulations.
 
 %Let $\theta$ be the angle between the line of sight direction and the line
 %connecting the centers of the two stars in the binary, and $d$ be the separation
@@ -199,7 +197,7 @@ rely on parallax based distances from Gaia Data Release 2
 \citep{Bailer-Jones_et_al_18}. While Gaia DR3 parallaxes are already available
 \citep{GaiaDR3_22}, converting to distance and uncertainty estimates is highly
 non-trivial. If DR3 distance analysis becomes available before or during this
-project, we will of course us the updated distances. However, given that we are
+project, we will of course use the updated distances. However, given that we are
 only analyzing very bright nearby stars, the DR2 precision is more than
 sufficient for our purposes, and is not the dominant source of uncertainty when
 converting absolute to apparent magnitudes by a significant margin. We will use
@@ -228,7 +226,7 @@ accounting for the spectral dependence of extinction) as in
 \citep{Chen_et_al_19}. \citep{CMD_interface} provides on-demand isochrones for a
 range of stellar properties and we have already implemented high-precision
 interpolation. We will assume quadratic limb darkening, and treat the limb
-darkening coefficients of each stars as model parameters to be constrained by
+darkening coefficients of each star as model parameters to be constrained by
 observations rather than using theoretical models.
 
 \subsubsection{Bayesian Analysis}
@@ -375,9 +373,9 @@ periods).
 will be carried out on the LCs of each \tess{} sector LC. If results differ
 significantly, the target will be flagged for manual inspection.
 
-Along with checking whether the target is a known EB, or has been flagged by the
-TESS transit search pipeline. We will also adapt the three tests listed above
-for FFI lightcurves.
+We will also adapt the three tests listed above for FFI lightcurves, along with
+checking whether the target is a known EB, or has been flagged by the TESS
+transit search pipeline.
 
 We will also carry out four additional validation steps:
 
@@ -385,18 +383,18 @@ We will also carry out four additional validation steps:
 also part of FFIs, an additional validation will be carried out by comparing the
 parameters extracted from stamps to those for the same targets using FFI LCs.
 This will serve as a test of our lightcurve preparation procedure allowing us to
-fine-tune our LC dentrending procedure and highlight differences in sensitivity
+fine-tune our LC detrending procedure and highlight differences in sensitivity
 to EB modulations between the two sets of LCs.
 
 \textit{\underline{\texttt{PHOEBE}}:} We will generate a \texttt{PHOEBE} model
 for each binary using the maximum likelihood parameters from MCMC to check if
 the LC is consistent and whether the phase curve parameters ($c_i, s_j$ in Table
-\ref{tab:mcmc_params}) are of the right order of magnitude. If not manual
-inspection will be performed to determine if this is falsely selected target or
-perhaps a genuine EB with rotational modulations due to a synchronously
+\ref{tab:mcmc_params}) are of the right order of magnitude. If not, manual
+inspection will be performed to determine if this is a falsely selected target
+or perhaps a genuine EB with rotational modulations due to a synchronously
 spinning primary star. We will also use gradient descent starting from the MCMC
 maximum likelihood parameters to find maximum likelihood parameters for
-\texttt{PHOEBE} based modeling to check if our treatment introduces bias in the
+\texttt{PHOEBE}-based modeling to check if our treatment introduces bias in the
 parameters.
 
 \textit{\underline{Comparison to \citep{Prsa_et_al_22} \tess{} EBs:}} We will
@@ -490,20 +488,20 @@ As each bright ($T<13.5$) stamp target will also have a QLP lightcurve, comparin
 to the spins from PDC detrended stamp LCs to those of the same stars from FFIs
 will provide a precise and accurate measurement of the false alarm rate. If that
 is high in spite of the many validations, we will re-introduce the QLP
-detrending but just like for the EB physical parameter analysis, modified to
+detrending, but just like for the EB physical parameter analysis, modified to
 preserve frequencies up to a limit. The limit will be tuned to the highest value
 that achieves appropriately low false alarm rate.
 
 Searching for periodic signals in EB LCs, indicative of rotational modulation,
-needs to overcome the fact that the eclipses are likely going to be by far the
-dominant periodic signal, and for short period binaries the phase curve effects
+needs to overcome the fact that the eclipses are likely going to be the dominant
+periodic signal, and for short period binaries the phase curve effects
 (\refsec{params_lc_sed_modeling}) will also introduce periodicities.
 \fig{EB_rotation_example} shows the stamp-based and FFI-based LCs of a binary
 where all three types of effects are present (eclipses, phase curve variability,
 and rotational modulations). In this example, due to the short orbital period,
 tides have synchronized the rotation to the orbit, so all effects have very
-similar dominant frequency, though the rotational modulation pattern changes
-on a longer timescale. Our ability to disentangle these effects will be
+similar dominant frequency, though the rotational modulation pattern changes on
+a longer timescale. Our ability to disentangle these effects will be
 dramatically boosted by the fact that similar observations will be available a
 year later, in some cases a third time, and more for targets where sectors
 overlap. On year timescales, the binary effects will not change, but rotational
@@ -552,7 +550,7 @@ of spots) are present.
 
 \textit{\underline{The Lomb-Scargle Periodogram (LSP)}} can be thought of as
 least squares fit for the amplitude of a signal of a single frequency as a
-function of the frequency. LSP has an advantage over ACF in that it is much
+function of the frequency. LSP has an advantage over ACF, in that it is much
 more sensitive to multiple rotation period signals (e.g. from the two stars, or
 from differential rotation on one star). We will follow the procedure of
 \citep{Rappaport_et_al_14, Lurie_et_al_17} for identifying multiple rotation
@@ -565,10 +563,10 @@ neighborhood of each peak group. Conditions are imposed on the peak prominence
 \textit{\underline{The Wavelet Transform (WT) and global wavelet spectrum
 (GWS)}} is a method to estimate the power spectrum of a signal as a function of
 time (see for example \citep{Grossmann_Morlet_84}), producing wavelet maps
-giving the spectral power vs frequency and time. Because WT is time dependent,
+giving the spectral power vs. frequency and time. Because WT is time dependent,
 it is robust against the pattern of spots on the stellar surface evolving with
-time.  It is also a powerful techniques for correctly distinguishing the true
-rotation period vs its aliases in the presence of multiple dark features on the
+time.  It is also a powerful technique for correctly distinguishing the true
+rotation period vs. its aliases in the presence of multiple dark features on the
 surface \citep{Bravo_et_al_14}. Finally, integrating the wavelet map over time
 gives us another periodogram, known as the GWS, the peaks of which can be
 directly compared to the ACF and LSP in an automated fashion, and like the LSP
@@ -609,7 +607,7 @@ the false alarm rate are satisfied for our LCs, it is a lower limit to the real
 rate so this will preserve all high significance signals. Surviving binaries
 will be subjected to the bootstrap procedure already described for ACF.
 
-WT, will be calculated only for systems passing one of the above two tests. If
+WT will be calculated only for systems passing one of the above two tests. If
 the candidate period from the above is not detected in the GWS, the system will
 also be discarded. Surviving systems will be flagged for manual review.
 
@@ -641,7 +639,7 @@ preparation and period measurement technique. As described above, comparing spin
 from stamp-based LCs to FFI-based LCs will help determine the false alarm rate
 and completeness of our FFI spin catalog, and help us fine-tune detrending if
 deemed necessary. The final manual examination of the ACF and periodograms,
-along side the LC itself will guard against other periodic signals being
+alongside the LC itself will guard against other periodic signals being
 mistakenly interpreted as rotational modulation.
 
 In addition, our automated procedure will be validated against the

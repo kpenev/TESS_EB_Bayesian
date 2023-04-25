@@ -1,42 +1,42 @@
 We propose to conduct a detailed homogeneous Bayesian analysis of TESS eclipsing
 binary (EB) lightcurves (LC) and spectral energy distributions (SED) to extract
 the physical properties of these systems, along with detailed information about
-the associated often non-Gaussian and highly correlated uncertainty
+the associated, often non-Gaussian and highly correlated, uncertainty
 distributions.  Our analysis will build on a preliminary effort from the
 literature. However, we will incorporate orders of magnitude more lightcurves,
 each with orders of magnitude more time coverage, as well as fully characterize
 the uncertainty distributions (which was not done in the original analysis), and
-investigate the lightcurves for spot induced modulations to extract the spin of
+investigate the lightcurves for spot-induced modulations to extract the spin of
 the brighter star when possible. We will analyze both the short-cadence
 lightcurves produced by the standard TESS pipeline as well as the long-cadence
 lightcurves produced by the Quick Look Pipeline processing of full frame images.
 SED information will be constructed through a combination of distance and
 photometry measurements from other surveys, like Gaia, 2MASS, WISE and others.
 
-We expect to generate a catalog of thousands of well characterized EBs with
-fully characterized probability distributions for their orbital (orbital period,
+We expect to generate a catalog of thousands of well-characterized EBs with
+fully characterized probability distributions for their orbital (period,
 eccentricity, inclination etc.) and stellar (masses, metallicities, ages, spins)
 parameters. 
 
 Such a catalogue will provide the basis for a large number of investigations,
 including direct calibration and tests of stellar evolution and stellar
 atmosphere modeling, investigation of stellar winds and angular momentum
-evolution, characterization of the most important source of false positives for
-transiting exoplanet detections, spectral synthesis for galaxy science, studies
-of galactic dark matter, and many others. The extended time coverage of the LCs
-we will analyze will allow detecting apsidal precession for some systems.
-Combined with spin measurements, this allows constraining the apsidal precession
-constants for the stars, which provide one of very few direct probes into the
-interiors of stars.  This catalog will also allow qualitatively more
-sophisticated studies of stellar and planetary tidal dynamics than what is
+evolution, characterization of the EB population (the most important source of
+false positives for transiting exoplanet detections), spectral synthesis for
+galaxy science, studies of galactic dark matter, and many others.  The extended
+time coverage of the LCs we will analyze will allow detecting apsidal precession
+for some systems.  Combined with spin measurements, this allows constraining the
+apsidal precession constants for the stars, which provide one of very few direct
+probes into the interiors of stars.  This catalog will also allow qualitatively
+more sophisticated studies of stellar and planetary tidal dynamics than what is
 possible with similar existing catalogs.  In particular, this will be the first
 catalogue that provides exquisitely precise eccentricity measurements for a very
 large number of systems to allow investigating how the efficiency with which
 tidally distorted stars dissipate energy depends on multiple properties
 (frequency and amplitude of the tidal wave, spin of the object, internal
-structure etc).  Furthermore, well characterized EBs are an invaluable control
+structure etc).  Furthermore, well-characterized EBs are an invaluable control
 sample for investigating planetary tides. Tidal studies are the primary interest
 of our group in exploiting this catalogue, but as the literature shows other
-groups will conduct similar analysis once the data is available. While such
+groups will conduct similar analyses once the data is available. While such
 investigations are beyond the scope of this project, the proposed effort is a
 necessary first step in that direction.
