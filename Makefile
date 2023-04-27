@@ -1,6 +1,10 @@
 all: proposal
 
 proposal:
+	-doc2pdf WorkEffortTable.docx
+	-doc2pdf WorkEffortTable_anonymized.docx
+	-doc2pdf budget/budget_justification.docx
+	-doc2pdf budget/budget_justification_anonymized.docx
 	-pdflatex --shell-escape $@.tex
 	-bibtex $@
 	-pdflatex --shell-escape $@.tex
