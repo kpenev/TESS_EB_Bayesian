@@ -1,0 +1,52 @@
+\section*{\centering{\Large Facilities and Equipment}}
+
+\section*{Computing}
+%
+\hrule \vspace{0.5mm}
+
+As a member of the University of Texas (UT) system, UT Dallas faculty get
+preferential access to the supercomputers at the Texas Advanced Computing Center
+(TACC) \citep{tacc_22}, one of the flagship national computing centers.
+Particularly relevant for this proposal are TACC's Lonestar6
+\citep{lonestar6_22} and Stampede2 \citep{stampede2_22} systems. Lonestar6 is a
+cluster dedicated for use by researchers at UT institutions, Texas A\&M
+University, Texas Tech University, and the University of North Texas, and
+Stampede2 is part of the national computing infrastructure, but UT and other
+partner institutions have a separate allocation request mechanism with dedicated
+guaranteed time. Allocations on both systems are virtually guaranteed for UT
+faculty given a successful funding proposal. For this academic year, the PI has
+an allocation of 30\,000 node hours on Lonestar6 ($\sim 4 \times 10^6$ core
+hours) and 35\,000 node hours on Stampede2 ($\sim 1.7 \times 10^6$ core hours).
+Standard research allocations on theses systems are 21\,000 node hours on
+stampede2 and for up to 100\,000 node hours on Lonestar6.
+
+UT Dallas maintains an additional high performance computing cluster
+(Ganymede)\citep{ganymede_22}, with 4786 cores, exclusively for UT Dallas
+researchers.  There are no formal usage quotas on the cluster, with users
+submitting jobs to a load balancing system consisting of a number of queues with
+different maximum job run times, node allocations and priorities. PI Penev and
+his students already have access to the cluster and are regularly using it for
+hundreds of thousands of core-hours each year.
+
+Finally, PI Penev has a dedicated 32 core computer only for use by his group
+that will contribute tens of thousands of additional core-hours each year to this
+project, mostly to serve as a convenient software development and testing
+system.
+
+The available computing resources greatly exceed the requirements for this
+project. Analyzing \kepler{} eclipsing binaries in a very similar manner as we
+propose to do, \citep{Windemuth_et_al_19} found that in order for the MCMC
+posteriors to converge, $10^5$ --- $10^6$ steps of 128 \texttt{emcee} walkers
+are required. By far the slowest part of each step is generating the lightcurve
+model, and within that, modeling the transits dominates over the phase curve
+model. Since we already have all the steps for modeling the transits at hand,
+and even a simplified phase curve model, we were able to generate $10^6$ transit
+models with random system parameters in order to estimate the required computing
+resources. Scaling by the expected number of systems to analze, the steps each
+system requires, and accounting for the well understood efficiency of
+\texttt{emcee} multi-processing, we can accurately estimate that just under
+20\,000 node hours on Lonestar6 will be sufficient to carry out the entire
+eclipsing binary physiycal parameters analysis. The spin analysis requires
+negligible computational resources compared to the physical parameter analysis.
+As a result, this entire project will require less than 10\% of a typical
+reseacrh allocation on Lonestar6 over two years.

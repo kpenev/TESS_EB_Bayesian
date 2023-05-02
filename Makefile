@@ -1,14 +1,16 @@
 all: proposal
 
 proposal:
-	-doc2pdf WorkEffortTable.docx
 	-doc2pdf WorkEffortTable_anonymized.docx
 	-doc2pdf budget/budget_justification.docx
 	-doc2pdf budget/budget_justification_anonymized.docx
-	-pdflatex --shell-escape $@.tex
-	-bibtex $@
-	-pdflatex --shell-escape $@.tex
-	-pdflatex --shell-escape $@.tex
+	-doc2pdf WorkEffortTable.docx
+	-pdflatex --shell-escape proposal.tex
+	-bibtex proposal
+	-pdflatex --shell-escape proposal.tex
+	-pdflatex --shell-escape proposal.tex
+	-pdflatex --shell-escape anonymized.tex
+	-pdflatex --shell-escape non_anonymized.tex
 #	-pdflatex --shell-escape summary_pages.tex
 #	-pdflatex --shell-escape project_description_pages.tex
 #	-pdflatex --shell-escape references.tex
