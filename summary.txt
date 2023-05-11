@@ -23,20 +23,21 @@ including direct calibration and tests of stellar evolution and stellar
 atmosphere modeling, investigation of stellar winds and angular momentum
 evolution, characterization of the EB population (the most important source of
 false positives for transiting exoplanet detections), spectral synthesis for
-galaxy science, studies of galactic dark matter, and many others.  The extended
-time coverage of the LCs we will analyze will allow detecting apsidal precession
-for some systems.  Combined with spin measurements, this allows constraining the
-apsidal precession constants for the stars, which provide one of very few direct
-probes into the interiors of stars.  This catalog will also allow qualitatively
-more sophisticated studies of stellar and planetary tidal dynamics than what is
-possible with similar existing catalogs.  In particular, this will be the first
-catalogue that provides exquisitely precise eccentricity measurements for a very
-large number of systems to allow investigating how the efficiency with which
-tidally distorted stars dissipate energy depends on multiple properties
-(frequency and amplitude of the tidal wave, spin of the object, internal
-structure etc).  Furthermore, well-characterized EBs are an invaluable control
-sample for investigating planetary tides. Tidal studies are the primary interest
-of our group in exploiting this catalogue, but as the literature shows other
-groups will conduct similar analyses once the data is available. While such
-investigations are beyond the scope of this project, the proposed effort is a
-necessary first step in that direction.
+galaxy science, studies of galactic dark matter, and many others. The spin
+measurements and physical paramameters catalogs that will be produced by this
+effort can be combined with apsidal precession measuremenst to allow measuring
+the apsidal precession constants for the stars. These constants provide one of
+very few direct probes into the interiors of stars. The proposed catalog will
+also allow qualitatively more sophisticated studies of stellar and planetary
+tidal dynamics than what is possible with similar existing catalogs.  In
+particular, this will be the first catalogue that provides exquisitely precise
+eccentricity measurements for a very large number of systems to allow
+investigating how the efficiency with which tidally distorted stars dissipate
+energy depends on multiple properties (frequency and amplitude of the tidal
+wave, spin of the object, internal structure etc). Furthermore,
+well-characterized EBs are an invaluable control sample for investigating
+planetary tides. Tidal studies are the primary interest of our group in
+exploiting this catalogue, but as the literature shows other groups will conduct
+similar analyses once the data is available. While such investigations are
+beyond the scope of this project, the proposed effort is a necessary first step
+in that direction.

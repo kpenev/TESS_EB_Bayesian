@@ -53,7 +53,7 @@ LC (e.g. using the \texttt{Lightkurve} package \citep{Lightkurve_18}).
     \caption{
 %
         Example LC of a short-period ($P_{orb}=2.02$\,d) EB TIC 33419790 from
-        \tess{} sector 6 observations. Light grey points: SPOC PDC detrended LC
+        \tess{} sector 6 observations. Light gray points: SPOC PDC detrended LC
         from stamp data, circles: QLP non-detrended SAP LC from FFIs, crosses:
         SPOC LC binned to the FFI cadence. Left panels show the full LC (top)
         and difference between QLP and binned SPOC (bottom). Right panels zoom
@@ -81,10 +81,10 @@ to match the orbit. The rest of the detrending procedure of the QLP will be
 preserved. It should be noted that the exact detrending used will not preclude
 detecting the high signal to noise EBs we are targeting.  In fact, the yield
 estimates from \refsec{catalog_size} are based on the \citep{Prsa_et_al_22}
-search which applied no detrending. Fig.  \fig{pure_EB_example} compares the PDC
+search which applied no detrending. \fig{pure_EB_example} compares the PDC
 stamp-based LC and undetrended QLP lightcurve from FFIs of a 2-d EB for a single
-sector. The out of eclipse LC exhibits strong ellipsoidal variatons, and to much
-smaller extent a mix of reflection and boosting effects. While instrumental
+sector. The out of eclipse LC exhibits strong ellipsoidal variations, and to
+much smaller extent a mix of reflection and boosting effects. While instrumental
 trends remain in the QLP LC, they are well below the level of the target signal
 for our high precision sample (defined in \refsec{catalog_size}), and will not
 significantly distort the results.
@@ -123,7 +123,7 @@ and likely contains multiple local minima, we will use one of the built-in
 global optimization algorithms of the \texttt{scipy} Python package. We will
 experiment with basin hopping \citep{Wales_Doye_97}, differential evolution
 \citep{Storn_Price_97}, and dual annealing \citep{Xiang_et_al_97} algorithms as
-part of this project, and if no clear winner can be found we will use multiple
+part of this project, and if no clear winner can be found, we will use multiple
 selecting whichever one produces the highest likelihood for each candidate. Even
 after this step, we will end up with several tens of thousands of candidates.
 All surviving EBs will be subjected to full analysis and included in the final
@@ -151,7 +151,7 @@ curve effects to better than 10\,ppm, much superior to the \tess{} precision.
 Hence, the phase curve model will not introduce significant model uncertainties
 compared to the observational ones. The eBEER model introduces 4 additional
 parameters to the LC model, that parameterize the response of each star to
-heating by its neighbour and the ratio of Doppler beaming to radial velocity.
+heating by its neighbor and the ratio of Doppler beaming to radial velocity.
 While the eBEER model begins to lose precision at extreme eccentricities since
 it ignores higher order orbital harmonics, in practice this limitation is never
 relevant because at short periods EBs are tidally circularized and at long
@@ -179,17 +179,18 @@ strong phase curve modulations.
 %include terms proportional to $\sin\theta/d^2$ and $\cos(2\theta)/d^3$.
 
 It should be noted that while there are much more sophisticated treatments of
-these effects available, for example by the \texttt{PHOEBE} package, those
-necessarily are much more computationally intensive. For example, generating a
-single EB LC using \texttt{PHOEBE} with sufficient resolution for this project
-takes several to several tens of seconds using a single thread on a contemporary
-computer. Given that \citep{Windemuth_et_al_19} found it takes $\sim10^8$
-samples ($10^6$ steps of 128 walker MCMC) for the samples to fully converge to
-the desired posterior distribution, the proposed analysis is not practical for
-tens of thousands of EBs even using state of the art high performance computing
-facilities. In contrast, the proposed modeling is $10^3$ to $10^5$ times faster
-(depending on the binary parameters) making it entirely feasible (see Facilities
-and Equipment).
+these effects available, for example by the \texttt{PHOEBE} package
+\citep{Prsa_Zwitter_05, Prsa_et_al_16, Horvat_et_al_18, Jones_et_al_20,
+Conroy_et_al_20}, those necessarily are much more computationally intensive. For
+example, generating a single EB LC using \texttt{PHOEBE} with sufficient
+resolution for this project takes several to several tens of seconds using a
+single thread on a contemporary computer. Given that \citep{Windemuth_et_al_19}
+found it takes $\sim10^8$ samples ($10^6$ steps of 128 walker MCMC) for the
+samples to fully converge to the desired posterior distribution, the proposed
+analysis is not practical for tens of thousands of EBs even using state of the
+art high performance computing facilities. In contrast, the proposed modeling is
+$10^3$ to $10^5$ times faster (depending on the binary parameters) making it
+entirely feasible (see Facilities and Equipment).
 
 The apparent brightness of a system often places better constraints on the
 masses than the LC alone, because mass is tightly correlated with luminosity. We
@@ -201,18 +202,17 @@ project, we will of course use the updated distances. However, given that we are
 only analyzing very bright nearby stars, the DR2 precision is more than
 sufficient for our purposes, and is not the dominant source of uncertainty when
 converting absolute to apparent magnitudes by a significant margin. We will use
-the extinction estimate fro the \tess{} input catalog (TIC) whenever available,
+the extinction estimate for the \tess{} input catalog (TIC) whenever available,
 using the 3D galactic dust map by \citep{Green_et_al_19} as a backup, and the
-dust map by \citep{Schlegel_et_al_98} as a last resort. For LC modeling we
-calculate difference it \tess{} magnitudes of the sources, and SED constraints
-will be based on whichever of the following magnitudes are available:
-Johnson–Cousins B and V, 2MASS J, H, K, and WISE W1 and W2.
+dust map by \citep{Schlegel_et_al_98} as a last resort. SED constraints will be
+based on whichever of the following magnitudes are available: Johnson–Cousins B
+and V, 2MASS J, H, K, and WISE W1 and W2.
 
 In order to build a model, we need the radii of the primary and secondary stars,
 their extinction and reddening corrected apparent magnitudes, and a limb
 darkening model. Without radial velocity observations, the masses of the stars
 are not constrained from photometry, because the LC depends only on orbital
-period, eccentricity, and orientation, the ratio of radii, and the semimajor
+period, eccentricity, orbital orientation, the ratio of radii, and the semimajor
 axis to primary radius ratio. In order to compensate for the lack of radial
 velocity data, we will instead rely on stellar evolution models to convert the
 two stellar masses, and common age and metallicity for a binary to radii and
@@ -387,15 +387,17 @@ fine-tune our LC detrending procedure and highlight differences in sensitivity
 to EB modulations between the two sets of LCs.
 
 \textit{\underline{\texttt{PHOEBE}}:} We will generate a \texttt{PHOEBE} model
-for each binary using the maximum likelihood parameters from MCMC to check if
-the LC is consistent and whether the phase curve parameters ($c_i, s_j$ in Table
-\ref{tab:mcmc_params}) are of the right order of magnitude. If not, manual
-inspection will be performed to determine if this is a falsely selected target
-or perhaps a genuine EB with rotational modulations due to a synchronously
-spinning primary star. We will also use gradient descent starting from the MCMC
-maximum likelihood parameters to find maximum likelihood parameters for
-\texttt{PHOEBE}-based modeling to check if our treatment introduces bias in the
-parameters.
+for each binary using the maximum likelihood parameters from MCMC. Since
+\texttt{PHOEBE} models with high fidelity the physical effects the eBEER model
+and limb darkening parameterize, it will allow us to check if the LC is
+consistent and whether the phase curve parameters ($\alpha_{ij}, u_{ij}$ in
+Table \ref{tab:mcmc_params}) are of the right order of magnitude.  If not,
+manual inspection will be performed to determine if this is a falsely selected
+target or perhaps a genuine EB with rotational modulations due to a
+synchronously spinning primary star. We will also use gradient descent starting
+from the MCMC maximum likelihood parameters to find maximum likelihood
+parameters for \texttt{PHOEBE}-based modeling to check if our treatment
+introduces bias in the parameters.
 
 \textit{\underline{Comparison to \citep{Prsa_et_al_22} \tess{} EBs:}} We will
 use the 4\,584 \citep{Prsa_et_al_22} EBs for the list of targets to analyze from
@@ -441,11 +443,12 @@ in a carefully prepared collection of lightcurves of non-binary stars with very
 similar astrophysical variability and instrumental effects as the true binary
 population in the \tess{} sample (not the one we detect). Such an effort will be
 on par with the work already described above and may be pursued in future
-proposals if it can be justified. However, we will make every effort to
-facilitate such characterization by other groups. In our data management plan
-(\refsec{dmp_software}) we describe how we will ensure all our steps are easily
-reproducible by independent scientists with minimal effort, allowing them to
-build a proper injection-recovery pipeline if desired.
+proposals if it can be justified. The approach above is the next best option,
+and we will make every effort to facilitate more detailed characterization by
+other groups. In our data management plan (\refsec{dmp_software}) we describe
+how we will ensure all our steps are easily reproducible by independent
+scientists with minimal effort, allowing them to build a proper
+injection-recovery pipeline if desired.
 
 \subsection{Determining Spins}
 %
@@ -462,7 +465,7 @@ build a proper injection-recovery pipeline if desired.
     \caption{
 %
         Example LC of a short-period EB TIC 27767184 from \tess{} sector 14
-        observations. Light grey points: SPOC PDC detrended LC from stamp data,
+        observations. Light gray points: SPOC PDC detrended LC from stamp data,
         circles: QLP non-detrended SAP LC from FFIs, crosses: SPOC LC binned to
         the FFI cadence. Left panels show the full LC (top) and zoomed in on the
         out of eclipse variations (bottom). Right panels zoom in on a single
@@ -659,9 +662,9 @@ $<13.5$\,days, most of these should be detectable by our FFI analysis, and
 deep transits, placing them within our expected the high precision catalog.
 Since the \citep{Lurie_et_al_17} catalog is based on the much longer time
 coverage and much better photometric precision \kepler{} data, the comparison
-will allow us to validate our procedures, period measurements, and will allow us
-to estimate the completeness of our catalog, as allowed by the limited number of
-overlapping targets.
+will allow us to validate our procedures and period measurements. It will also
+allow us to estimate the completeness of our catalog to the extent the limited
+number of overlapping targets permits.
 
 We also expect to have a large number of common detections with
 \citep{Oelkers_et_al_18} who used KELT observations to detect stellar rotation.
