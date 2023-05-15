@@ -111,24 +111,26 @@ detected eclipses are masked and another search is conducted to check for
 secondary eclipses of eccentric binaries which are also checked for consistency
 of their depths. Finally, only high signal-to-noise candidates are kept (primary
 eclipse $>5$\% and secondary eclipse $>1$\%). \citep{Justesen_Albrecht_21}
-report that this procedure eliminated 98\% of the input sources. However, since
-we will begin with $10^7$ LCs, $\sim2\times10^5$ will pass all tests. These are
-too many to examine by eye, as \citep{Justesen_Albrecht_21} did. Instead, we
-will find a maximum likelihood estimate for the system parameters and
-automatically reject binaries for which the residuals between the observed LC
-and the model for the maximum likelihood parameters are too large.  The exact
-threshold for rejection will be determined by visual inspection of several
-hundred examples.  Since the likelihood function defined below is non-linear
-and likely contains multiple local minima, we will use one of the built-in
-global optimization algorithms of the \texttt{scipy} Python package. We will
-experiment with basin hopping \citep{Wales_Doye_97}, differential evolution
-\citep{Storn_Price_97}, and dual annealing \citep{Xiang_et_al_97} algorithms as
-part of this project, and if no clear winner can be found, we will use multiple
-selecting whichever one produces the highest likelihood for each candidate. Even
-after this step, we will end up with several tens of thousands of candidates.
-All surviving EBs will be subjected to full analysis and included in the final
-catalog, but we will manually vet the 5\,000 -- 10\,000 with tightest
-constraints to produce a sub-catalog of highly reliable EBs.
+report that this procedure eliminated 98\% of the input sources, and they
+manually examined the surviving 2\% to eliminate false positives (e.g. pulsating
+stars, instrumental effects, or even exoplanets). However, since we will begin
+with $10^7$ LCs, $\sim2\times10^5$ will pass all tests. These are too many to
+examine by eye, as \citep{Justesen_Albrecht_21} did. Instead, we will find a
+maximum likelihood estimate for the system parameters and automatically reject
+binaries for which the residuals between the observed LC and the model for the
+maximum likelihood parameters are too large.  The exact threshold for rejection
+will be determined by visual inspection of several hundred examples.  Since the
+likelihood function defined below is non-linear and likely contains multiple
+local minima, we will use one of the built-in global optimization algorithms of
+the \texttt{scipy} Python package. We will experiment with basin hopping
+\citep{Wales_Doye_97}, differential evolution \citep{Storn_Price_97}, and dual
+annealing \citep{Xiang_et_al_97} algorithms as part of this project, and if no
+clear winner can be found, we will use multiple selecting whichever one produces
+the highest likelihood for each candidate. Even after this step, we will end up
+with several tens of thousands of candidates.  All surviving EBs will be
+subjected to full analysis and included in the final catalog, but we will
+manually vet the 5\,000 -- 10\,000 with tightest constraints to produce a
+sub-catalog of highly reliable EBs.
 
 \subsubsection{Lightcurve and Spectral Energy Distribution Modeling}
 %
@@ -156,15 +158,15 @@ While the eBEER model begins to lose precision at extreme eccentricities since
 it ignores higher order orbital harmonics, in practice this limitation is never
 relevant because at short periods EBs are tidally circularized and at long
 periods the phase curve effects are negligible. Binaries that are simultaneously
-short period and highly eccentricity need some mechanism to excite the
-eccentricity (e.g. third body), in which case many aspects of the proposed
-analysis break down. In the zoomed-in plots in \fig{pure_EB_example} we plot a
-best fit simplified version of \texttt{batman} + eBEER model, where we included
-only the leading terms of the phase curve effects, and assumed a circular orbit
-(as is likely to be the case for a 2-day orbital period binary). As can be seen
-even this very simplified version of the model reproduces the observations to
-within the \tess{} precision even for such a high signal-to-noise short EB with
-strong phase curve modulations.
+short period and highly eccentric need some mechanism to excite the eccentricity
+(e.g. third body), in which case many aspects of the proposed analysis break
+down. In the zoomed-in plots in \fig{pure_EB_example} we plot a best fit
+simplified version of \texttt{batman} + eBEER model, where we included only the
+leading terms of the phase curve effects, and assumed a circular orbit (as is
+likely to be the case for a 2-day orbital period binary). As can be seen even
+this very simplified version of the model reproduces the observations to within
+the \tess{} precision even for such a high signal-to-noise short EB with strong
+phase curve modulations.
 
 %Let $\theta$ be the angle between the line of sight direction and the line
 %connecting the centers of the two stars in the binary, and $d$ be the separation
@@ -389,13 +391,13 @@ to EB modulations between the two sets of LCs.
 \textit{\underline{\texttt{PHOEBE}}:} We will generate a \texttt{PHOEBE} model
 for each binary using the maximum likelihood parameters from MCMC. Since
 \texttt{PHOEBE} models with high fidelity the physical effects the eBEER model
-and limb darkening parameterize, it will allow us to check if the LC is
-consistent and whether the phase curve parameters ($\alpha_{ij}, u_{ij}$ in
-Table \ref{tab:mcmc_params}) are of the right order of magnitude.  If not,
-manual inspection will be performed to determine if this is a falsely selected
-target or perhaps a genuine EB with rotational modulations due to a
-synchronously spinning primary star. We will also use gradient descent starting
-from the MCMC maximum likelihood parameters to find maximum likelihood
+and limb darkening parameterize, it will allow us to check if the extracted
+parameters are mutually consistent and whether the phase curve parameters
+($\alpha_{ij}, u_{ij}$ in Table \ref{tab:mcmc_params}) are of the right order of
+magnitude. If not, manual inspection will be performed to determine if this is
+a falsely selected target or perhaps a genuine EB with rotational modulations
+due to a synchronously spinning primary star. We will also use gradient descent
+starting from the MCMC maximum likelihood parameters to find maximum likelihood
 parameters for \texttt{PHOEBE}-based modeling to check if our treatment
 introduces bias in the parameters.
 
@@ -508,7 +510,7 @@ a longer timescale. Our ability to disentangle these effects will be
 dramatically boosted by the fact that similar observations will be available a
 year later, in some cases a third time, and more for targets where sectors
 overlap. On year timescales, the binary effects will not change, but rotational
-variability will likely not look anything like pattern observed in the first
+variability will likely not look anything like the pattern observed in the first
 \tess{} sector.
 
 Each EB lightcurve will be prepared in two different ways, each of which will be
