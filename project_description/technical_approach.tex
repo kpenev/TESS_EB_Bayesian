@@ -330,11 +330,12 @@ to evaluate it. To within a normalization constant:
 \end{multline*}
 %
 where $\Delta \mathrm{LC}$, $\Delta \mathrm{SED}$, and $\Delta E(B-V)$ are the
-residuals of the LC, SED, and reddening respectively. Adding the $\ln\sigma^2$
-terms ensures that even though uncertainties are allowed to float, the best fit
-solution along with the intuitive estimates for the floating uncertainty
-maximizes the likelihood. Also following \citep{Windemuth_et_al_19}, we will use
-Gaussian priors on $d$ and $E(B-V)$, uniform priors on all other parameters.
+residuals of the LC, SED, and reddening respectively. Including the
+$\ln\sigma^2$ terms ensures that even though uncertainties are allowed to float,
+the best fit solution along with the intuitive estimates for the floating
+uncertainty maximizes the likelihood. Also following \citep{Windemuth_et_al_19},
+we will use Gaussian priors on $d$ and $E(B-V)$, uniform priors on all other
+parameters.
 
 As already mentioned in \refsec{params_lc_preparation}, when analyzing FFIs, we
 will calculate $\Delta \mathrm{LC}$ by first subtracting the LC model for a
