@@ -1,6 +1,6 @@
 .PHONY: all
 
-all: sow_spin_only
+all: final
 
 %:
 	-pdflatex --shell-escape $@.tex
