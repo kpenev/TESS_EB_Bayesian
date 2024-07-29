@@ -1,9 +1,9 @@
 """Configure eBEER modulation to match a given PHOEBE binary."""
 
 import numpy as np
-import phoebe
 from astropy import units
-from poliastro.core import angles
+import phoebe
+from poliastro.core.angles import E_to_nu, M_to_E
 
 class eBEERParams:
     """Wrapper class to minimize clunky action of pulling from phoebe bundle.
@@ -12,7 +12,7 @@ class eBEERParams:
         Porb(float): Orbital Period of the binary | Days
         ecc(float): Orbital Eccentricity | Dimensionless
         incl(float): Inclination of Orbital Plane | Radians
-        per0(float): Argument of Periastron | radians
+        per0(float): Argument    of Periastron | radians
         t0(float): Zeropoint Date of Periastron Passage | Days
         M1(float): Primary Mass | Msun
         M2(float): Secondary Mass | Msun
@@ -68,11 +68,11 @@ class eBEERParams:
         M = 2*np.pi * (times - self.t0) / self.Porb # mean anomaly
         M = (M + np.pi) % (2*np.pi) - np.pi
         if isinstance(M, (int, float)):
-            self.v = angles.E_to_nu(angles.M_to_E(M, self.ecc), self.ecc)
+            self.v = E_to_nu(M_to_E(M, self.ecc), self.ecc)
         elif isinstance(M, np.ndarray):
             self.v = np.zeros(len(M))
             for i, m in enumerate(M):
-                temp = angles.E_to_nu(angles.M_to_E(m, self.ecc), self.ecc)
+                temp = E_to_nu(M_to_E(m, self.ecc), self.ecc)
                 self.v[i] = temp
 
 
@@ -101,7 +101,7 @@ def Mbeam(eBp: eBEERParams, alpha_beam: float, calc_for_star_1: bool=True):
         per0 = eBp.per0 + np.pi
         
     # Full Calculation (Eq.2 from Engel et al. 2020)
-    return (-2380 * alpha_beam * (q / (1+q)**(2/3)) * M**(1/3) 
+    return (-2830 * alpha_beam * (q / (1+q)**(2/3)) * M**(1/3) 
             * eBp.Porb**(-1/3) * np.sin(eBp.incl) 
             * (np.cos(per0 + eBp.v) / np.sqrt(1 - eBp.ecc**2)))
 
@@ -161,7 +161,7 @@ def Mellip(eBp: eBEERParams, calc_for_star1: bool=True):
              * M**(-1) * (q / (1+q)) * eBp.Porb**(-2) * (beta*R)**(3))
     
     line3 = (759 * alpha_e0b 
-             * (8 - 40 * (np.sin(eBp.incl))**2 + 35 * np.sin(eBp.incl)**4) 
+             * (8 - 40 * np.sin(eBp.incl)**2 + 35 * np.sin(eBp.incl)**4) 
              * M**(-5/3) * (q / (1+q)**(5/3)) * eBp.Porb**(-10/3) 
              * (beta*R)**5)
     
@@ -288,9 +288,9 @@ def get_eBEER_lc(phoebe_binary, times, alpha_beam1: float, alpha_beam2: float,
             phoebe_binary['secondary@teff'].get_value('K')
             /
             phoebe_binary['primary@teff'].get_value('K')
-        )**4 / (eBp.M1 / eBp.M2)**2
+        )**4 * (eBp.R2 / eBp.R1)**2
     elif secondary_flux_fraction == 'split':
         return (MeBEER1, MeBEER2)
 
     # Eq.7 from Engel et al. 2020
-    return MeBEER1 + secondary_flux_fraction * MeBEER2
+    return (MeBEER1 + secondary_flux_fraction * MeBEER2) / (1 + secondary_flux_fraction)
