@@ -83,7 +83,7 @@ def main(args):
     b_2.set_value_all('ld_mode*', 'manual')
     b_2.set_value_all('ld_func*', 'linear')
     b_2.set_value_all('ld_coeffs*', [0.5])
-    b_2.set_value_all('ntriangles', 10000)
+    b_2.set_value_all('ntriangles', 20000)
     b_2['eclipse_method'] = 'only_horizon'
     b_2['passband'] = 'Kepler:mean'
     b_2.set_value_all('atm', 'phoenix')
