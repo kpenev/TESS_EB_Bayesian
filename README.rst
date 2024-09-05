@@ -8,3 +8,5 @@ Relevant articles:
 * `Verification of Gaia DR3 Single-lined Spectroscopic Binary Solutions With Three Transiting Low-mass Secondaries <https://ui.adsabs.harvard.edu/abs/2023arXiv231007936S/abstract>`_
 
 * `TESSILATOR: a one-stop shop for measuring TESS rotation periods <https://ui.adsabs.harvard.edu/abs/2024MNRAS.533.2162B/abstract>`_
+
+* `A Data-driven Spectral Model of Main Sequence Stars in Gaia DR3 <https://ui.adsabs.harvard.edu/abs/2024arXiv240719016A/abstract>`_
