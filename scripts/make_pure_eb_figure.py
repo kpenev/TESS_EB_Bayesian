@@ -240,5 +240,5 @@ def main(tic, sector):
 
 
 if __name__ == '__main__':
-    main(443768508, 32)
-#    main(33419790, 6)
+#    main(443768508, 32)
+    main(33419790, 6)

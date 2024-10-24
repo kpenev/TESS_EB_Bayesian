@@ -1,3 +1,7 @@
+"""Unified interface for binary parameters needed by the likelihood function."""
+
+import numpy
+from astropy import units
 import batman
 
 class BinaryParms(batman.TransitParams):
@@ -8,8 +12,8 @@ class BinaryParms(batman.TransitParams):
         """
         Calculate the phase difference between secondary and primary eclipse.
 
-        Uses equation 31 (and correction for non-central transits) from Sterne 1940
-        (PNAS 26, 36):
+        Uses equation 31 (and correction for non-central transits) from
+        Sterne 1940 (PNAS 26, 36):
 
         `https://ui.adsabs.harvard.edu/abs/1940PNAS...26...36S/abstract`_
 
@@ -22,21 +26,21 @@ class BinaryParms(batman.TransitParams):
 
             ecosw(float):    Eccentricity times cos of longitude of periapsis.
 
-            coti(float):    1/tan of the inclination angle. Leave zero to disable
-                            the correction to Eq. 31 in Sterne 1940
+            coti(float):    1/tan of the inclination angle. Leave zero to
+                            disable the correction to Eq. 31 in Sterne 1940
 
         Returns:
             float:
-                The fraction of the orbital period that elapses between primary and
-                secondary eclipses.
+                The fraction of the orbital period that elapses between primary
+                and secondary eclipses.
         """
 
-        e2 = esinw**2 + ecosw**2
+        e_square = esinw**2 + ecosw**2
 
         central_transits_rhs = (
-            ecosw * (1.0 - e2)**0.5 / (1.0 - esinw**2)
+            ecosw * (1.0 - e_square)**0.5 / (1.0 - esinw**2)
             +
-            numpy.arctan(ecosw / (1.0 - e2)**0.5)
+            numpy.arctan(ecosw / (1.0 - e_square)**0.5)
         )
 
         if coti:
@@ -64,20 +68,20 @@ class BinaryParms(batman.TransitParams):
         return (central_transits_rhs + inclination_correction) / numpy.pi + 0.5
 
 
-    def _init_from_phoebe(self, phoebe_binary):
+    def _init_from_phoebe(self, phoebe_binary, dataset='lc01'):
         """Set BATMAN params independent of component given a PHOEBE binary."""
 
         orbit = phoebe_binary['orbit@component']
         self._t0_both = {'primary': orbit['t0_supconj'].get_value(units.day)}
         self.per = orbit['period'].get_value(units.day)
         self.rp = orbit['requivratio'].get_value('')
-        self.a = ((1.0 + batman_params.rp)
+        self.a = ((1.0 + self.rp)
                   /
                   orbit['requivsumfrac'].get_value(''))
         self.inc = orbit['incl'].get_value(units.deg)
         self.ecc = orbit['ecc'].get_value('')
         self.w = (
-            90.0 if batman_params.ecc == 0 else orbit['per0'].get_value(units.deg)
+            90.0 if self.ecc == 0 else orbit['per0'].get_value(units.deg)
         )
         #(orbit['long_an'].get_value(units.deg)
         #                   +
@@ -94,35 +98,30 @@ class BinaryParms(batman.TransitParams):
             )
         )
 
-        self._limb_dark_both = {
-            component: phoebe_binary['ld_func'][dataset][component].get_value()
-            for component in ['primary', 'secondary']
-        }
-
-        self._u_both = {}
-        for component in ['primary', 'secondary']
+        for component in ['primary', 'secondary']:
+            self._limb_dark_both[
+                component
+            ] = phoebe_binary['ld_func'][dataset][component].get_value()
             phoebe_coefs = phoebe_binary.compute_ld_coeffs(dataset=dataset,
                                                            component=component)
             assert len(phoebe_coefs) == 1
             for value in phoebe_coefs.values():
-                self.u[component] = value
+                self._u_both[component] = value
         self.t0 = self._t0_both['primary']
         self.u = self._u_both['primary']
         self.limb_dark = self._limb_dark_both['primary']
-        self.inverted = False
 
 
     def __init__(self, *, from_phoebe=None, from_mcmc=None):
         """Set the model parameters either from PHOEBE binary or MCMC sample."""
 
+        super().__init__()
         assert from_phoebe or from_mcmc
+        self._limb_dark_both = {}
+        self._u_both = {}
         if from_phoebe:
-            self._set_common_batman_params_phoebe(from_phoebe)
-            self._set_batman_component_params_phoebe(phoebe_binary,
-                                                     'primary')
-            self._set_batman_component_params(phoebe_binary,
-                                              'secondary',
-                                              dataset)
+            self._init_from_phoebe(from_phoebe)
+        self.inverted = False
 
 
     def swap_components(self):
