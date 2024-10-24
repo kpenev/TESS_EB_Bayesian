@@ -2,7 +2,6 @@
 
 import numpy as np
 from astropy import units
-import phoebe
 from poliastro.core.angles import E_to_nu, M_to_E
 
 class eBEERParams:
@@ -20,28 +19,28 @@ class eBEERParams:
         R2(float): Secondary Radius | Rsun
         Prot1(float): Rotation Period of Primary | Days
         Prot2(float): Rotation Period of Secondary | Days
-        u1(float): Linear-Limb Darkening Coefficient of Primary. Assumes   
+        u1(float): Linear-Limb Darkening Coefficient of Primary. Assumes
                      ld_func='linear' for primary
-        u2(float): Linear-Limb Darkening Coefficient of Secondary. Assumes   
+        u2(float): Linear-Limb Darkening Coefficient of Secondary. Assumes
                      ld_func='linear' for secondary
         tau1(float): Gravity Darkening Coefficient of Primary
         tau2(float): Gravity Darkening Coefficient of Primary
         v(float or numpy array): true anomaly of system over time
     """
-    
+
     def __init__(self, phoebe_binary, times):
         """Initializes instance with params from phoebe_binary for given times
 
-        phoebe_binary must have ld_mode_bol set to 'manual' and ld_func_bol 
-        set to 'linear'. Assumes linear limb darkening (u) and gravity 
-        darkening (tau) coeffs are input into PHOEBE binary before eBEER model 
+        phoebe_binary must have ld_mode_bol set to 'manual' and ld_func_bol
+        set to 'linear'. Assumes linear limb darkening (u) and gravity
+        darkening (tau) coeffs are input into PHOEBE binary before eBEER model
         is computed.
 
         Args:
-            phoebe_binary(PHOEBE bundle): phoebe system to generate lightcurve 
+            phoebe_binary(PHOEBE bundle): phoebe system to generate lightcurve
                                             for
-            times(float or numpy array): time(s) in DAYS which the model will 
-                                           be computed for 
+            times(float or numpy array): time(s) in DAYS which the model will
+                                           be computed for
         """
         orbit = phoebe_binary['component@binary']
         self.Porb = orbit['period'].get_value(units.day)
@@ -99,10 +98,10 @@ def Mbeam(eBp: eBEERParams, alpha_beam: float, calc_for_star_1: bool=True):
         M = eBp.M2
         q = eBp.M1 / eBp.M2
         per0 = eBp.per0 + np.pi
-        
+
     # Full Calculation (Eq.2 from Engel et al. 2020)
-    return (-2830 * alpha_beam * (q / (1+q)**(2/3)) * M**(1/3) 
-            * eBp.Porb**(-1/3) * np.sin(eBp.incl) 
+    return (-2830 * alpha_beam * (q / (1+q)**(2/3)) * M**(1/3)
+            * eBp.Porb**(-1/3) * np.sin(eBp.incl)
             * (np.cos(per0 + eBp.v) / np.sqrt(1 - eBp.ecc**2)))
 
 
@@ -112,7 +111,7 @@ def Mellip(eBp: eBEERParams, calc_for_star1: bool=True):
     Using equations 3-5 from Engel et al. 2020 (MNRAS, 497, 4884):
     `https://ui.adsabs.harvard.edu/abs/2020MNRAS.497.4884E/abstract`
 
-    Assume linear limb darkening (u) and gravity darkening (tau) coeffs are 
+    Assume linear limb darkening (u) and gravity darkening (tau) coeffs are
     input into PHOEBE binary before eBEER model is computed
 
     Args:
@@ -120,7 +119,7 @@ def Mellip(eBp: eBEERParams, calc_for_star1: bool=True):
         calc_for_star_1: whether to calculate effect from primary or secondary
 
     Returns:
-        A float or numpy array of the flux modulation due to the ellipsoidal 
+        A float or numpy array of the flux modulation due to the ellipsoidal
         effect
     """
 
@@ -146,48 +145,48 @@ def Mellip(eBp: eBEERParams, calc_for_star1: bool=True):
     alpha_e1 = (15 * u * (2 + tau)) / (32 * (3 - u))
     alpha_e2 = (3 * (15 + u) * (1 + tau)) / (20 * (3 - u))
     alpha_e2b = (15 * (1 - u) * (3 + tau)) / (64 * (3 - u))
-    alpha_e0 = alpha_e2/9 
+    alpha_e0 = alpha_e2/9
     alpha_e0b = 3*alpha_e2b/20
     alpha_e3 = 5*alpha_e1/3
     alpha_e4 = 7*alpha_e2b/4
 
     # Full Calculation (Eq.3 from Engel et al. 2020)
-    line1 = (13435 * 2*alpha_e0 
-             * (2 - 3 * np.sin(eBp.incl)**2) 
+    line1 = (13435 * 2*alpha_e0
+             * (2 - 3 * np.sin(eBp.incl)**2)
              * M**(-1) * Prot**(-2) * R**3)
 
-    line2 = (13435 * 3*alpha_e0 
-             * (2 - 3 * np.sin(eBp.incl)**2) 
+    line2 = (13435 * 3*alpha_e0
+             * (2 - 3 * np.sin(eBp.incl)**2)
              * M**(-1) * (q / (1+q)) * eBp.Porb**(-2) * (beta*R)**(3))
-    
-    line3 = (759 * alpha_e0b 
-             * (8 - 40 * np.sin(eBp.incl)**2 + 35 * np.sin(eBp.incl)**4) 
-             * M**(-5/3) * (q / (1+q)**(5/3)) * eBp.Porb**(-10/3) 
+
+    line3 = (759 * alpha_e0b
+             * (8 - 40 * np.sin(eBp.incl)**2 + 35 * np.sin(eBp.incl)**4)
+             * M**(-5/3) * (q / (1+q)**(5/3)) * eBp.Porb**(-10/3)
              * (beta*R)**5)
-    
-    line4 = (3194 * alpha_e1 
-             * (4 * np.sin(eBp.incl) - 5 * np.sin(eBp.incl)**3) 
-             * M**(-4/3) * (q / (1+q)**(4/3)) * eBp.Porb**(-8/3) 
+
+    line4 = (3194 * alpha_e1
+             * (4 * np.sin(eBp.incl) - 5 * np.sin(eBp.incl)**3)
+             * M**(-4/3) * (q / (1+q)**(4/3)) * eBp.Porb**(-8/3)
              * (beta*R)**4 * np.sin(per0 + eBp.v))
-    
+
     line5 = (13435 * alpha_e2
-              * np.sin(eBp.incl)**2 
-              * M**(-1) * (q / (1+q)) * eBp.Porb**(-2) 
+              * np.sin(eBp.incl)**2
+              * M**(-1) * (q / (1+q)) * eBp.Porb**(-2)
               * (beta*R)**3 * np.cos(2*(per0 + eBp.v)))
-    
-    line6 = (759 * alpha_e2b 
-             * (6 * np.sin(eBp.incl)**2 - 7 * np.sin(eBp.incl)**4) 
-             * M**(-5/3) * (q / (1+q)**(5/3)) * eBp.Porb**(-10/3) 
+
+    line6 = (759 * alpha_e2b
+             * (6 * np.sin(eBp.incl)**2 - 7 * np.sin(eBp.incl)**4)
+             * M**(-5/3) * (q / (1+q)**(5/3)) * eBp.Porb**(-10/3)
              * (beta*R)**5 * np.cos(2*(per0 + eBp.v)))
-    
-    line7 = (3194 * alpha_e3 
-             * np.sin(eBp.incl)**3 
-             * M**(-4/3) * (q / (1+q)**(4/3)) * eBp.Porb**(-8/3) 
+
+    line7 = (3194 * alpha_e3
+             * np.sin(eBp.incl)**3
+             * M**(-4/3) * (q / (1+q)**(4/3)) * eBp.Porb**(-8/3)
              * (beta*R)**4 * np.sin(3*(per0 + eBp.v)))
-    
-    line8 = (759 * alpha_e4 
-             * np.sin(eBp.incl)**4 
-             * M**(-5/3) * (q / (1+q)**(5/3)) * eBp.Porb**(-10/3) 
+
+    line8 = (759 * alpha_e4
+             * np.sin(eBp.incl)**4
+             * M**(-5/3) * (q / (1+q)**(5/3)) * eBp.Porb**(-10/3)
              * (beta*R)**5 * np.cos(4*(per0 + eBp.v)))
 
     return line1 + line2 + line3 + line4 + line5 + line6 + line7 + line8
@@ -205,7 +204,7 @@ def Mrefl(eBp: eBEERParams, alpha_refl: float, calc_for_star1: bool=True):
         calc_for_star_1: whether to calculate effect from primary or secondary
 
     Returns:
-        A float or numpy array of the flux modulation due to the reflection 
+        A float or numpy array of the flux modulation due to the reflection
         effect
     """
 
@@ -219,56 +218,56 @@ def Mrefl(eBp: eBEERParams, alpha_refl: float, calc_for_star1: bool=True):
         q = eBp.M1 / eBp.M2
         R2 = eBp.R1
         per0 = eBp.per0 + np.pi
-    
+
     # Eq.4 from Engel et al. 2020
     beta = (1 + eBp.ecc * np.cos(eBp.v)) / (1 - eBp.ecc**2)
 
     # Full Calculation (Eq.6 from Engel et al. 2020)
-    return (56514 * alpha_refl * (1+q)**(-2/3) * M**(-2/3) 
-            * eBp.Porb**(-4/3) * (beta * R2)**2 
-            * (0.64 - np.sin(eBp.incl) * np.sin(per0 + eBp.v) 
+    return (56514 * alpha_refl * (1+q)**(-2/3) * M**(-2/3)
+            * eBp.Porb**(-4/3) * (beta * R2)**2
+            * (0.64 - np.sin(eBp.incl) * np.sin(per0 + eBp.v)
                + 0.18 * np.sin(eBp.incl)**2 * (1 - np.cos(2*(per0 + eBp.v)))))
 
 
 def get_eBEER_lc(phoebe_binary, times, alpha_beam1: float, alpha_beam2: float,
-                  alpha_refl1: float, alpha_refl2: float, 
+                  alpha_refl1: float, alpha_refl2: float,
                   secondary_flux_fraction=None):
     """Total flux modulation from eBEER effects.
 
     Using equations 1 & 7 from Engel et al. 2020 (MNRAS, 497, 4884):
     `https://ui.adsabs.harvard.edu/abs/2020MNRAS.497.4884E/abstract`
 
-    phoebe_binary must have ld_mode_bol set to 'manual' and ld_func_bol set 
-    to 'linear'. Assumes linear limb darkening (u) and gravity darkening 
+    phoebe_binary must have ld_mode_bol set to 'manual' and ld_func_bol set
+    to 'linear'. Assumes linear limb darkening (u) and gravity darkening
     (tau) coeffs are input into PHOEBE binary before eBEER model is computed.
 
     Args:
         phoebe_binary(PHOEBE bundle): phoebe system to generate lightcurve for
-        times(float or numpy array): time(s) in DAYS which the model will 
-                                       be computed for 
-        alpha_beam1: beaming scaling factor coefficient of primary (to be tuned 
+        times(float or numpy array): time(s) in DAYS which the model will
+                                       be computed for
+        alpha_beam1: beaming scaling factor coefficient of primary (to be tuned
                        using MCMC)
-        alpha_beam2: beaming scaling factor coefficient of secondary (to be 
+        alpha_beam2: beaming scaling factor coefficient of secondary (to be
                        tuned using MCMC)
-        alpha_refl1: reflection scaling factor coefficient of primary (to be 
+        alpha_refl1: reflection scaling factor coefficient of primary (to be
                        tuned using MCMC)
-        alpha_refl2: reflection scaling factor coefficient of secondary (to be 
+        alpha_refl2: reflection scaling factor coefficient of secondary (to be
                        tuned using MCMC)
         secondary_flux_fraction(str or float or None):
             relative flux fraction of secondary compared to primary
-            Options:    
-                        None (Default): Calculated based on component 
+            Options:
+                        None (Default): Calculated based on component
                                           temperatures and masses
                         float: relative flux fraction entered manually
-                        'split': returns primary and secondary       
+                        'split': returns primary and secondary
                                        components separately
 
     Returns:
-        Total eBEER flux modulation. If secondary_flux_fraction is 'split' 
-        function return is a tuple (MeBEER1, MeBEER2) which are the calculated 
-        eBEER modulations (float or numpy array) from the primary and secondary 
-        respectively. Otherwise return is a single float or numpy array which 
-        is the combined eBEER flux modulation from both stars   
+        Total eBEER flux modulation. If secondary_flux_fraction is 'split'
+        function return is a tuple (MeBEER1, MeBEER2) which are the calculated
+        eBEER modulations (float or numpy array) from the primary and secondary
+        respectively. Otherwise return is a single float or numpy array which
+        is the combined eBEER flux modulation from both stars
     """
 
     eBp = eBEERParams(phoebe_binary, times)

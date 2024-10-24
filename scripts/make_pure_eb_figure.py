@@ -19,13 +19,22 @@ def get_plot_data(tic, sector, exposure_shift, spoc_flux_column):
 
     qlp_lc = get_astroquery(tic, sector, 'QLP')
     spoc_lc = get_astroquery(tic, sector, 'SPOC')
-    params = get_eb_params(tic)
-    first_eclipse = params['t1']
-    if len(params) == 0:
-        params = get_eb_params(tic, 'prsa')
-        first_eclipse = params['BJD0']
+    try:
+        params = get_eb_params(tic)
+        first_eclipse = params['t1']
+        if len(params) == 0:
+            params = get_eb_params(tic, 'prsa')
+            first_eclipse = params['BJD0']
 
-    print('Params: ' + repr(params))
+        print('Params: ' + repr(params))
+    except:
+        params = {
+            'BJD0': qlp_lc['TIME'][0],
+            'Per': 1.0 / 0.87897
+        }
+
+    print('QLP LC: ' + repr(qlp_lc))
+    print('SPOC LC: ' + repr(spoc_lc))
 
     spoc_lc = spoc_lc[
         numpy.logical_and(
@@ -221,13 +230,15 @@ def main(tic, sector):
                      loc='upper center',
                      borderaxespad=0)
 
-    pyplot.savefig(
-        path.join(
-            plot_dir,
-            'tic%016d_s%06d_qlp_spoc_comparison.pdf' % (tic, sector)
-        )
-    )
+    pyplot.show()
+#    pyplot.savefig(
+#        path.join(
+#            plot_dir,
+#            'tic%016d_s%06d_qlp_spoc_comparison.pdf' % (tic, sector)
+#        )
+#    )
 
 
 if __name__ == '__main__':
-    main(33419790, 6)
+    main(443768508, 32)
+#    main(33419790, 6)

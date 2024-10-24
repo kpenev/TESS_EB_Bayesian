@@ -157,6 +157,7 @@ def get_astroquery(tic, sector, provenance='SPOC', plot=False):
 
     result = dict()
     for fits_path, fits_sector in fits_list:
+        print(f'Opening: {fits_path!r}')
         with fits.open(fits_path, 'readonly') as fits_f:
             lightcurve = fits_f[1].data[:]
         if plot:

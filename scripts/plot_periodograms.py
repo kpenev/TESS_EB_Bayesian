@@ -311,16 +311,18 @@ def get_periodogram_data(config, params):
 
     lightcurve_dict = get_lc(config.tic, 'all', 'SPOC')
 
-    print('Params:\n' + '\n'.join(['%s: %s' % (p, repr(params[p]))
-                                   for p in params.dtype.names]))
+    if params:
+        print('Params:\n' + '\n'.join(['%s: %s' % (p, repr(params[p]))
+                                       for p in params.dtype.names]))
+
+        folded_spoc_times, folded_spoc_fluxes = get_folded_matched_lc(
+            lightcurve_dict,
+            params,
+            config.match_resolution,
+            'PDCSAP_FLUX'
+        )
 
     reference_time = lightcurve_dict[min(lightcurve_dict.keys())]['TIME'][0]
-    folded_spoc_times, folded_spoc_fluxes = get_folded_matched_lc(
-        lightcurve_dict,
-        params,
-        config.match_resolution,
-        'PDCSAP_FLUX'
-    )
 
     lightcurve_dict = get_lc(config.tic, 'all', 'QLP')
     print('Available sectiors: ' + repr(lightcurve_dict.keys()))
@@ -335,70 +337,75 @@ def get_periodogram_data(config, params):
         ]
 
         corrected_flux = numpy.copy(lightcurve['SAP_FLUX'])
-        min_norb = int(numpy.floor((lightcurve['TIME'][0] - reference_time)
-                                   /
-                                   params['Per']))
-        max_norb = int(numpy.ceil((lightcurve['TIME'][-1] - reference_time)
-                                  /
-                                  params['Per']))
-        orbit_splits = numpy.searchsorted(
-            lightcurve['TIME'],
-            (
-                numpy.arange(min_norb, max_norb + 1, dtype=float)
-                *
-                params['Per']
-                +
-                reference_time
-            )
-        )
-        for norb in range(max_norb - min_norb):
-            lightcurve_slice = lightcurve[orbit_splits[norb]
-                                          :
-                                          orbit_splits[norb + 1]]
-
-            binned_folded_flux = numpy.ones(
-                (orbit_splits[norb + 1] - orbit_splits[norb], 2)
-            )
-            binned_folded_flux[:, 0] = bin_lightcurve(
-                folded_spoc_fluxes,
-                folded_spoc_times,
+        if params:
+            min_norb = int(numpy.floor((lightcurve['TIME'][0] - reference_time)
+                                       /
+                                       params['Per']))
+            max_norb = int(numpy.ceil((lightcurve['TIME'][-1] - reference_time)
+                                      /
+                                      params['Per']))
+            orbit_splits = numpy.searchsorted(
+                lightcurve['TIME'],
                 (
-                    lightcurve_slice['TIME']
-                    -
+                    numpy.arange(min_norb, max_norb + 1, dtype=float)
+                    *
+                    params['Per']
+                    +
                     reference_time
-                    -
-                    (norb  + min_norb) * params['Per']
-                ),
-                average=numpy.nanmean
+                )
             )
-            assert numpy.isfinite(binned_folded_flux).all()
-            assert numpy.isfinite(lightcurve_slice['SAP_FLUX']).all()
-            eclipse_mask = get_eclipse_mask(lightcurve_slice['TIME'],
-                                            params,
-                                            1.0)
-            if eclipse_mask.sum():
-                shift_scale = lstsq(
-                    binned_folded_flux[eclipse_mask],
-                    lightcurve_slice['SAP_FLUX'][eclipse_mask]
-                )[0]
-                corrected_flux[
-                    orbit_splits[norb]
-                    :
-                    orbit_splits[norb + 1]
-                ] /= binned_folded_flux.dot(shift_scale)
-            else:
-                corrected_flux[
-                    orbit_splits[norb]
-                    :
-                    orbit_splits[norb + 1]
-                ] = numpy.nan
+            for norb in range(max_norb - min_norb):
+                lightcurve_slice = lightcurve[orbit_splits[norb]
+                                              :
+                                              orbit_splits[norb + 1]]
 
-        corrected_flux[numpy.abs(corrected_flux - 1) > 0.03] = numpy.nan
-        remove_eclipse_mask = numpy.logical_not(
-            get_eclipse_mask(lightcurve['TIME'], params)
-        )
-        usable = numpy.logical_and(remove_eclipse_mask,
-                                   numpy.isfinite(corrected_flux))
+                binned_folded_flux = numpy.ones(
+                    (orbit_splits[norb + 1] - orbit_splits[norb], 2)
+                )
+                binned_folded_flux[:, 0] = bin_lightcurve(
+                    folded_spoc_fluxes,
+                    folded_spoc_times,
+                    (
+                        lightcurve_slice['TIME']
+                        -
+                        reference_time
+                        -
+                        (norb  + min_norb) * params['Per']
+                    ),
+                    average=numpy.nanmean
+                )
+                assert numpy.isfinite(binned_folded_flux).all()
+                assert numpy.isfinite(lightcurve_slice['SAP_FLUX']).all()
+                eclipse_mask = get_eclipse_mask(lightcurve_slice['TIME'],
+                                                params,
+                                                1.0)
+                if eclipse_mask.sum():
+                    shift_scale = lstsq(
+                        binned_folded_flux[eclipse_mask],
+                        lightcurve_slice['SAP_FLUX'][eclipse_mask]
+                    )[0]
+                    corrected_flux[
+                        orbit_splits[norb]
+                        :
+                        orbit_splits[norb + 1]
+                    ] /= binned_folded_flux.dot(shift_scale)
+                else:
+                    corrected_flux[
+                        orbit_splits[norb]
+                        :
+                        orbit_splits[norb + 1]
+                    ] = numpy.nan
+
+            corrected_flux[numpy.abs(corrected_flux - 1) > 0.03] = numpy.nan
+            remove_eclipse_mask = numpy.logical_not(
+                get_eclipse_mask(lightcurve['TIME'], params)
+            )
+            usable = numpy.logical_and(remove_eclipse_mask,
+                                       numpy.isfinite(corrected_flux))
+        else:
+            remove_eclipse_mask = numpy.ones(len(lightcurve), dtype=bool)
+            usable = numpy.ones(len(lightcurve), dtype=bool)
+
         result[sector] = dict(
             times=lightcurve['TIME'],
             raw_flux=lightcurve['SAP_FLUX'],
@@ -537,16 +544,17 @@ def make_lsp_figures(periodogram_data, params):
                     '-',
                     label='corrected Sector ' + repr(sector))
 
-        for i in range(1, 10):
-            pyplot.axvline(params['Per'] / i,
-                           color='black')
-            pyplot.text(
-                x=params['Per'] / i,
-                y=pyplot.ylim()[1],
-                s=('Porb' + ('' if i==1 else ' / ' + str(i))),
-                verticalalignment='bottom',
-                horizontalalignment='center'
-            )
+        if params:
+            for i in range(1, 10):
+                pyplot.axvline(params['Per'] / i,
+                               color='black')
+                pyplot.text(
+                    x=params['Per'] / i,
+                    y=pyplot.ylim()[1],
+                    s=('Porb' + ('' if i==1 else ' / ' + str(i))),
+                    verticalalignment='bottom',
+                    horizontalalignment='center'
+                )
 
         pyplot.legend()
         pyplot.show()
