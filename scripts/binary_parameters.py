@@ -4,7 +4,8 @@ import numpy
 from astropy import units
 import batman
 
-class BinaryParms(batman.TransitParams):
+
+class BinaryParams(batman.TransitParams):
     """Extend the batman parameters with everything needed by model."""
 
     @staticmethod
@@ -98,7 +99,15 @@ class BinaryParms(batman.TransitParams):
             )
         )
 
+        self._prot_both = {}
+        self._linear_limbdark_both = {}
+        self._gravdark_both = {}
+        self._u_both = {}
+        self._limb_dark_both = {}
+        self.mtotal = 0.0
+
         for component in ['primary', 'secondary']:
+            star = phoebe_binary[component]
             self._limb_dark_both[
                 component
             ] = phoebe_binary['ld_func'][dataset][component].get_value()
@@ -107,9 +116,24 @@ class BinaryParms(batman.TransitParams):
             assert len(phoebe_coefs) == 1
             for value in phoebe_coefs.values():
                 self._u_both[component] = value
-        self.t0 = self._t0_both['primary']
-        self.u = self._u_both['primary']
-        self.limb_dark = self._limb_dark_both['primary']
+            self.mtotal += star['component@mass'].get_value(units.Msun)
+            if component == 'primary':
+                self.mratio = self.mtotal
+                self.rstar = star['requiv'].get_value(units.R_sun)
+            else:
+                self.mratio /= star['component@mass'].get_value(units.Msun)
+
+            self._prot_both[component] = (
+                star['component@period'].get_value(units.day)
+            )
+            self._linear_limbdark_both[component] = (
+                star['ld_coeffs_bol'].get_value('')
+            )
+            self._gravdark_both[component] = star['gravb_bol'].get_value('')
+
+
+        for attr in self._per_star_attr:
+            setattr(self, attr, getattr(self, f'_{attr}_both')['primary'])
 
 
     def __init__(self, *, from_phoebe=None, from_mcmc=None):
@@ -117,8 +141,14 @@ class BinaryParms(batman.TransitParams):
 
         super().__init__()
         assert from_phoebe or from_mcmc
-        self._limb_dark_both = {}
-        self._u_both = {}
+        self._per_star_attr = ['t0',
+                               'u',
+                               'limb_dark',
+                               'prot',
+                               'linear_limbdark',
+                               'gravdark']
+        self.mratio = 1.0
+        self.rstar = 1.0
         if from_phoebe:
             self._init_from_phoebe(from_phoebe)
         self.inverted = False
@@ -128,9 +158,11 @@ class BinaryParms(batman.TransitParams):
         """Swap which star is considered primary vs secondary."""
 
         component = 'primary' if self.inverted else 'secondary'
-        self.t0 = self._t0_both[component]
-        self.u = self._u_both[component]
-        self.limb_dark = self._limb_dark_both[component]
+        for attr in self._per_star_attr:
+            setattr(self, attr, getattr(self, f'_{attr}_both')[component])
+
+        self.rstar *= self.rp
         self.rp = 1.0 / self.rp
+        self.mratio = 1.0 / self.mratio
         self.a *= self.rp
         self.w = (self.w + 180.0) % 360.0

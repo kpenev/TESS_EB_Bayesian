@@ -2,7 +2,7 @@
 
 import batman
 
-from binary_parameters import BinaryParms
+from binary_parameters import BinaryParams
 
 def get_batman_lc(phoebe_binary,
                   times,
@@ -11,7 +11,7 @@ def get_batman_lc(phoebe_binary,
     """Use BATMAN to approximate the LC of the given binary."""
 
     assert dataset == 'lc01'
-    params = BinaryParms(from_phoebe=phoebe_binary)
+    params = BinaryParams(from_phoebe=phoebe_binary)
 
     print('\t\t\tRunning primary batman model for: ' + repr(vars(params)))
     model = batman.TransitModel(params, times)
