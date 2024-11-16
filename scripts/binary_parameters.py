@@ -5,6 +5,7 @@ from astropy import units
 import batman
 import phoebe
 
+#TODO: Connect time of periastron passage and time of superior conjunction
 
 # This is set by BATMAN
 # pylint: disable=too-many-instance-attributes
@@ -169,7 +170,8 @@ class BinaryParams(batman.TransitParams):
         self.rp = 1.0 / self.rp
         self.mratio = 1.0 / self.mratio
         self.a *= self.rp
-        self.w = (self.w + 180.0) % 360.0
+        self.w = (self.w + 18Figure out time of periapsis passage from time of
+                  sup0.0) % 360.0
         self.teff_ratio = 1.0 / self.teff_ratio
 
     def to_phoebe(self):

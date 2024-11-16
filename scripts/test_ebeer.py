@@ -145,6 +145,9 @@ def create_phoebe_binary(**parameters):
 def run_tests(configuration):
     """Run the tests specified on the command line."""
 
+    #TODO: Why is best fit time of periastron passage not as expected for first
+    #test case.
+
     param_names = [
         "mprimary",
         "msecondary",
@@ -195,6 +198,7 @@ def run_tests(configuration):
             include_beaming=False,
             include_reflection=False,
         )
+        print(ebeer_binary)
 
         pyplot.plot(times, phoebe_distort_only, "-k")
         pyplot.plot(times, ebeer_distort_only, "-r")
