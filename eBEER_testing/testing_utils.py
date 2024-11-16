@@ -1,17 +1,30 @@
 import phoebe
 from astropy import units as u
 
-def get_phoebe_binary(Porb= 1, t0= -0.25, M1= 0.9988131358058301, 
-                      M2= 0.9988131358058301, R1= 1, R2= 1, T1= 6000, T2= 6000,
-                      incl= 90, per0= 0, ecc= 0, u1= 0.5, u2= 0.5, tau1= 0.32,
-                      tau2= 0.32, metallicity= None):
+def get_phoebe_binary(*,
+                      Porb=1,
+                      t0_perpass=-0.25,
+                      M1=0.9988131358058301,
+                      M2=0.9988131358058301,
+                      R1=1,
+                      R2=1,
+                      T1=6000,
+                      T2=6000,
+                      incl=90,
+                      per0=0,
+                      ecc=0,
+                      u1=0.5,
+                      u2=0.5,
+                      tau1=0.32,
+                      tau2=0.32,
+                      metallicity=None):
     """Configure a PHOEBE binary with input parameters.
-    
+
     Default parameters above are the PHOEBE defaults
     Assumes Prot of stars = Porb of system (default PHOEBE behavior)
 
     Args: System Parameters
-        t0: time of periastron passage in days
+        t0_perpass: time of periastron passage in days
         per0: argument of periastron in degrees
         u1, u2: primary and secondary linear limb darkening coefficients
         tau1, tau2: primary and secondary gravity darkening coefficients
@@ -42,12 +55,12 @@ def get_phoebe_binary(Porb= 1, t0= -0.25, M1= 0.9988131358058301,
     binary['secondary']['requiv'].set_value(R2 * u.R_sun)
 
     binary.flip_constraint('t0_perpass', solve_for= 't0_supconj')
-    orbit['t0_perpass'].set_value(t0 * u.day)
-    
+    orbit['t0_perpass'].set_value(t0_perpass * u.day)
+
     for component in ['primary', 'secondary']:
         binary[component]['ld_mode_bol'].set_value('manual')
         binary[component]['ld_func_bol'].set_value('linear')
-    
+
     binary['primary']['ld_coeffs_bol'].set_value(u1)
     binary['secondary']['ld_coeffs_bol'].set_value(u2)
     binary['primary']['gravb_bol'].set_value(tau1)
@@ -78,7 +91,7 @@ def print_pb_params(b):
     except:
         u1 = "Limb Darkening Coeffs not exposed"
     tau1 = star1['gravb_bol'].get_value('')
-    
+
     star2 = b['secondary']
     M2 = star2['component@mass'].get_value(u.Msun)
     R2 = star2['requiv'].get_value(u.R_sun)
@@ -89,7 +102,7 @@ def print_pb_params(b):
     except:
         u2 = "Limb Darkening Coeffs not exposed"
     tau2 = star2['gravb_bol'].get_value('')
-    
+
 
     print(fr'Orbit - e: {ecc},  i: {incl},  $\omega$: {per0},  Porb: {Porb}, ',
           f't0_periastron: {t0},  q: {q}')
