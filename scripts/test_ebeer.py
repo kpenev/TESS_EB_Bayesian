@@ -17,6 +17,25 @@ import phoebe
 from binary_parameters import BinaryParams
 from ebeer import fit_ebeer_time_and_coef
 
+# TODO: Suspcious behavior:
+# * Difference in ellipticity modulation when primary and secondary are swapped
+#   for:
+#   - mprimary: 0.7
+#   - msecondary: 0.4
+#   - peridistance_factor: 3.0
+#   - ecc: 0.4
+#   - incl: 0.0
+#   - per0: 0.0
+#   - t0_supconj_factor: 0.0
+#   AND
+#   - mprimary: 0.4
+#   - msecondary: 0.7
+#   - peridistance_factor: 5.0
+#   - ecc: 0.4
+#   - incl: 0.0
+#   - per0: 0.0
+#   - t0_supconj_factor: 0.0
+
 
 def parse_command_line():
     """Return the command line configuration."""
