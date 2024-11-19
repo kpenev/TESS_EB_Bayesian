@@ -5,7 +5,6 @@ from astropy import units
 import batman
 import phoebe
 
-#TODO: Connect time of periastron passage and time of superior conjunction
 
 # This is set by BATMAN
 # pylint: disable=too-many-instance-attributes
@@ -170,8 +169,7 @@ class BinaryParams(batman.TransitParams):
         self.rp = 1.0 / self.rp
         self.mratio = 1.0 / self.mratio
         self.a *= self.rp
-        self.w = (self.w + 18Figure out time of periapsis passage from time of
-                  sup0.0) % 360.0
+        self.w = (self.w + 180.0) % 360.0
         self.teff_ratio = 1.0 / self.teff_ratio
 
     def to_phoebe(self):
@@ -188,7 +186,6 @@ class BinaryParams(batman.TransitParams):
         )
 
         orbit = result["orbit@component"]
-        orbit["t0_supconj"].set_value(self.t0 * units.day)
         orbit["t0_perpass"].set_value(self.t0_perpass * units.day)
         orbit["period"].set_value(self.per * units.day)
         orbit["requivratio"].set_value(self.rp)
@@ -227,8 +224,9 @@ class BinaryParams(batman.TransitParams):
             f"Binary: Mtot={self.mtotal}, q={self.mratio}, R1={self.rstar}, "
             f"R2/R1={self.rp}, Teff1/Teff2={self.teff_ratio} Porb={self.per}, "
             f"a={self.a}, e={self.ecc}, i={self.inc}, w={self.w}, "
-            f"t0={self.t0}, u={self.u}, LDcoef={self.limb_dark}, "
-            f"Prot={self.prot}, LinLDcoef={self.linear_limbdark}, "
+            f"t0={self.t0}, t_perpass={self.t0_perpass}, u={self.u}, "
+            f"LDcoef={self.limb_dark}, Prot={self.prot}, "
+            f"LinLDcoef={self.linear_limbdark}, "
             f"GDcoef={self.gravdark}, reflect coef={self.reflection_coef}, "
             f"beaming coef={self.beaming_coef}"
         )

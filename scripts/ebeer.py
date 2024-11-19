@@ -2,7 +2,7 @@
 
 import numpy
 from scipy.linalg import lstsq
-from scipy.optimize import minimize_scalar
+from scipy.optimize import minimize
 from poliastro.core.angles import E_to_nu, M_to_E
 
 from binary_parameters import BinaryParams
@@ -281,6 +281,8 @@ def fit_ebeer_coefficients(
             + secondary_flux_fraction * ellipticity(binary, true_anomaly)
         ) / (1.0 + secondary_flux_fraction)
         rhs = fluxdiff_to_fit - ellip_fluxdiff
+    else:
+        rhs = fluxdiff_to_fit
     if num_coef == 0:
         if result == "fluxdiff":
             return ellip_fluxdiff
@@ -294,17 +296,21 @@ def fit_ebeer_coefficients(
         binary.reflection_coef = fit_result[0][:2]
     if include_beaming:
         binary.beaming_coef = fit_result[0][beaming_ind : beaming_ind + 2]
+    best_fit_fluxdiff = lhs_matrix.dot(fit_result[0])
+    if include_ellipticity:
+        best_fit_fluxdiff += ellip_fluxdiff
     print(
-        f"Residues: {fit_result[1]!r}\nRank: {fit_result[2]}\nSingular "
+        f"Coef: {fit_result[0]!r}\nRank: {fit_result[2]}\nSingular "
         f"vals:{fit_result[3]!r}"
     )
     if result == "fluxdiff":
-        return lhs_matrix.dot(fit_result[0])
+        return best_fit_fluxdiff
+    best_fit_fluxdiff -= fluxdiff_to_fit
     if result == "rms":
-        result = numpy.mean(fit_result[1] ** 2) ** 0.5
+        result = numpy.mean(best_fit_fluxdiff**2) ** 0.5
         print(f"Returning: {result!r}")
         return result
-    return fit_result[1]
+    return best_fit_fluxdiff
 
 
 # pylint: enable=too-many-branches
@@ -344,10 +350,14 @@ def fit_ebeer_time_and_coef(binary, times, fluxdiff_to_fit, **fit_coef_kwargs):
         return result
 
     orig_result = fit_coef_kwargs.pop("result", "fluxdiff")
-    print(f"Minimizing with bounds: {(0, binary.per)!r}")
-    fit_result = minimize_scalar(to_minimize, bounds=(0, binary.per))
-    print("Minimize result: {fit_result!r}")
-    binary.t0_perpass = fit_result.x
+    best_fit = None
+    for t0 in numpy.linspace(0, binary.per, 11):
+        print(f"Minimizing with t0 = {t0!r}")
+        fit_result = minimize(to_minimize, x0=t0)
+        print(f"Minimize result: {fit_result!r}")
+        if best_fit is None or fit_result.fun < best_fit.fun:
+            best_fit = fit_result
+    binary.t0_perpass = best_fit.x
     fit_coef_kwargs["result"] = orig_result
     return fit_ebeer_coefficients(
         binary,
