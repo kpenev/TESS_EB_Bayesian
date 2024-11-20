@@ -244,7 +244,7 @@ def fit_ebeer_coefficients(
             array: The residues if ``result`` is neither of the above.
     """
 
-    secondary_flux_fraction = binary.teff_ratio**4 * (binary.rp) ** 2
+    secondary_flux_fraction = binary.secondary_flux_fraction()
 
     num_coef = 0
     if include_beaming:
@@ -283,6 +283,9 @@ def fit_ebeer_coefficients(
         rhs = fluxdiff_to_fit - ellip_fluxdiff
     else:
         rhs = fluxdiff_to_fit
+
+    binary.swap_components()
+
     if num_coef == 0:
         if result == "fluxdiff":
             return ellip_fluxdiff
@@ -423,7 +426,7 @@ def get_ebeer_lc(
     )
 
     if secondary_flux_fraction is None:
-        secondary_flux_fraction = binary.teff_ratio**4 * (binary.rp) ** 2
+        secondary_flux_fraction = binary.secondary_flux_fraction()
 
     binary.swap_components()
 
@@ -432,6 +435,8 @@ def get_ebeer_lc(
         + binary.reflection_coef[1] * reflection(binary, true_anom)
         + alpha_ellip * ellipticity(binary, true_anom)
     )
+
+    binary.swap_components()
 
     if secondary_flux_fraction == "split":
         return (primary_flux, secondary_flux)

@@ -171,6 +171,9 @@ class BinaryParams(batman.TransitParams):
         self.a *= self.rp
         self.w = (self.w + 180.0) % 360.0
         self.teff_ratio = 1.0 / self.teff_ratio
+        self.reflection_coef = numpy.flip(self.reflection_coef)
+        self.beaming_coef = numpy.flip(self.beaming_coef)
+        self.inverted = not self.inverted
 
     def to_phoebe(self):
         """Return PHOEBE binary with parameters specified in this object."""
@@ -215,6 +218,11 @@ class BinaryParams(batman.TransitParams):
             this_star["ld_coeffs_bol"].set_value(self._u_both[star_rank])
             this_star["period"].set_value(self._prot_both[star_rank])
 
+    def secondary_flux_fraction(self):
+        """Return the fraction of the flux coming from the secondary."""
+
+        return self.teff_ratio**4 * (self.rp) ** 2
+
     def __str__(self):
         """Human readable representation of the currently stored values."""
 
@@ -224,11 +232,11 @@ class BinaryParams(batman.TransitParams):
             f"Binary: Mtot={self.mtotal}, q={self.mratio}, R1={self.rstar}, "
             f"R2/R1={self.rp}, Teff1/Teff2={self.teff_ratio} Porb={self.per}, "
             f"a={self.a}, e={self.ecc}, i={self.inc}, w={self.w}, "
-            f"t0={self.t0}, t_perpass={self.t0_perpass}, u={self.u}, "
-            f"LDcoef={self.limb_dark}, Prot={self.prot}, "
-            f"LinLDcoef={self.linear_limbdark}, "
-            f"GDcoef={self.gravdark}, reflect coef={self.reflection_coef}, "
-            f"beaming coef={self.beaming_coef}"
+            f"t0={self.t0}, t_perpass={self.t0_perpass}, u={self._u_both}, "
+            f"LDcoef={self._limb_dark_both}, Prot={self._prot_both}, "
+            f"LinLDcoef={self._linear_limbdark_both}, "
+            f"GDcoef={self._gravdark_both}, reflect "
+            f"coef={self.reflection_coef}, beaming coef={self.beaming_coef}"
         )
         # pylint: enable=no-member
 
