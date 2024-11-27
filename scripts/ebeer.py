@@ -296,9 +296,9 @@ def fit_ebeer_coefficients(
     lhs_matrix /= 1.0 + secondary_flux_fraction
     fit_result = lstsq(lhs_matrix, rhs)
     if include_reflection:
-        binary.reflection_coef = fit_result[0][:2]
+        binary.set_reflection_coef(fit_result[0][:2])
     if include_beaming:
-        binary.beaming_coef = fit_result[0][beaming_ind : beaming_ind + 2]
+        binary.set_beaming_coef(fit_result[0][beaming_ind : beaming_ind + 2])
     best_fit_fluxdiff = lhs_matrix.dot(fit_result[0])
     if include_ellipticity:
         best_fit_fluxdiff += ellip_fluxdiff
@@ -420,8 +420,8 @@ def get_ebeer_lc(
     true_anom = calc_true_anomaly(binary, times)
     alpha_ellip = 0 if disable_ellipticity else 1
     primary_flux = (
-        binary.beaming_coef[0] * beaming(binary, true_anom)
-        + binary.reflection_coef[0] * reflection(binary, true_anom)
+        binary.beaming_coef * beaming(binary, true_anom)
+        + binary.reflection_coef * reflection(binary, true_anom)
         + alpha_ellip * ellipticity(binary, true_anom)
     )
 
@@ -431,8 +431,8 @@ def get_ebeer_lc(
     binary.swap_components()
 
     secondary_flux = (
-        binary.beaming_coef[1] * beaming(binary, true_anom)
-        + binary.reflection_coef[1] * reflection(binary, true_anom)
+        binary.beaming_coef * beaming(binary, true_anom)
+        + binary.reflection_coef * reflection(binary, true_anom)
         + alpha_ellip * ellipticity(binary, true_anom)
     )
 

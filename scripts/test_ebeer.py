@@ -9,13 +9,12 @@ import pickle
 
 from astropy import units
 from configargparse import ArgumentParser, DefaultsFormatter
-from matplotlib import pyplot
+from matplotlib import pyplot, use
 from matplotlib.backends.backend_pdf import PdfPages
 import numpy
 import phoebe
 
-from binary_parameters import BinaryParams
-from ebeer import fit_ebeer_time_and_coef
+from plot_ebeer import get_flux_modulations as get_ebeer_flux_modulations, create_phoebe_binary
 
 # TODO: Suspcious behavior:
 # * Difference in ellipticity modulation when primary and secondary are swapped
@@ -122,56 +121,62 @@ def parse_command_line():
     return parser.parse_args()
 
 
-def set_star_params(star, mass):
-    """Set stellar properties per Eq. 8-10 of eBEER paper."""
+def get_phoebe_reference_flux(phoebe_binary):
+    """Return the reference flux (with all effects off) for given binary."""
 
-    if mass < 0.43:
-        luminosity = 0.23 * mass**2.3
-    elif mass < 2.0:
-        luminosity = mass**4
-    else:
-        luminosity = 1.5 * mass**3.5
-    radius = max(0.1, mass**0.8)
-    star["mass"].set_value(mass * units.Msun)
-    star["requiv"].set_value(radius * units.Rsun)
-    star["teff"].set_value(6000.0 * luminosity**0.25 / radius**0.5)
-    star["ld_func_bol"].set_value("linear")
-    star["ld_mode_bol"].set_value("lookup")
+    phoebe_binary["irrad_method"].set_value("none")
+    phoebe_binary.set_value_all("distortion_method", value="sphere")
+    phoebe_binary.run_compute(overwrite=True)
+    return phoebe_binary["lc01@latest@model@fluxes"].quantity
 
 
-def create_phoebe_binary(**parameters):
-    """Create a PHOEBE binary given values for all parameters from cmdline."""
+def get_phoebe_ellipticity_mod(
+    phoebe_binary, reference_flux, combined_only=False
+):
+    """Return the primary, secondary, combined ellipticity flux modulations."""
 
-    binary = phoebe.default_binary()
-    binary.add_dataset("lc", times=0, label="lc01")
-    binary.flip_constraint("mass@primary", solve_for="period")
-    binary.flip_constraint("mass@secondary", solve_for="q")
+    phoebe_binary["irrad_method"].set_value("none")
+    phoebe_binary.set_value_all("distortion_method", value="roche")
+    result = {"combined": get_phoebe_fluxmod(phoebe_binary, reference_flux)}
+    if combined_only:
+        return result["combined"]
 
-    binary["passband"] = "Bolometric:900-40000"
-    binary.set_value_all("ld_func*", "linear")
-    binary["eclipse_method"].set_value("only_horizon")
-    binary.set_value_all("atm", "phoenix")
+    phoebe_binary["secondary"]["distortion_method"] = "sphere"
+    result["primary"] = get_phoebe_fluxmod(phoebe_binary, reference_flux)
+    phoebe_binary["secondary"]["distortion_method"] = "roche"
+    phoebe_binary["primary"]["distortion_method"] = "sphere"
+    result["secondary"] = get_phoebe_fluxmod(phoebe_binary, reference_flux)
 
-    orbit = binary["orbit"]["component"]
-    for param_name in ["ecc", "incl", "per0"]:
-        orbit[param_name] = parameters[param_name]
+    return result
 
-    set_star_params(binary["primary"]["component"], parameters["mprimary"])
-    set_star_params(binary["secondary"]["component"], parameters["msecondary"])
-    roche_total = (
-        binary["primary"]["component"]["requiv_max"].quantity
-        + binary["secondary"]["component"]["requiv_max"].quantity
-    )
-    orbit["sma"].set_value(
-        parameters["peridistance_factor"]
-        * roche_total
-        / (1.0 - parameters["ecc"])
-    )
 
-    orbit["t0_supconj"] = (
-        orbit["period"].quantity * parameters["t0_supconj_factor"]
-    )
-    return binary
+def get_phoebe_reflection_mod(
+    phoebe_binary, reference_flux, combined_only=False
+):
+    """Return the primary, secondary, combined reflection flux modulations."""
+
+    phoebe_binary["irrad_method"].set_value("horvat")
+    phoebe_binary.set_value_all("distortion_method", value="sphere")
+    reflection_frac = {
+        component: phoebe_binary[component]["irrad_frac_refl_bol"]
+        for component in ["primary", "secondary"]
+    }
+
+    result = {"combined": get_phoebe_fluxmod(phoebe_binary, reference_flux)}
+    if combined_only:
+        return result["combined"]
+
+    phoebe_binary["secondary"]["irrad_frac_refl_bol"] = 0.0
+    result["primary"] = get_phoebe_fluxmod(phoebe_binary, reference_flux)
+
+    phoebe_binary["secondary"]["irrad_frac_refl_bol"] = reflection_frac[
+        "secondary"
+    ]
+    phoebe_binary["primary"]["irrad_frac_refl_bol"] = 0.0
+    result["secondary"] = get_phoebe_fluxmod(phoebe_binary, reference_flux)
+    phoebe_binary["primary"]["irrad_frac_refl_bol"] = reflection_frac["primary"]
+
+    return result
 
 
 def get_phoebe_fluxmod(phoebe_binary, reference_flux):
@@ -226,38 +231,30 @@ class CalculateScenario:
         )
         phoebe_binary["dataset"]["lc01"]["times"].set_value(times * units.day)
 
-        phoebe_binary["irrad_method"].set_value("none")
-        phoebe_binary.set_value_all("distortion_method", value="sphere")
-        phoebe_binary.run_compute(overwrite=True)
-        reference_flux = phoebe_binary["lc01@latest@model@fluxes"].quantity
+        reference_flux = get_phoebe_reference_flux(phoebe_binary)
 
-        phoebe_binary.set_value_all("distortion_method", value="roche")
         phoebe_flux = {
-            "ellipticity": get_phoebe_fluxmod(phoebe_binary, reference_flux),
+            "ellipticity": get_phoebe_ellipticity_mod(
+                phoebe_binary, reference_flux
+            ),
+            "reflection": get_phoebe_reflection_mod(
+                phoebe_binary, reference_flux
+            )
         }
-        phoebe_binary.set_value_all("distortion_method", value="sphere")
-        phoebe_binary["irrad_method"].set_value("horvat")
-        phoebe_flux["reflection"] = get_phoebe_fluxmod(
-            phoebe_binary, reference_flux
-        )
         phoebe_binary.set_value_all("distortion_method", value="roche")
+        phoebe_binary["irrad_method"].set_value("horvat")
         phoebe_flux["everything"] = get_phoebe_fluxmod(
             phoebe_binary, reference_flux
         )
 
-        ebeer_binary = BinaryParams(from_phoebe=phoebe_binary)
-
-        ebeer_flux = {
-            flux_key: fit_ebeer_time_and_coef(
-                ebeer_binary,
-                times,
-                phoebe_flux[flux_key],
-                include_beaming=False,
-                include_reflection=(flux_key in ["reflection", "everything"]),
-                include_ellipticity=(flux_key in ["ellipticity", "everything"]),
-            )
-            for flux_key in ["ellipticity", "reflection", "everything"]
-        }
+        ebeer_flux = get_ebeer_flux_modulations(
+            phoebe_binary,
+            times,
+            phoebe_flux['everything'],
+            include_beaming=False,
+            include_reflection=True,
+            include_ellipticity=True,
+        )
         result = (times, ebeer_flux, phoebe_flux)
         self.plot_data[tuple(param_values)] = result
         self._pickle_lock.acquire()
@@ -311,11 +308,18 @@ def run_tests(configuration):
     elif not configuration.plots:
         return
 
+    use("PDF")
+    plot_data = {
+        param_values: calculate_scenario.plot_data[param_values]
+        for param_values in map(tuple, scenarios)
+        if param_values in calculate_scenario.plot_data
+    }
+    print(f"Plotting {len(plot_data)} scenarios")
     for param_values, (
         times,
         ebeer_flux,
         phoebe_flux,
-    ) in calculate_scenario.plot_data.items():
+    ) in sorted(plot_data.items()):
         for subplot, flux_key in enumerate(
             ["ellipticity", "reflection", "everything"]
         ):
@@ -335,6 +339,7 @@ def run_tests(configuration):
         )
         pdf.savefig()
         pyplot.close()
+        print("Added plot")
 
     if configuration.plots:
         pdf.close()

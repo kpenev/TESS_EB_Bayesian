@@ -140,6 +140,8 @@ class BinaryParams(batman.TransitParams):
 
         super().__init__()
         assert from_phoebe or from_mcmc
+        self._reflection_coef_both = {"primary": 0.0, "secondary": 0.0}
+        self._beaming_coef_both = {"primary": 0.0, "secondary": 0.0}
         self._per_star_attr = [
             "t0",
             "u",
@@ -147,6 +149,8 @@ class BinaryParams(batman.TransitParams):
             "prot",
             "linear_limbdark",
             "gravdark",
+            "reflection_coef",
+            "beaming_coef",
         ]
         self.mratio = 1.0
         self.rstar = 1.0
@@ -155,8 +159,6 @@ class BinaryParams(batman.TransitParams):
         self.teff_ratio = 1.0
         self.t0_perpass = 0.0
         self.inverted = False
-        self.reflection_coef = numpy.zeros(2)
-        self.beaming_coef = numpy.zeros(2)
 
     def swap_components(self):
         """Swap which star is considered primary vs secondary."""
@@ -171,8 +173,6 @@ class BinaryParams(batman.TransitParams):
         self.a *= self.rp
         self.w = (self.w + 180.0) % 360.0
         self.teff_ratio = 1.0 / self.teff_ratio
-        self.reflection_coef = numpy.flip(self.reflection_coef)
-        self.beaming_coef = numpy.flip(self.beaming_coef)
         self.inverted = not self.inverted
 
     def to_phoebe(self):
@@ -223,6 +223,24 @@ class BinaryParams(batman.TransitParams):
 
         return self.teff_ratio**4 * (self.rp) ** 2
 
+    def set_reflection_coef(self, coef):
+        """Set the reflection coefficients from the given 2-element iterable."""
+
+        self._reflection_coef_both["primary"] = coef[0]
+        self._reflection_coef_both["secondary"] = coef[1]
+        self.reflection_coef = self._reflection_coef_both[
+            "secondary" if self.inverted else "primary"
+        ]
+
+    def set_beaming_coef(self, coef):
+        """Set the reflection coefficients from the given 2-element iterable."""
+
+        self._beaming_coef_both["primary"] = coef[0]
+        self._beaming_coef_both["secondary"] = coef[1]
+        self.beaming_coef = self._beaming_coef_both[
+            "secondary" if self.inverted else "primary"
+        ]
+
     def __str__(self):
         """Human readable representation of the currently stored values."""
 
@@ -236,7 +254,8 @@ class BinaryParams(batman.TransitParams):
             f"LDcoef={self._limb_dark_both}, Prot={self._prot_both}, "
             f"LinLDcoef={self._linear_limbdark_both}, "
             f"GDcoef={self._gravdark_both}, reflect "
-            f"coef={self.reflection_coef}, beaming coef={self.beaming_coef}"
+            f"coef={self._reflection_coef_both}, beaming "
+            f"coef={self._beaming_coef_both}"
         )
         # pylint: enable=no-member
 
