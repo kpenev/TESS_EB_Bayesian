@@ -12,9 +12,12 @@ from configargparse import ArgumentParser, DefaultsFormatter
 from matplotlib import pyplot, use
 from matplotlib.backends.backend_pdf import PdfPages
 import numpy
-import phoebe
 
-from plot_ebeer import get_flux_modulations as get_ebeer_flux_modulations, create_phoebe_binary
+from plot_ebeer import (
+    get_flux_modulations as get_ebeer_flux_modulations,
+    create_phoebe_binary,
+    plot_modulations,
+)
 
 # TODO: Suspcious behavior:
 # * Difference in ellipticity modulation when primary and secondary are swapped
@@ -118,6 +121,11 @@ def parse_command_line():
         help="If passed, just counts how many scenarios are stored in the "
         "pickle and plots those.",
     )
+    parser.add_argument(
+        "--pickle-fname",
+        default="ebeer_test_data.pkl",
+        help="The filename to store/load pre-computed lightcurves in.",
+    )
     return parser.parse_args()
 
 
@@ -158,7 +166,7 @@ def get_phoebe_reflection_mod(
     phoebe_binary["irrad_method"].set_value("horvat")
     phoebe_binary.set_value_all("distortion_method", value="sphere")
     reflection_frac = {
-        component: phoebe_binary[component]["irrad_frac_refl_bol"]
+        component: phoebe_binary[component]["irrad_frac_refl_bol"].get_value()
         for component in ["primary", "secondary"]
     }
 
@@ -179,6 +187,38 @@ def get_phoebe_reflection_mod(
     return result
 
 
+def get_phoebe_everything_mod(
+    phoebe_binary, reference_flux, combined_only=False
+):
+    """Return the primary, secondary, combined total flux modulations."""
+
+    phoebe_binary["irrad_method"].set_value("horvat")
+    phoebe_binary.set_value_all("distortion_method", value="roche")
+    reflection_frac = {
+        component: phoebe_binary[component]["irrad_frac_refl_bol"].get_value()
+        for component in ["primary", "secondary"]
+    }
+
+    result = {"combined": get_phoebe_fluxmod(phoebe_binary, reference_flux)}
+    if combined_only:
+        return result["combined"]
+
+    phoebe_binary["secondary"]["distortion_method"] = "sphere"
+    phoebe_binary["secondary"]["irrad_frac_refl_bol"] = 0.0
+    result["primary"] = get_phoebe_fluxmod(phoebe_binary, reference_flux)
+
+    phoebe_binary["secondary"]["distortion_method"] = "roche"
+    phoebe_binary["secondary"]["irrad_frac_refl_bol"] = reflection_frac[
+        "secondary"
+    ]
+    phoebe_binary["primary"]["distortion_method"] = "sphere"
+    phoebe_binary["primary"]["irrad_frac_refl_bol"] = 0.0
+    result["secondary"] = get_phoebe_fluxmod(phoebe_binary, reference_flux)
+    phoebe_binary["primary"]["irrad_frac_refl_bol"] = reflection_frac["primary"]
+
+    return result
+
+
 def get_phoebe_fluxmod(phoebe_binary, reference_flux):
     """Return flux modulation, given reference, for fully configured binary."""
 
@@ -192,16 +232,19 @@ def get_phoebe_fluxmod(phoebe_binary, reference_flux):
 class CalculateScenario:
     """Callable that calculates eBEER and PHOEBE models given binary params."""
 
-    def __init__(self, param_names, ntriangles, ntimes, pool_manager):
+    def __init__(
+        self, *, param_names, ntriangles, ntimes, pool_manager, pickle_fname
+    ):
         """Prepare."""
 
         self._param_names = param_names
         self._ntriangles = ntriangles
         self._ntimes = ntimes
         self._pickle_lock = pool_manager.Lock()
+        self._pickle_fnaame = pickle_fname
         self.plot_data = pool_manager.dict()
-        if path.exists("ebeer_test_data.pkl"):
-            with open("ebeer_test_data.pkl", "rb") as pickle_f:
+        if path.exists(pickle_fname):
+            with open(pickle_fname, "rb") as pickle_f:
                 try:
                     while True:
                         assert pickle.load(pickle_f) == "START RECORD"
@@ -234,23 +277,16 @@ class CalculateScenario:
         reference_flux = get_phoebe_reference_flux(phoebe_binary)
 
         phoebe_flux = {
-            "ellipticity": get_phoebe_ellipticity_mod(
-                phoebe_binary, reference_flux
-            ),
-            "reflection": get_phoebe_reflection_mod(
+            modulation: globals()[f"get_phoebe_{modulation}_mod"](
                 phoebe_binary, reference_flux
             )
+            for modulation in ["ellipticity", "reflection", "everything"]
         }
-        phoebe_binary.set_value_all("distortion_method", value="roche")
-        phoebe_binary["irrad_method"].set_value("horvat")
-        phoebe_flux["everything"] = get_phoebe_fluxmod(
-            phoebe_binary, reference_flux
-        )
 
         ebeer_flux = get_ebeer_flux_modulations(
             phoebe_binary,
             times,
-            phoebe_flux['everything'],
+            phoebe_flux["everything"]["combined"],
             include_beaming=False,
             include_reflection=True,
             include_ellipticity=True,
@@ -258,7 +294,7 @@ class CalculateScenario:
         result = (times, ebeer_flux, phoebe_flux)
         self.plot_data[tuple(param_values)] = result
         self._pickle_lock.acquire()
-        with open("ebeer_test_data.pkl", "ab") as pickle_f:
+        with open(self._pickle_fnaame, "ab") as pickle_f:
             pickle.dump("START RECORD", pickle_f)
             pickle.dump(self._param_names, pickle_f)
             pickle.dump(param_values, pickle_f)
@@ -296,6 +332,7 @@ def run_tests(configuration):
         ntriangles=configuration.ntriangles,
         ntimes=configuration.ntimes,
         pool_manager=Manager(),
+        pickle_fname=configuration.pickle_fname,
     )
     print(
         f"Found {len(calculate_scenario.plot_data)} / "
@@ -324,8 +361,24 @@ def run_tests(configuration):
             ["ellipticity", "reflection", "everything"]
         ):
             pyplot.subplot(2, 2, subplot + 1)
-            pyplot.plot(times, phoebe_flux[flux_key], "-k")
-            pyplot.plot(times, ebeer_flux[flux_key], "-r")
+            print(f"PHOEBE flux: {phoebe_flux!r}")
+            print(f"eBEER flux: {ebeer_flux!r}")
+
+            plot_modulations(
+                times,
+                phoebe_flux[flux_key],
+                "PHOEBE {component}",
+                primary={"linestyle": "-", "color": "blue"},
+                secondary={"linestyle": "-", "color": "red"},
+            )
+            plot_modulations(
+                times,
+                ebeer_flux[flux_key],
+                "eBEER {component}",
+                primary={"linestyle": ":", "color": "blue"},
+                secondary={"linestyle": ":", "color": "red"},
+            )
+
             pyplot.title(flux_key)
 
         pyplot.gcf().text(

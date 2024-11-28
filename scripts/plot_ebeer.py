@@ -119,14 +119,18 @@ def get_flux_modulations(phoebe_binary, times, *fit_args, **fit_kwargs):
                 modulation["primary"] + modulation["secondary"]
             )
             if everything is None:
-                everything = numpy.copy(modulation["combined"])
+                everything = {
+                    component: numpy.copy(modulation[component])
+                    for component in ["primary", "secondary", "combined"]
+                }
             else:
-                everything += modulation["combined"]
+                for component in ["primary", "secondary", "combined"]:
+                    everything[component] += modulation[component]
     flux_mod["everything"] = everything
     return flux_mod
 
 
-def plot(times, flux_modulations, label_fmt, **plot_kwargs):
+def plot_modulations(times, flux_modulations, label_fmt, **plot_kwargs):
     """Plot flux modulations calculated using `get_flux_modulations()`."""
 
     for component in ("primary", "secondary", "combined"):
@@ -166,6 +170,15 @@ def main():
     param_values = tuple(parameters[name] for name in param_names)
     times, _, phoebe_flux = plot_data[param_values]
 
+    pyplot.plot(times, phoebe_flux["everything"], label="target")
+
+    plot_colors = {
+        "ellipticity": "green",
+        "reflection": "red",
+        "beaming": "blue",
+        "everything": "black",
+    }
+
     for modulation, to_plot in get_flux_modulations(
         create_phoebe_binary(**parameters),
         times,
@@ -174,11 +187,15 @@ def main():
         include_reflection=True,
         include_ellipticity=True,
     ).items():
-        if modulation == "everything":
-            pyplot.plot(times, to_plot, label="everything")
-            pyplot.plot(times, phoebe_flux["everything"], label="target")
-        elif to_plot:
-            plot(times, to_plot, f"{{component}} {modulation}")
+        if to_plot:
+            plot_modulations(
+                times,
+                to_plot,
+                f"{{component}} {modulation}",
+                primary={"linestyle": "--", "color": plot_colors[modulation]},
+                secondary={"linestyle": ":", "color": plot_colors[modulation]},
+                combined={"linestyle": "-", "color": plot_colors[modulation]},
+            )
 
     #    parameters["per0"] = 90.0
     #    plot(
@@ -194,7 +211,7 @@ def main():
 
     pyplot.xlabel("Time [days]")
     pyplot.ylabel(r"$\Delta F$")
-    pyplot.legend()
+    pyplot.figlegend()
     pyplot.savefig("ebeer_breakdown.pdf")
 
 
