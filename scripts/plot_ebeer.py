@@ -54,6 +54,7 @@ def create_phoebe_binary(**parameters):
 
     binary = phoebe.default_binary()
     binary.add_dataset("lc", times=0, label="lc01")
+    binary.add_dataset("rv")
     binary.flip_constraint("mass@primary", solve_for="period")
     binary.flip_constraint("mass@secondary", solve_for="q")
 

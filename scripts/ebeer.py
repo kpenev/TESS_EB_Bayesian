@@ -170,7 +170,7 @@ def reflection(binary: BinaryParams, true_anomaly):
         effect
     """
 
-    orb_angle = binary.w * _deg + true_anomaly
+    orb_angle = (binary.w * _deg + true_anomaly + 180.0 * _deg)
 
     # Eq.4 from Engel et al. 2020
     beta = (1 + binary.ecc * numpy.cos(true_anomaly)) / (1 - binary.ecc**2)
@@ -181,7 +181,7 @@ def reflection(binary: BinaryParams, true_anomaly):
         56514
         * binary.mtotal ** (-2 / 3)
         * binary.per ** (-4 / 3)
-        * (beta * binary.rp * binary.rstar) ** 2
+        * (beta * binary.rstar) ** 2
         * (
             0.64
             - sin_inc * numpy.sin(orb_angle)
@@ -349,7 +349,7 @@ def fit_ebeer_time_and_coef(binary, times, fluxdiff_to_fit, **fit_coef_kwargs):
             result="rms",
             **fit_coef_kwargs,
         )
-        print(f"To minimize result: {result!r}")
+        print(f"To minimize result at t={t0_perpass}: {result!r}")
         return result
 
     orig_result = fit_coef_kwargs.pop("result", "fluxdiff")

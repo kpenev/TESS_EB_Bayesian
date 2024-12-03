@@ -154,11 +154,12 @@ class BinaryParams(batman.TransitParams):
         ]
         self.mratio = 1.0
         self.rstar = 1.0
-        if from_phoebe:
-            self._init_from_phoebe(from_phoebe)
         self.teff_ratio = 1.0
         self.t0_perpass = 0.0
         self.inverted = False
+
+        if from_phoebe:
+            self._init_from_phoebe(from_phoebe)
 
     def swap_components(self):
         """Swap which star is considered primary vs secondary."""

@@ -80,12 +80,12 @@ def parse_command_line():
     )
     add_param(
         "per0",
-        [0.0, 30.0, 90.0, 135.0, 180.0, 240.0, 270.0],
+        [0.0, 30.0, 90.0, 150.0, 180.0, 270.0],
         "Values to try for the argument of periapsis in degrees.",
     )
     add_param(
         "t0-supconj-factor",
-        numpy.linspace(0.0, 1.0, 5),
+        numpy.linspace(0.0, 1.0, 4),
         "Values to try for the time of superior conjunction in units of the "
         "orbital period.",
     )
@@ -112,6 +112,7 @@ def parse_command_line():
     )
     parser.add_argument(
         "--nthreads",
+        type=int,
         default=16,
         help="The number of parallel threads to use to do the calculations.",
     )
@@ -125,6 +126,14 @@ def parse_command_line():
         "--pickle-fname",
         default="ebeer_test_data.pkl",
         help="The filename to store/load pre-computed lightcurves in.",
+    )
+    parser.add_argument(
+        "--refit-ebeer",
+        default=False,
+        action="store_true",
+        help="Ignore pickled eBEER flux modulations and fit those from scratch."
+        " Since PHOEBE is orders of magnitude more computationally intensive "
+        "this is useful when experimenting with how to fit eBEER.",
     )
     return parser.parse_args()
 
@@ -233,7 +242,13 @@ class CalculateScenario:
     """Callable that calculates eBEER and PHOEBE models given binary params."""
 
     def __init__(
-        self, *, param_names, ntriangles, ntimes, pool_manager, pickle_fname
+        self,
+        *,
+        param_names,
+        ntriangles,
+        ntimes,
+        pool_manager,
+        pickle_fname,
     ):
         """Prepare."""
 
@@ -252,6 +267,7 @@ class CalculateScenario:
                         param_values = tuple(pickle.load(pickle_f))
                         print(f"Unpickling {param_values!r}")
                         self.plot_data[param_values] = pickle.load(pickle_f)
+
                         assert pickle.load(pickle_f) == "END RECORD"
                 except EOFError:
                     pass
@@ -357,19 +373,31 @@ def run_tests(configuration):
         ebeer_flux,
         phoebe_flux,
     ) in sorted(plot_data.items()):
+        if configuration.refit_ebeer:
+            phoebe_binary = create_phoebe_binary(
+                **dict(zip(param_names, param_values))
+            )
+            ebeer_flux = get_ebeer_flux_modulations(
+                phoebe_binary,
+                times,
+                phoebe_flux["everything"]["combined"],
+                include_beaming=False,
+                include_reflection=True,
+                include_ellipticity=True,
+            )
+
         for subplot, flux_key in enumerate(
             ["ellipticity", "reflection", "everything"]
         ):
             pyplot.subplot(2, 2, subplot + 1)
-            print(f"PHOEBE flux: {phoebe_flux!r}")
-            print(f"eBEER flux: {ebeer_flux!r}")
 
             plot_modulations(
                 times,
                 phoebe_flux[flux_key],
                 "PHOEBE {component}",
-                primary={"linestyle": "-", "color": "blue"},
-                secondary={"linestyle": "-", "color": "red"},
+                primary={"linestyle": "-", "color": "blue", "alpha": 0.6},
+                secondary={"linestyle": "-", "color": "red", "alpha": 0.6},
+                combined={"linestyle": "-", "color": "black", "alpha": 0.6},
             )
             plot_modulations(
                 times,
@@ -377,6 +405,7 @@ def run_tests(configuration):
                 "eBEER {component}",
                 primary={"linestyle": ":", "color": "blue"},
                 secondary={"linestyle": ":", "color": "red"},
+                combined={"linestyle": ":", "color": "black"},
             )
 
             pyplot.title(flux_key)
