@@ -228,19 +228,31 @@ class BinaryParams(batman.TransitParams):
         """Set the reflection coefficients from the given 2-element iterable."""
 
         self._reflection_coef_both["primary"] = coef[0]
-        self._reflection_coef_both["secondary"] = coef[1]
+        if len(coef) == 2:
+            self._reflection_coef_both["secondary"] = coef[1]
+        else:
+            self._reflection_coef_both["secondary"] = 0.0
+        # False positive
+        # pylint: disable=attribute-defined-outside-init
         self.reflection_coef = self._reflection_coef_both[
             "secondary" if self.inverted else "primary"
         ]
+        # pylint: enable=attribute-defined-outside-init
 
     def set_beaming_coef(self, coef):
         """Set the reflection coefficients from the given 2-element iterable."""
 
         self._beaming_coef_both["primary"] = coef[0]
-        self._beaming_coef_both["secondary"] = coef[1]
+        if len(coef) == 2:
+            self._beaming_coef_both["secondary"] = coef[1]
+        else:
+            self._beaming_coef_both["secondary"] = 0.0
+        # False positive
+        # pylint: disable=attribute-defined-outside-init
         self.beaming_coef = self._beaming_coef_both[
             "secondary" if self.inverted else "primary"
         ]
+        # pylint: enable=attribute-defined-outside-init
 
     def __str__(self):
         """Human readable representation of the currently stored values."""
@@ -249,7 +261,7 @@ class BinaryParams(batman.TransitParams):
         # pylint: disable=no-member
         return (
             f"Binary: Mtot={self.mtotal}, q={self.mratio}, R1={self.rstar}, "
-            f"R2/R1={self.rp}, Teff1/Teff2={self.teff_ratio} Porb={self.per}, "
+            f"R2/R1={self.rp}, Teff2/Teff1={self.teff_ratio} Porb={self.per}, "
             f"a={self.a}, e={self.ecc}, i={self.inc}, w={self.w}, "
             f"t0={self.t0}, t_perpass={self.t0_perpass}, u={self._u_both}, "
             f"LDcoef={self._limb_dark_both}, Prot={self._prot_both}, "

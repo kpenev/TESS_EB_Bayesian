@@ -15,6 +15,7 @@ import numpy
 
 from plot_ebeer import (
     get_flux_modulations as get_ebeer_flux_modulations,
+    get_rvs as get_ebeer_rvs,
     create_phoebe_binary,
     plot_modulations,
 )
@@ -288,7 +289,7 @@ class CalculateScenario:
             phoebe_binary["orbit"]["component"]["period"].get_value(units.day),
             self._ntimes,
         )
-        phoebe_binary["dataset"]["lc01"]["times"].set_value(times * units.day)
+        phoebe_binary.set_value_all("times", times * units.day)
 
         reference_flux = get_phoebe_reference_flux(phoebe_binary)
 
@@ -297,6 +298,12 @@ class CalculateScenario:
                 phoebe_binary, reference_flux
             )
             for modulation in ["ellipticity", "reflection", "everything"]
+        }
+        phoebe_rv = {
+            component: phoebe_binary[component]["rvs"]["rv01"][
+                "model"
+            ].get_value("km/s")
+            for component in ["primary", "secondary"]
         }
 
         ebeer_flux = get_ebeer_flux_modulations(
@@ -307,7 +314,8 @@ class CalculateScenario:
             include_reflection=True,
             include_ellipticity=True,
         )
-        result = (times, ebeer_flux, phoebe_flux)
+        ebeer_rv = get_ebeer_rvs(phoebe_binary, times, phoebe_rv)
+        result = (times, ebeer_flux, phoebe_flux, ebeer_rv, phoebe_rv)
         self.plot_data[tuple(param_values)] = result
         self._pickle_lock.acquire()
         with open(self._pickle_fnaame, "ab") as pickle_f:
@@ -332,6 +340,15 @@ def run_tests(configuration):
         "per0",
         "t0_supconj_factor",
     ]
+    plot_param_translate = {
+        "peridistance_factor": r"$\frac{r_{per}}{r_{roche}}$",
+        "mprimary": r"$\frac{M_1}{M_{\odot}}$",
+        "msecondary": r"$\frac{M_2}{M_{\odot}}$",
+        "ecc": "e",
+        "incl": "i",
+        "per0": r"$\omega$",
+        "t0_supconj_factor": r"$\frac{t_{sup. conj.}}{P_{orb}}$",
+    }
     scenarios = list(
         product(
             *(
@@ -372,7 +389,11 @@ def run_tests(configuration):
         times,
         ebeer_flux,
         phoebe_flux,
+        ebeer_rv,
+        phoebe_rv,
     ) in sorted(plot_data.items()):
+        pyplot.subplots_adjust(left=0.15, right=0.95, top=0.8, bottom=0.1)
+
         if configuration.refit_ebeer:
             phoebe_binary = create_phoebe_binary(
                 **dict(zip(param_names, param_values))
@@ -386,37 +407,68 @@ def run_tests(configuration):
                 include_ellipticity=True,
             )
 
+        plot_config = {
+            "primary": {"color": "blue"},
+            "secondary": {"color": "red"},
+            "combined": {"color": "black"},
+        }
+
         for subplot, flux_key in enumerate(
-            ["ellipticity", "reflection", "everything"]
+            ["ellipticity", "reflection", "everything", "beaming"]
         ):
             pyplot.subplot(2, 2, subplot + 1)
 
+            for component_config in plot_config.values():
+                component_config["linestyle"] = "-"
+                component_config["alpha"] = 0.6
+
             plot_modulations(
                 times,
-                phoebe_flux[flux_key],
+                phoebe_flux.get(flux_key, phoebe_rv),
                 "PHOEBE {component}",
-                primary={"linestyle": "-", "color": "blue", "alpha": 0.6},
-                secondary={"linestyle": "-", "color": "red", "alpha": 0.6},
-                combined={"linestyle": "-", "color": "black", "alpha": 0.6},
+                **plot_config,
             )
+            for component_config in plot_config.values():
+                component_config["linestyle"] = ":"
+                component_config["alpha"] = 1.0
+
             plot_modulations(
                 times,
-                ebeer_flux[flux_key],
+                ebeer_flux.get(flux_key, ebeer_rv),
                 "eBEER {component}",
-                primary={"linestyle": ":", "color": "blue"},
-                secondary={"linestyle": ":", "color": "red"},
-                combined={"linestyle": ":", "color": "black"},
+                **plot_config,
             )
 
             pyplot.title(flux_key)
 
         pyplot.gcf().text(
-            0.6,
             0.1,
-            "Scenario:\n - "
-            + "\n - ".join(
-                f"{name}: {value!r}"
+            0.87,
+            "Scenario: "
+            + ", ".join(
+                f"{plot_param_translate[name]}: {value}"
                 for name, value in zip(param_names, param_values)
+            )
+            + "\nBest fit coef: "
+            + ", ".join(
+                [
+                    r"$\alpha_{{refl,1}}="
+                    f"{ebeer_flux['reflection_coef'][0]:0.3g}$",
+                    r"$\alpha_{{refl,2}}="
+                    f"{ebeer_flux['reflection_coef'][1]:0.3g}$",
+                    r"$\alpha_{{beam,1}}="
+                    f"{ebeer_rv['beaming_coef'][0]:0.3g}$",
+                    r"$\alpha_{{beam,2}}="
+                    f"{ebeer_rv['beaming_coef'][1]:0.3g}$",
+                ]
+            )
+            + "\nBest fit $t_{0,perpass}$: "
+            + ", ".join(
+                [
+                    f"Ellip.+Refl.: {float(ebeer_flux['t0_perpass']):0.3g}",
+                    f"Primary RV: {ebeer_rv['t0_perpass'][0]:0.3g}",
+                    f"Secondary RV: {ebeer_rv['t0_perpass'][1]:0.3g}",
+                ]
             ),
         )
         pdf.savefig()

@@ -38,8 +38,9 @@ def beaming(binary: BinaryParams, true_anomaly):
         * numpy.sin(binary.inc * _deg)
         * (
             numpy.cos(binary.w * _deg + true_anomaly)
-            / numpy.sqrt(1 - binary.ecc**2)
+            + binary.ecc * numpy.cos(binary.w * _deg)
         )
+        / numpy.sqrt(1 - binary.ecc**2)
     )
 
 
@@ -170,7 +171,7 @@ def reflection(binary: BinaryParams, true_anomaly):
         effect
     """
 
-    orb_angle = (binary.w * _deg + true_anomaly + 180.0 * _deg)
+    orb_angle = binary.w * _deg + true_anomaly + 180.0 * _deg
 
     # Eq.4 from Engel et al. 2020
     beta = (1 + binary.ecc * numpy.cos(true_anomaly)) / (1 - binary.ecc**2)
@@ -245,12 +246,13 @@ def fit_ebeer_coefficients(
     """
 
     secondary_flux_fraction = binary.secondary_flux_fraction()
+    num_components = 2 if secondary_flux_fraction > 0 else 1
 
     num_coef = 0
     if include_beaming:
-        num_coef += 2
+        num_coef += num_components
     if include_reflection:
-        num_coef += 2
+        num_coef += num_components
 
     lhs_matrix = numpy.empty((true_anomaly.size, num_coef))
     if include_ellipticity:
@@ -258,22 +260,23 @@ def fit_ebeer_coefficients(
 
     if include_reflection:
         lhs_matrix[:, 0] = reflection(binary, true_anomaly)
-        beaming_ind = 2
+        beaming_ind = num_components
     else:
         beaming_ind = 0
     if include_beaming:
         lhs_matrix[:, beaming_ind] = beaming(binary, true_anomaly)
 
-    binary.swap_components()
+    if secondary_flux_fraction > 0:
+        binary.swap_components()
 
-    if include_reflection:
-        lhs_matrix[:, 1] = secondary_flux_fraction * reflection(
-            binary, true_anomaly
-        )
-    if include_beaming:
-        lhs_matrix[:, beaming_ind + 1] = secondary_flux_fraction * beaming(
-            binary, true_anomaly
-        )
+        if include_reflection:
+            lhs_matrix[:, 1] = secondary_flux_fraction * reflection(
+                binary, true_anomaly
+            )
+        if include_beaming:
+            lhs_matrix[:, beaming_ind + 1] = secondary_flux_fraction * beaming(
+                binary, true_anomaly
+            )
 
     if include_ellipticity:
         ellip_fluxdiff = (
@@ -284,8 +287,6 @@ def fit_ebeer_coefficients(
     else:
         rhs = fluxdiff_to_fit
 
-    binary.swap_components()
-
     if num_coef == 0:
         if result == "fluxdiff":
             return ellip_fluxdiff
@@ -293,12 +294,17 @@ def fit_ebeer_coefficients(
             return numpy.mean(rhs**2) ** 0.5
         return rhs
 
+    if secondary_flux_fraction > 0:
+        binary.swap_components()
+
     lhs_matrix /= 1.0 + secondary_flux_fraction
     fit_result = lstsq(lhs_matrix, rhs)
     if include_reflection:
-        binary.set_reflection_coef(fit_result[0][:2])
+        binary.set_reflection_coef(fit_result[0][:num_components])
     if include_beaming:
-        binary.set_beaming_coef(fit_result[0][beaming_ind : beaming_ind + 2])
+        binary.set_beaming_coef(
+            fit_result[0][beaming_ind : beaming_ind + num_components]
+        )
     best_fit_fluxdiff = lhs_matrix.dot(fit_result[0])
     if include_ellipticity:
         best_fit_fluxdiff += ellip_fluxdiff

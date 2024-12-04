@@ -27,7 +27,7 @@ from ebeer import (
 _curves = list(
     product(
         ["primary", "secondary"],
-        ["ellipticity", "reflection", "beaming"],
+        ["ellipticity", "reflection"],
     )
 )
 
@@ -58,7 +58,7 @@ def create_phoebe_binary(**parameters):
     binary.flip_constraint("mass@primary", solve_for="period")
     binary.flip_constraint("mass@secondary", solve_for="q")
 
-    binary["passband"] = "Bolometric:900-40000"
+    binary["lc"]["passband"] = "Bolometric:900-40000"
     binary.set_value_all("ld_func*", "linear")
     binary["eclipse_method"].set_value("only_horizon")
     binary.set_value_all("atm", "phoenix")
@@ -82,6 +82,9 @@ def create_phoebe_binary(**parameters):
     orbit["t0_supconj"] = (
         orbit["period"].quantity * parameters["t0_supconj_factor"]
     )
+    binary["primary"]["rv_method"] = "dynamical"
+    binary["secondary"]["rv_method"] = "dynamical"
+
     return binary
 
 
@@ -92,16 +95,17 @@ def get_flux_modulations(phoebe_binary, times, *fit_args, **fit_kwargs):
 
     binary = BinaryParams(from_phoebe=phoebe_binary)
     fit_ebeer_time_and_coef(binary, times, *fit_args, **fit_kwargs)
-    print(f"Best fit binary: {binary}")
+    print(f"LC Best fit binary: {binary}")
     true_anomaly = calc_true_anomaly(binary, times)
-    flux_mod = {}
+    reflection_coef = numpy.zeros(2)
+    result = {}
     secondary_flux_fraction = binary.secondary_flux_fraction()
     for component, modulation in _curves:
-        if modulation not in flux_mod:
-            flux_mod[modulation] = {}
+        if modulation not in result:
+            result[modulation] = {}
         component_i = 0 if component == "primary" else 1
         if fit_kwargs.get("include_" + modulation, True):
-            flux_mod[modulation][component] = (
+            result[modulation][component] = (
                 globals()[modulation](binary, true_anomaly)
                 * (
                     1
@@ -111,10 +115,11 @@ def get_flux_modulations(phoebe_binary, times, *fit_args, **fit_kwargs):
                 * (secondary_flux_fraction if component == "secondary" else 1)
                 / (1.0 + secondary_flux_fraction)
             )
-        if modulation == "beaming":
+        if modulation == "reflection":
+            reflection_coef[component_i] = binary.reflection_coef
             binary.swap_components()
     everything = None
-    for modulation in flux_mod.values():
+    for modulation in result.values():
         if modulation:
             modulation["combined"] = (
                 modulation["primary"] + modulation["secondary"]
@@ -127,14 +132,65 @@ def get_flux_modulations(phoebe_binary, times, *fit_args, **fit_kwargs):
             else:
                 for component in ["primary", "secondary", "combined"]:
                     everything[component] += modulation[component]
-    flux_mod["everything"] = everything
-    return flux_mod
+    result["everything"] = everything
+    result["reflection_coef"] = reflection_coef
+    result['t0_perpass'] = binary.t0_perpass
+    return result
+
+
+def get_rvs(phoebe_binary, times, rvs_to_fit, *fit_args, **fit_kwargs):
+    """Return best-fit eBEER beaming modulation per component to given RVs."""
+
+    binary = BinaryParams(from_phoebe=phoebe_binary)
+    result = {
+        't0_perpass': numpy.zeros(2)
+    }
+
+    fit_kwargs["include_beaming"] = True
+    fit_kwargs["include_reflection"] = False
+    fit_kwargs["include_ellipticity"] = False
+    teff_ratio = binary.teff_ratio
+    binary.teff_ratio = 0.0
+
+    fit_ebeer_time_and_coef(
+        binary, times, rvs_to_fit["primary"], *fit_args, **fit_kwargs
+    )
+    print(f"RV Best fit binary (primary): {binary}")
+    result['t0_perpass'][0] = binary.t0_perpass
+
+    true_anomaly = calc_true_anomaly(binary, times)
+
+    primary_beaming_coef = binary.beaming_coef
+    result["primary"] = primary_beaming_coef * beaming(binary, true_anomaly)
+
+    binary.teff_ratio = teff_ratio
+    binary.swap_components()
+    binary.teff_ratio = 0.0
+    fit_ebeer_time_and_coef(
+        binary, times, rvs_to_fit["secondary"], *fit_args, **fit_kwargs
+    )
+    print(f"RV Best fit binary (secondary): {binary}")
+
+    binary.teff_ratio = 1.0 / teff_ratio
+    binary.swap_components()
+    secondary_beaming_coef = binary.beaming_coef
+    result['t0_perpass'][1] = binary.t0_perpass
+    binary.swap_components()
+    result["secondary"] = secondary_beaming_coef * beaming(binary, true_anomaly)
+
+    result["beaming_coef"] = numpy.array(
+        [primary_beaming_coef, secondary_beaming_coef]
+    )
+
+    return result
 
 
 def plot_modulations(times, flux_modulations, label_fmt, **plot_kwargs):
     """Plot flux modulations calculated using `get_flux_modulations()`."""
 
     for component in ("primary", "secondary", "combined"):
+        if component not in flux_modulations:
+            continue
         pyplot.plot(
             times,
             flux_modulations[component],
