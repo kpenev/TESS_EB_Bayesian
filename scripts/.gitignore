@@ -3,3 +3,6 @@
 __pycache__/
 mastDownload
 .ipynb_checkpoints
+*.pkl
+*.log
+*.out
