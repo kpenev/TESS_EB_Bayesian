@@ -20,25 +20,6 @@ from plot_ebeer import (
     plot_modulations,
 )
 
-# TODO: Suspcious behavior:
-# * Difference in ellipticity modulation when primary and secondary are swapped
-#   for:
-#   - mprimary: 0.7
-#   - msecondary: 0.4
-#   - peridistance_factor: 3.0
-#   - ecc: 0.4
-#   - incl: 0.0
-#   - per0: 0.0
-#   - t0_supconj_factor: 0.0
-#   AND
-#   - mprimary: 0.4
-#   - msecondary: 0.7
-#   - peridistance_factor: 5.0
-#   - ecc: 0.4
-#   - incl: 0.0
-#   - per0: 0.0
-#   - t0_supconj_factor: 0.0
-
 
 def parse_command_line():
     """Return the command line configuration."""
@@ -239,6 +220,8 @@ def get_phoebe_fluxmod(phoebe_binary, reference_flux):
     ).to_value() * 1e6
 
 
+# Intended to function just as a callable for multiprocessing
+# pylint: disable=too-few-public-methods
 class CalculateScenario:
     """Callable that calculates eBEER and PHOEBE models given binary params."""
 
@@ -253,7 +236,7 @@ class CalculateScenario:
     ):
         """Prepare."""
 
-        self._param_names = param_names
+        self.param_names = param_names
         self._ntriangles = ntriangles
         self._ntimes = ntimes
         self._pickle_lock = pool_manager.Lock()
@@ -264,7 +247,7 @@ class CalculateScenario:
                 try:
                     while True:
                         assert pickle.load(pickle_f) == "START RECORD"
-                        assert pickle.load(pickle_f) == self._param_names
+                        assert pickle.load(pickle_f) == self.param_names
                         param_values = tuple(pickle.load(pickle_f))
                         print(f"Unpickling {param_values!r}")
                         self.plot_data[param_values] = pickle.load(pickle_f)
@@ -280,7 +263,7 @@ class CalculateScenario:
             print(f"Skipping pre-computed: {param_values!r}")
             return
 
-        parameters = dict(zip(self._param_names, param_values))
+        parameters = dict(zip(self.param_names, param_values))
         phoebe_binary = create_phoebe_binary(**parameters)
         # print(f'Phoebe binary:\n{phoebe_binary}')
         phoebe_binary.set_value_all("ntriangles", self._ntriangles)
@@ -309,10 +292,8 @@ class CalculateScenario:
         ebeer_flux = get_ebeer_flux_modulations(
             phoebe_binary,
             times,
-            phoebe_flux["everything"]["combined"],
-            include_beaming=False,
-            include_reflection=True,
-            include_ellipticity=True,
+            phoebe_flux["everything"]["combined"] * 1e-6 + 1.0,
+            exclude=("beaming", "eclipse"),
         )
         ebeer_rv = get_ebeer_rvs(phoebe_binary, times, phoebe_rv)
         result = (times, ebeer_flux, phoebe_flux, ebeer_rv, phoebe_rv)
@@ -320,7 +301,7 @@ class CalculateScenario:
         self._pickle_lock.acquire()
         with open(self._pickle_fnaame, "ab") as pickle_f:
             pickle.dump("START RECORD", pickle_f)
-            pickle.dump(self._param_names, pickle_f)
+            pickle.dump(self.param_names, pickle_f)
             pickle.dump(param_values, pickle_f)
             pickle.dump(result, pickle_f)
             pickle.dump("END RECORD", pickle_f)
@@ -328,8 +309,11 @@ class CalculateScenario:
         # print(ebeer_binary)
 
 
-def run_tests(configuration):
-    """Run the tests specified on the command line."""
+# pylint: disable=too-few-public-methods
+
+
+def get_plot_data(configuration):
+    """Calculate everything to make the plots specified by configuration."""
 
     param_names = [
         "mprimary",
@@ -340,15 +324,6 @@ def run_tests(configuration):
         "per0",
         "t0_supconj_factor",
     ]
-    plot_param_translate = {
-        "peridistance_factor": r"$\frac{r_{per}}{r_{roche}}$",
-        "mprimary": r"$\frac{M_1}{M_{\odot}}$",
-        "msecondary": r"$\frac{M_2}{M_{\odot}}$",
-        "ecc": "e",
-        "incl": "i",
-        "per0": r"$\omega$",
-        "t0_supconj_factor": r"$\frac{t_{sup. conj.}}{P_{orb}}$",
-    }
     scenarios = list(
         product(
             *(
@@ -357,8 +332,6 @@ def run_tests(configuration):
             )
         )
     )
-    if configuration.plots:
-        pdf = PdfPages(configuration.plots)
 
     calculate_scenario = CalculateScenario(
         param_names=param_names,
@@ -375,15 +348,38 @@ def run_tests(configuration):
     if not configuration.check_progress:
         with Pool(configuration.nthreads) as workers:
             workers.map(calculate_scenario, scenarios)
-    elif not configuration.plots:
+
+    return (
+        param_names,
+        {
+            param_values: calculate_scenario.plot_data[param_values]
+            for param_values in map(tuple, scenarios)
+            if param_values in calculate_scenario.plot_data
+        },
+    )
+
+
+def run_tests(configuration):
+    """Run the tests specified on the command line."""
+
+    param_names, plot_data = get_plot_data(configuration)
+
+    if not configuration.plots:
         return
 
     use("PDF")
-    plot_data = {
-        param_values: calculate_scenario.plot_data[param_values]
-        for param_values in map(tuple, scenarios)
-        if param_values in calculate_scenario.plot_data
+    pdf = PdfPages(configuration.plots)
+
+    plot_param_translate = {
+        "peridistance_factor": r"$\frac{r_{per}}{r_{roche}}$",
+        "mprimary": r"$\frac{M_1}{M_{\odot}}$",
+        "msecondary": r"$\frac{M_2}{M_{\odot}}$",
+        "ecc": "e",
+        "incl": "i",
+        "per0": r"$\omega$",
+        "t0_supconj_factor": r"$\frac{t_{sup. conj.}}{P_{orb}}$",
     }
+
     print(f"Plotting {len(plot_data)} scenarios")
     for param_values, (
         times,
@@ -401,11 +397,10 @@ def run_tests(configuration):
             ebeer_flux = get_ebeer_flux_modulations(
                 phoebe_binary,
                 times,
-                phoebe_flux["everything"]["combined"],
-                include_beaming=False,
-                include_reflection=True,
-                include_ellipticity=True,
+                phoebe_flux["everything"]["combined"] * 1e-6 + 1.0,
+                exclude=("beaming", "eclipse"),
             )
+            ebeer_rv = get_ebeer_rvs(phoebe_binary, times, phoebe_rv)
 
         plot_config = {
             "primary": {"color": "blue"},

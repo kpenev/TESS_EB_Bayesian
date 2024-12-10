@@ -4,6 +4,7 @@ import numpy
 from astropy import units
 import batman
 import phoebe
+from poliastro.core.angles import E_to_nu, M_to_E
 
 
 # This is set by BATMAN
@@ -253,6 +254,17 @@ class BinaryParams(batman.TransitParams):
             "secondary" if self.inverted else "primary"
         ]
         # pylint: enable=attribute-defined-outside-init
+
+    def calc_true_anomaly(self, times):
+        """Return the true anomaly for the given binary and times."""
+
+        mean_anom = 2 * numpy.pi * (times - self.t0_perpass) / self.per
+        mean_anom = (mean_anom + numpy.pi) % (2 * numpy.pi) - numpy.pi
+        true_anom = numpy.vectorize(E_to_nu)(
+            numpy.vectorize(M_to_E)(mean_anom, self.ecc), self.ecc
+        )
+
+        return true_anom
 
     def __str__(self):
         """Human readable representation of the currently stored values."""

@@ -10,19 +10,8 @@ import phoebe
 from astropy import units
 import numpy
 
-from binary_parameters import BinaryParams
-
-# False positive due to calling from string name
-# pylint: disable=unused-import
-from ebeer import (
-    fit_ebeer_time_and_coef,
-    calc_true_anomaly,
-    ellipticity,
-    reflection,
-    beaming,
-)
-
-# pylint: enable=unused-import
+from binary import Binary
+import ebeer
 
 _curves = list(
     product(
@@ -52,26 +41,26 @@ def set_star_params(star, mass):
 def create_phoebe_binary(**parameters):
     """Create a PHOEBE binary given values for all parameters from cmdline."""
 
-    binary = phoebe.default_binary()
-    binary.add_dataset("lc", times=0, label="lc01")
-    binary.add_dataset("rv")
-    binary.flip_constraint("mass@primary", solve_for="period")
-    binary.flip_constraint("mass@secondary", solve_for="q")
+    result = phoebe.default_binary()
+    result.add_dataset("lc", times=0, label="lc01")
+    result.add_dataset("rv")
+    result.flip_constraint("mass@primary", solve_for="period")
+    result.flip_constraint("mass@secondary", solve_for="q")
 
-    binary["lc"]["passband"] = "Bolometric:900-40000"
-    binary.set_value_all("ld_func*", "linear")
-    binary["eclipse_method"].set_value("only_horizon")
-    binary.set_value_all("atm", "phoenix")
+    result["lc"]["passband"] = "Bolometric:900-40000"
+    result.set_value_all("ld_func*", "linear")
+    result["eclipse_method"].set_value("only_horizon")
+    result.set_value_all("atm", "phoenix")
 
-    orbit = binary["orbit"]["component"]
+    orbit = result["orbit"]["component"]
     for param_name in ["ecc", "incl", "per0"]:
         orbit[param_name] = parameters[param_name]
 
-    set_star_params(binary["primary"]["component"], parameters["mprimary"])
-    set_star_params(binary["secondary"]["component"], parameters["msecondary"])
+    set_star_params(result["primary"]["component"], parameters["mprimary"])
+    set_star_params(result["secondary"]["component"], parameters["msecondary"])
     roche_total = (
-        binary["primary"]["component"]["requiv_max"].quantity
-        + binary["secondary"]["component"]["requiv_max"].quantity
+        result["primary"]["component"]["requiv_max"].quantity
+        + result["secondary"]["component"]["requiv_max"].quantity
     )
     orbit["sma"].set_value(
         parameters["peridistance_factor"]
@@ -82,10 +71,10 @@ def create_phoebe_binary(**parameters):
     orbit["t0_supconj"] = (
         orbit["period"].quantity * parameters["t0_supconj_factor"]
     )
-    binary["primary"]["rv_method"] = "dynamical"
-    binary["secondary"]["rv_method"] = "dynamical"
+    result["primary"]["rv_method"] = "dynamical"
+    result["secondary"]["rv_method"] = "dynamical"
 
-    return binary
+    return result
 
 
 def get_flux_modulations(phoebe_binary, times, *fit_args, **fit_kwargs):
@@ -93,10 +82,10 @@ def get_flux_modulations(phoebe_binary, times, *fit_args, **fit_kwargs):
     Return best-fit eBEER flux modulation components for the given binary.
     """
 
-    binary = BinaryParams(from_phoebe=phoebe_binary)
-    fit_ebeer_time_and_coef(binary, times, *fit_args, **fit_kwargs)
+    binary = Binary(from_phoebe=phoebe_binary)
+    binary.fit_lightcurve(times, *fit_args, **fit_kwargs)
     print(f"LC Best fit binary: {binary}")
-    true_anomaly = calc_true_anomaly(binary, times)
+    true_anomaly = binary.calc_true_anomaly(times)
     reflection_coef = numpy.zeros(2)
     result = {}
     secondary_flux_fraction = binary.secondary_flux_fraction()
@@ -104,9 +93,9 @@ def get_flux_modulations(phoebe_binary, times, *fit_args, **fit_kwargs):
         if modulation not in result:
             result[modulation] = {}
         component_i = 0 if component == "primary" else 1
-        if fit_kwargs.get("include_" + modulation, True):
+        if modulation not in fit_kwargs.get("exclude", ()):
             result[modulation][component] = (
-                globals()[modulation](binary, true_anomaly)
+                getattr(ebeer, modulation)(binary, true_anomaly) * 1e6
                 * (
                     1
                     if modulation == "ellipticity"
@@ -134,49 +123,47 @@ def get_flux_modulations(phoebe_binary, times, *fit_args, **fit_kwargs):
                     everything[component] += modulation[component]
     result["everything"] = everything
     result["reflection_coef"] = reflection_coef
-    result['t0_perpass'] = binary.t0_perpass
+    result["t0_perpass"] = binary.t0_perpass % binary.per
     return result
 
 
 def get_rvs(phoebe_binary, times, rvs_to_fit, *fit_args, **fit_kwargs):
     """Return best-fit eBEER beaming modulation per component to given RVs."""
 
-    binary = BinaryParams(from_phoebe=phoebe_binary)
-    result = {
-        't0_perpass': numpy.zeros(2)
-    }
+    binary = Binary(from_phoebe=phoebe_binary)
+    result = {"t0_perpass": numpy.zeros(2)}
 
-    fit_kwargs["include_beaming"] = True
-    fit_kwargs["include_reflection"] = False
-    fit_kwargs["include_ellipticity"] = False
+    fit_kwargs["exclude"] = ('reflection', 'ellipticity', 'eclipse')
     teff_ratio = binary.teff_ratio
     binary.teff_ratio = 0.0
 
-    fit_ebeer_time_and_coef(
-        binary, times, rvs_to_fit["primary"], *fit_args, **fit_kwargs
-    )
+    binary.fit_lightcurve(times, rvs_to_fit["primary"], *fit_args, **fit_kwargs)
     print(f"RV Best fit binary (primary): {binary}")
-    result['t0_perpass'][0] = binary.t0_perpass
+    result["t0_perpass"][0] = binary.t0_perpass % binary.per
 
-    true_anomaly = calc_true_anomaly(binary, times)
+    true_anomaly = binary.calc_true_anomaly(times)
 
     primary_beaming_coef = binary.beaming_coef
-    result["primary"] = primary_beaming_coef * beaming(binary, true_anomaly)
+    result["primary"] = primary_beaming_coef * ebeer.beaming(
+        binary, true_anomaly
+    )
 
     binary.teff_ratio = teff_ratio
     binary.swap_components()
     binary.teff_ratio = 0.0
-    fit_ebeer_time_and_coef(
-        binary, times, rvs_to_fit["secondary"], *fit_args, **fit_kwargs
+    binary.fit_lightcurve(
+        times, rvs_to_fit["secondary"], *fit_args, **fit_kwargs
     )
     print(f"RV Best fit binary (secondary): {binary}")
 
     binary.teff_ratio = 1.0 / teff_ratio
     binary.swap_components()
     secondary_beaming_coef = binary.beaming_coef
-    result['t0_perpass'][1] = binary.t0_perpass
+    result["t0_perpass"][1] = binary.t0_perpass % binary.per
     binary.swap_components()
-    result["secondary"] = secondary_beaming_coef * beaming(binary, true_anomaly)
+    result["secondary"] = secondary_beaming_coef * ebeer.beaming(
+        binary, true_anomaly
+    )
 
     result["beaming_coef"] = numpy.array(
         [primary_beaming_coef, secondary_beaming_coef]
@@ -239,10 +226,8 @@ def main():
     for modulation, to_plot in get_flux_modulations(
         create_phoebe_binary(**parameters),
         times,
-        fluxdiff_to_fit=phoebe_flux["everything"],
-        include_beaming=False,
-        include_reflection=True,
-        include_ellipticity=True,
+        fluxdiff_to_fit=phoebe_flux["everything"] + 1,
+        exclude=('beaming', 'eclipse')
     ).items():
         if to_plot:
             plot_modulations(
@@ -253,18 +238,6 @@ def main():
                 secondary={"linestyle": ":", "color": plot_colors[modulation]},
                 combined={"linestyle": "-", "color": plot_colors[modulation]},
             )
-
-    #    parameters["per0"] = 90.0
-    #    plot(
-    #        *get_flux_modulations(
-    #            parameters,
-    #            times,
-    #            fluxdiff_to_fit=phoebe_flux["ellipticity"],
-    #            include_beaming=False,
-    #            include_reflection=True,
-    #            include_ellipticity=True,
-    #        )
-    #    )
 
     pyplot.xlabel("Time [days]")
     pyplot.ylabel(r"$\Delta F$")
