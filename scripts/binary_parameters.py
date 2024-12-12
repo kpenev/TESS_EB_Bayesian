@@ -85,7 +85,7 @@ class BinaryParams(batman.TransitParams):
         self.a = (1.0 + self.rp) / orbit["requivsumfrac"].get_value("")
         self.inc = orbit["incl"].get_value(units.deg)
         self.ecc = orbit["ecc"].get_value("")
-        self.w = 90.0 if self.ecc == 0 else orbit["per0"].get_value(units.deg)
+        self.w = orbit["per0"].get_value(units.deg)
         # (orbit['long_an'].get_value(units.deg)
         #                   +
         #                   orbit['per0'].get_value(units.deg)
@@ -133,9 +133,6 @@ class BinaryParams(batman.TransitParams):
             self._linear_limbdark_both[component] = self._u_both[component]
             self._gravdark_both[component] = star["gravb_bol"].get_value("")
 
-        for attr in self._per_star_attr:
-            setattr(self, attr, getattr(self, f"_{attr}_both")["primary"])
-
     def __init__(self, *, from_phoebe=None, from_mcmc=None):
         """Set the model parameters either from PHOEBE binary or MCMC sample."""
 
@@ -161,6 +158,9 @@ class BinaryParams(batman.TransitParams):
 
         if from_phoebe:
             self._init_from_phoebe(from_phoebe)
+
+        for attr in self._per_star_attr:
+            setattr(self, attr, getattr(self, f"_{attr}_both")["primary"])
 
     def swap_components(self):
         """Swap which star is considered primary vs secondary."""
@@ -225,35 +225,35 @@ class BinaryParams(batman.TransitParams):
 
         return self.teff_ratio**4 * (self.rp) ** 2
 
+    def _set_ebeer_coefficients(self, coef, effect):
+        """Set either the reflection or beaming (``effect``) coefficients."""
+
+        target_coef = getattr(self, f"_{effect}_coef_both")
+
+        if self.inverted:
+            primary, secondary = "secondary", "primary"
+        else:
+            primary, secondary = "primary", "secondary"
+
+        target_coef[primary] = coef[0]
+        if len(coef) == 2:
+            target_coef[secondary] = coef[1]
+        else:
+            target_coef[secondary] = 0.0
+        # False positive
+        # pylint: disable=attribute-defined-outside-init
+        setattr(self, f'{effect}_coef', coef[0])
+        # pylint: enable=attribute-defined-outside-init
+
     def set_reflection_coef(self, coef):
         """Set the reflection coefficients from the given 2-element iterable."""
 
-        self._reflection_coef_both["primary"] = coef[0]
-        if len(coef) == 2:
-            self._reflection_coef_both["secondary"] = coef[1]
-        else:
-            self._reflection_coef_both["secondary"] = 0.0
-        # False positive
-        # pylint: disable=attribute-defined-outside-init
-        self.reflection_coef = self._reflection_coef_both[
-            "secondary" if self.inverted else "primary"
-        ]
-        # pylint: enable=attribute-defined-outside-init
+        self._set_ebeer_coefficients(coef, "reflection")
 
     def set_beaming_coef(self, coef):
         """Set the reflection coefficients from the given 2-element iterable."""
 
-        self._beaming_coef_both["primary"] = coef[0]
-        if len(coef) == 2:
-            self._beaming_coef_both["secondary"] = coef[1]
-        else:
-            self._beaming_coef_both["secondary"] = 0.0
-        # False positive
-        # pylint: disable=attribute-defined-outside-init
-        self.beaming_coef = self._beaming_coef_both[
-            "secondary" if self.inverted else "primary"
-        ]
-        # pylint: enable=attribute-defined-outside-init
+        self._set_ebeer_coefficients(coef, "beaming")
 
     def calc_true_anomaly(self, times):
         """Return the true anomaly for the given binary and times."""

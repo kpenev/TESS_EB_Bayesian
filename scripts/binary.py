@@ -1,18 +1,14 @@
 """Define class representing TESS EBs for analysis."""
 
-from traceback import print_stack
-
-from binary_parameters import BinaryParams
-
 import batman
 import numpy
 from scipy.optimize import minimize
 from scipy.linalg import lstsq
 
-import ebeer
+from ebeer import EBEERBinary
 
 
-class Binary(BinaryParams):
+class Binary(EBEERBinary):
     """Represent TESS eclipsing binaries."""
 
     def _get_primary_lightcurve(self, times, true_anomaly, exclude=()):
@@ -20,17 +16,90 @@ class Binary(BinaryParams):
 
         flux = numpy.ones(true_anomaly.shape)
         if "ellipticity" not in exclude:
-            flux += ebeer.ellipticity(self, true_anomaly)
+            flux += self.ellipticity(true_anomaly)
         if "reflection" not in exclude:
-            flux += self.reflection_coef * ebeer.reflection(self, true_anomaly)
+            flux += self.reflection(true_anomaly)
         if "beaming" not in exclude:
-            flux += self.beaming_coef * ebeer.beaming(self, true_anomaly)
+            flux += self.beaming(true_anomaly)
         if "eclipse" not in exclude:
-            flux *= batman.TransitModel(self, times).light_curve(self)
+            flux *= self.eclipse(times)
         return flux
 
-    # Lots of cases to handle
-    # pylint: disable=too-many-branches
+    def _setup_fit_beer_coef_problem(
+        self,
+        times,
+        lc_to_fit,
+        *,
+        true_anomaly,
+        exclude,
+    ):
+        """Set up the linear algebra problem for `fit_ebeer_coefficients()`."""
+
+        def add_primary_rhs(rhs, scaling, eclipse):
+            """Update the RHS vector with scaled effects of current primary."""
+
+            if "ellipticity" in exclude:
+                rhs -= scaling * eclipse
+            else:
+                rhs -= (
+                    scaling * (1.0 + self.ellipticity(true_anomaly)) * eclipse
+                )
+
+        def add_primary_lhs(lhs_matrix, scaling, eclipse, offset):
+            """Update LHS matrix with scaled effects of current primary."""
+
+            if "reflection" not in exclude:
+                lhs_matrix[:, offset] = (
+                    scaling * self.reflection(true_anomaly) * eclipse
+                )
+            if "beaming" not in exclude:
+                lhs_matrix[:, beaming_ind + offset] = (
+                    scaling * self.beaming(true_anomaly) * eclipse
+                )
+
+        if true_anomaly is None:
+            true_anomaly = self.calc_true_anomaly(times)
+
+        secondary_flux_fraction = self.secondary_flux_fraction()
+        if "eclipse" in exclude:
+            eclipse = 1
+        else:
+            eclipse = batman.TransitModel(self, times).light_curve(self)
+
+        rhs = numpy.copy(lc_to_fit)
+        if secondary_flux_fraction:
+            num_components = 2
+            rhs *= 1.0 + secondary_flux_fraction
+        else:
+            num_components = 1
+
+        num_coef = 0
+        if "beaming" not in exclude:
+            self.set_beaming_coef((1.0, 1.0))
+            num_coef += num_components
+
+        if "reflection" in exclude:
+            beaming_ind = 0
+        else:
+            self.set_reflection_coef((1.0, 1.0))
+            beaming_ind = num_components
+            num_coef += num_components
+
+        lhs_matrix = numpy.empty((true_anomaly.size, num_coef))
+        add_primary_rhs(rhs, 1.0, eclipse)
+        add_primary_lhs(lhs_matrix, 1.0, eclipse, 0)
+
+        if secondary_flux_fraction > 0:
+            self.swap_components()
+            if 'eclipse' not in exclude:
+                eclipse = batman.TransitModel(self, times).light_curve(self)
+            add_primary_rhs(rhs, secondary_flux_fraction, eclipse)
+            add_primary_lhs(lhs_matrix, secondary_flux_fraction, eclipse, 1)
+
+            self.swap_components()
+
+        return lhs_matrix, rhs, num_coef, secondary_flux_fraction
+
     def fit_ebeer_coefficients(
         self,
         times,
@@ -72,77 +141,12 @@ class Binary(BinaryParams):
                 model if ``result`` is neither of the above.
         """
 
-        if true_anomaly is None:
-            true_anomaly = self.calc_true_anomaly(times)
-
-        secondary_flux_fraction = self.secondary_flux_fraction()
-        if "eclipse" in exclude:
-            eclipse = 1
-        else:
-            eclipse = batman.TransitModel(self, times).light_curve(self)
-
-        rhs = numpy.copy(lc_to_fit)
-        if secondary_flux_fraction:
-            num_components = 2
-            rhs *= 1.0 + secondary_flux_fraction
-        else:
-            num_components = 1
-
-        if "ellipticity" in exclude:
-            rhs -= eclipse
-        else:
-            rhs -= (1.0 + ebeer.ellipticity(self, true_anomaly)) * eclipse
-
-        num_coef = 0
-        if "beaming" not in exclude:
-            num_coef += num_components
-        if "reflection" not in exclude:
-            num_coef += num_components
-
-        print_stack()
-
-        print(f'Fitting coef for times: {times}, lc: {lc_to_fit}, '
-              f'exclude={exclude}, num_coef={num_coef}, '
-              f'num_components={num_components}')
-
-
-        lhs_matrix = numpy.empty((true_anomaly.size, num_coef))
-        if "reflection" not in exclude:
-            lhs_matrix[:, 0] = ebeer.reflection(self, true_anomaly) * eclipse
-            beaming_ind = num_components
-        else:
-            beaming_ind = 0
-        if "beaming" not in exclude:
-            lhs_matrix[:, beaming_ind] = (
-                ebeer.beaming(self, true_anomaly) * eclipse
+        lhs_matrix, rhs, num_coef, secondary_flux_fraction = (
+            self._setup_fit_beer_coef_problem(
+                times, lc_to_fit, true_anomaly=true_anomaly, exclude=exclude
             )
-
-        if secondary_flux_fraction > 0:
-            self.swap_components()
-            eclipse = batman.TransitModel(self, times).light_curve(self)
-            if 'ellipticity' in exclude:
-                rhs -= secondary_flux_fraction * eclipse
-            else:
-                rhs -= (
-                    secondary_flux_fraction
-                    * (1.0 + ebeer.ellipticity(self, true_anomaly))
-                    * eclipse
-                )
-
-            if "reflection" not in exclude:
-                lhs_matrix[:, 1] = (
-                    secondary_flux_fraction
-                    * ebeer.reflection(self, true_anomaly)
-                    * eclipse
-                )
-            if "beaming" not in exclude:
-                lhs_matrix[:, beaming_ind + 1] = (
-                    secondary_flux_fraction
-                    * ebeer.beaming(self, true_anomaly)
-                    * eclipse
-                )
-
-            self.swap_components()
+        )
+        num_components = 2 if secondary_flux_fraction else 1
 
         if num_coef == 0:
             if result == "lc":
@@ -155,6 +159,7 @@ class Binary(BinaryParams):
         if "reflection" not in exclude:
             self.set_reflection_coef(fit_result[0][:num_components])
         if "beaming" not in exclude:
+            beaming_ind = 0 if "reflection" in exclude else num_components
             self.set_beaming_coef(
                 fit_result[0][beaming_ind : beaming_ind + num_components]
             )
@@ -174,7 +179,10 @@ class Binary(BinaryParams):
             return result
         return residuals
 
-    # pylint: enable=too-many-branches
+    def eclipse(self, times):
+        """Return fraction of the primary flux observed due to eclipse."""
+
+        return batman.TransitModel(self, times).light_curve(self)
 
     def fit_lightcurve(self, times, lc_to_fit, **fit_coef_kwargs):
         """

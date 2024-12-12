@@ -16,9 +16,21 @@ import numpy
 from plot_ebeer import (
     get_flux_modulations as get_ebeer_flux_modulations,
     get_rvs as get_ebeer_rvs,
-    create_phoebe_binary,
     plot_modulations,
 )
+
+# False positive
+# pylint: disable=unused-import
+from phoebe_model import (
+    create_phoebe_binary,
+    get_phoebe_reference_flux,
+    get_phoebe_ellipticity_mod,
+    get_phoebe_reflection_mod,
+    get_phoebe_eclipse_mod,
+    get_phoebe_multieffect_mod,
+)
+
+# pylint: enable=unused-import
 
 
 def parse_command_line():
@@ -57,17 +69,17 @@ def parse_command_line():
     add_param("ecc", [0.0, 0.4, 0.8], "Values to try for the eccentricity.")
     add_param(
         "incl",
-        [0.0, 30.0, 60.0, 90.0, 135.0, 180.0],
+        [0.0, 30.0, 90.0, 135.0, 180.0],
         "Values to try for the inclination in degrees.",
     )
     add_param(
         "per0",
-        [0.0, 30.0, 90.0, 150.0, 180.0, 270.0],
+        [0.0, 30.0, 90.0, 150.0],
         "Values to try for the argument of periapsis in degrees.",
     )
     add_param(
         "t0-supconj-factor",
-        numpy.linspace(0.0, 1.0, 4),
+        numpy.linspace(0.0, 1.0, 3),
         "Values to try for the time of superior conjunction in units of the "
         "orbital period.",
     )
@@ -118,106 +130,6 @@ def parse_command_line():
         "this is useful when experimenting with how to fit eBEER.",
     )
     return parser.parse_args()
-
-
-def get_phoebe_reference_flux(phoebe_binary):
-    """Return the reference flux (with all effects off) for given binary."""
-
-    phoebe_binary["irrad_method"].set_value("none")
-    phoebe_binary.set_value_all("distortion_method", value="sphere")
-    phoebe_binary.run_compute(overwrite=True)
-    return phoebe_binary["lc01@latest@model@fluxes"].quantity
-
-
-def get_phoebe_ellipticity_mod(
-    phoebe_binary, reference_flux, combined_only=False
-):
-    """Return the primary, secondary, combined ellipticity flux modulations."""
-
-    phoebe_binary["irrad_method"].set_value("none")
-    phoebe_binary.set_value_all("distortion_method", value="roche")
-    result = {"combined": get_phoebe_fluxmod(phoebe_binary, reference_flux)}
-    if combined_only:
-        return result["combined"]
-
-    phoebe_binary["secondary"]["distortion_method"] = "sphere"
-    result["primary"] = get_phoebe_fluxmod(phoebe_binary, reference_flux)
-    phoebe_binary["secondary"]["distortion_method"] = "roche"
-    phoebe_binary["primary"]["distortion_method"] = "sphere"
-    result["secondary"] = get_phoebe_fluxmod(phoebe_binary, reference_flux)
-
-    return result
-
-
-def get_phoebe_reflection_mod(
-    phoebe_binary, reference_flux, combined_only=False
-):
-    """Return the primary, secondary, combined reflection flux modulations."""
-
-    phoebe_binary["irrad_method"].set_value("horvat")
-    phoebe_binary.set_value_all("distortion_method", value="sphere")
-    reflection_frac = {
-        component: phoebe_binary[component]["irrad_frac_refl_bol"].get_value()
-        for component in ["primary", "secondary"]
-    }
-
-    result = {"combined": get_phoebe_fluxmod(phoebe_binary, reference_flux)}
-    if combined_only:
-        return result["combined"]
-
-    phoebe_binary["secondary"]["irrad_frac_refl_bol"] = 0.0
-    result["primary"] = get_phoebe_fluxmod(phoebe_binary, reference_flux)
-
-    phoebe_binary["secondary"]["irrad_frac_refl_bol"] = reflection_frac[
-        "secondary"
-    ]
-    phoebe_binary["primary"]["irrad_frac_refl_bol"] = 0.0
-    result["secondary"] = get_phoebe_fluxmod(phoebe_binary, reference_flux)
-    phoebe_binary["primary"]["irrad_frac_refl_bol"] = reflection_frac["primary"]
-
-    return result
-
-
-def get_phoebe_everything_mod(
-    phoebe_binary, reference_flux, combined_only=False
-):
-    """Return the primary, secondary, combined total flux modulations."""
-
-    phoebe_binary["irrad_method"].set_value("horvat")
-    phoebe_binary.set_value_all("distortion_method", value="roche")
-    reflection_frac = {
-        component: phoebe_binary[component]["irrad_frac_refl_bol"].get_value()
-        for component in ["primary", "secondary"]
-    }
-
-    result = {"combined": get_phoebe_fluxmod(phoebe_binary, reference_flux)}
-    if combined_only:
-        return result["combined"]
-
-    phoebe_binary["secondary"]["distortion_method"] = "sphere"
-    phoebe_binary["secondary"]["irrad_frac_refl_bol"] = 0.0
-    result["primary"] = get_phoebe_fluxmod(phoebe_binary, reference_flux)
-
-    phoebe_binary["secondary"]["distortion_method"] = "roche"
-    phoebe_binary["secondary"]["irrad_frac_refl_bol"] = reflection_frac[
-        "secondary"
-    ]
-    phoebe_binary["primary"]["distortion_method"] = "sphere"
-    phoebe_binary["primary"]["irrad_frac_refl_bol"] = 0.0
-    result["secondary"] = get_phoebe_fluxmod(phoebe_binary, reference_flux)
-    phoebe_binary["primary"]["irrad_frac_refl_bol"] = reflection_frac["primary"]
-
-    return result
-
-
-def get_phoebe_fluxmod(phoebe_binary, reference_flux):
-    """Return flux modulation, given reference, for fully configured binary."""
-
-    phoebe_binary.run_compute(overwrite=True)
-    return (
-        (phoebe_binary["lc01@latest@model@fluxes"].quantity - reference_flux)
-        / reference_flux
-    ).to_value() * 1e6
 
 
 # Intended to function just as a callable for multiprocessing
@@ -276,12 +188,18 @@ class CalculateScenario:
 
         reference_flux = get_phoebe_reference_flux(phoebe_binary)
 
-        phoebe_flux = {
+        phoebe_modulation = {
             modulation: globals()[f"get_phoebe_{modulation}_mod"](
                 phoebe_binary, reference_flux
             )
-            for modulation in ["ellipticity", "reflection", "everything"]
+            for modulation in ["ellipticity", "reflection", "eclipse"]
         }
+        phoebe_modulation["out_of_eclipse"] = get_phoebe_multieffect_mod(
+            phoebe_binary, reference_flux, exclude=("eclipse", "beaming")
+        )
+        phoebe_modulation["everything"] = get_phoebe_multieffect_mod(
+            phoebe_binary, reference_flux, exclude=("beaming",)
+        )
         phoebe_rv = {
             component: phoebe_binary[component]["rvs"]["rv01"][
                 "model"
@@ -289,14 +207,20 @@ class CalculateScenario:
             for component in ["primary", "secondary"]
         }
 
-        ebeer_flux = get_ebeer_flux_modulations(
+        approx_modulation = get_ebeer_flux_modulations(
             phoebe_binary,
             times,
-            phoebe_flux["everything"]["combined"] * 1e-6 + 1.0,
+            phoebe_modulation["out_of_eclipse"]["combined"] + 1.0,
             exclude=("beaming", "eclipse"),
         )
         ebeer_rv = get_ebeer_rvs(phoebe_binary, times, phoebe_rv)
-        result = (times, ebeer_flux, phoebe_flux, ebeer_rv, phoebe_rv)
+        result = (
+            times,
+            approx_modulation,
+            phoebe_modulation,
+            ebeer_rv,
+            phoebe_rv,
+        )
         self.plot_data[tuple(param_values)] = result
         self._pickle_lock.acquire()
         with open(self._pickle_fnaame, "ab") as pickle_f:
@@ -381,12 +305,13 @@ def run_tests(configuration):
     }
 
     print(f"Plotting {len(plot_data)} scenarios")
+    model = {}
     for param_values, (
-        times,
-        ebeer_flux,
-        phoebe_flux,
-        ebeer_rv,
-        phoebe_rv,
+        model["times"],
+        model["ebeer_modulation"],
+        model["phoebe_modulation"],
+        model["ebeer_rv"],
+        model["phoebe_rv"],
     ) in sorted(plot_data.items()):
         pyplot.subplots_adjust(left=0.15, right=0.95, top=0.8, bottom=0.1)
 
@@ -394,13 +319,15 @@ def run_tests(configuration):
             phoebe_binary = create_phoebe_binary(
                 **dict(zip(param_names, param_values))
             )
-            ebeer_flux = get_ebeer_flux_modulations(
+            model["ebeer_modulation"] = get_ebeer_flux_modulations(
                 phoebe_binary,
-                times,
-                phoebe_flux["everything"]["combined"] * 1e-6 + 1.0,
+                model["times"],
+                model["phoebe_modulation"]["out_of_eclipse"]["combined"] + 1.0,
                 exclude=("beaming", "eclipse"),
             )
-            ebeer_rv = get_ebeer_rvs(phoebe_binary, times, phoebe_rv)
+            model["ebeer_rv"] = get_ebeer_rvs(
+                phoebe_binary, model["times"], model["phoebe_rv"]
+            )
 
         plot_config = {
             "primary": {"color": "blue"},
@@ -408,18 +335,32 @@ def run_tests(configuration):
             "combined": {"color": "black"},
         }
 
-        for subplot, flux_key in enumerate(
-            ["ellipticity", "reflection", "everything", "beaming"]
+        for subplot, modulation_key in enumerate(
+            [
+                "ellipticity",
+                "reflection",
+                "beaming",
+                "eclipse",
+                "out_of_eclipse",
+                "everything",
+            ]
         ):
-            pyplot.subplot(2, 2, subplot + 1)
+            pyplot.subplot(2, 3, subplot + 1)
 
             for component_config in plot_config.values():
                 component_config["linestyle"] = "-"
                 component_config["alpha"] = 0.6
 
+            phoebe_modulation = model["phoebe_modulation"].get(
+                modulation_key, model["phoebe_rv"]
+            )
+            if modulation_key == "eclipse":
+                phoebe_modulation = {
+                    "combined": phoebe_modulation["combined"] + 1
+                }
             plot_modulations(
-                times,
-                phoebe_flux.get(flux_key, phoebe_rv),
+                model["times"],
+                phoebe_modulation,
                 "PHOEBE {component}",
                 **plot_config,
             )
@@ -428,13 +369,15 @@ def run_tests(configuration):
                 component_config["alpha"] = 1.0
 
             plot_modulations(
-                times,
-                ebeer_flux.get(flux_key, ebeer_rv),
+                model["times"],
+                model["ebeer_modulation"].get(
+                    modulation_key, model["ebeer_rv"]
+                ),
                 "eBEER {component}",
                 **plot_config,
             )
 
-            pyplot.title(flux_key)
+            pyplot.title(modulation_key)
 
         pyplot.gcf().text(
             0.1,
@@ -448,21 +391,22 @@ def run_tests(configuration):
             + ", ".join(
                 [
                     r"$\alpha_{{refl,1}}="
-                    f"{ebeer_flux['reflection_coef'][0]:0.3g}$",
+                    f"{model['ebeer_modulation']['reflection_coef'][0]:0.3g}$",
                     r"$\alpha_{{refl,2}}="
-                    f"{ebeer_flux['reflection_coef'][1]:0.3g}$",
+                    f"{model['ebeer_modulation']['reflection_coef'][1]:0.3g}$",
                     r"$\alpha_{{beam,1}}="
-                    f"{ebeer_rv['beaming_coef'][0]:0.3g}$",
+                    f"{model['ebeer_rv']['beaming_coef'][0]:0.3g}$",
                     r"$\alpha_{{beam,2}}="
-                    f"{ebeer_rv['beaming_coef'][1]:0.3g}$",
+                    f"{model['ebeer_rv']['beaming_coef'][1]:0.3g}$",
                 ]
             )
             + "\nBest fit $t_{0,perpass}$: "
             + ", ".join(
                 [
-                    f"Ellip.+Refl.: {float(ebeer_flux['t0_perpass']):0.3g}",
-                    f"Primary RV: {ebeer_rv['t0_perpass'][0]:0.3g}",
-                    f"Secondary RV: {ebeer_rv['t0_perpass'][1]:0.3g}",
+                    "Ellip.+Refl.: ",
+                    f"{float(model['ebeer_modulation']['t0_perpass']):0.3g}",
+                    f"Primary RV: {model['ebeer_rv']['t0_perpass'][0]:0.3g}",
+                    f"Secondary RV: {model['ebeer_rv']['t0_perpass'][1]:0.3g}",
                 ]
             ),
         )
