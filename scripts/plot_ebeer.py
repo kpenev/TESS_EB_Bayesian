@@ -139,7 +139,9 @@ def get_rvs(phoebe_binary, times, rvs_to_fit, *fit_args, **fit_kwargs):
     return result
 
 
-def plot_modulations(times, flux_modulations, label_fmt, **plot_kwargs):
+def plot_modulations(
+    times, flux_modulations, scaling, label_fmt, **plot_kwargs
+):
     """Plot flux modulations calculated using `get_flux_modulations()`."""
 
     for component in ("primary", "secondary", "combined"):
@@ -147,7 +149,7 @@ def plot_modulations(times, flux_modulations, label_fmt, **plot_kwargs):
             continue
         pyplot.plot(
             times,
-            flux_modulations[component],
+            flux_modulations[component] * scaling,
             label=label_fmt.format(component=component),
             **plot_kwargs.get(component, {}),
         )
@@ -200,6 +202,7 @@ def main():
             plot_modulations(
                 times,
                 to_plot,
+                1000.0,
                 f"{{component}} {modulation}",
                 primary={"linestyle": "--", "color": plot_colors[modulation]},
                 secondary={"linestyle": ":", "color": plot_colors[modulation]},
