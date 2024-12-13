@@ -56,25 +56,25 @@ def parse_command_line():
     )
     add_param(
         "mstar",
-        [0.4, 0.7, 1.0],
+        [0.4, 0.7],
         "Values to try for the masses of the stars. The primary and "
         "secondary star masses are independently taken from this list.",
     )
     add_param(
         "peridistance-factor",
-        [3.0, 5.0, 10.0],
+        [3.0, 7.0],
         "Values to try for the periapsis distance in units of the sum of "
         "the roche radii of the two stars.",
     )
     add_param("ecc", [0.0, 0.4, 0.8], "Values to try for the eccentricity.")
     add_param(
         "incl",
-        [0.0, 30.0, 90.0, 135.0, 180.0],
+        [0.0, 30.0, 85.0, 90.0, 135.0],
         "Values to try for the inclination in degrees.",
     )
     add_param(
         "per0",
-        [0.0, 30.0, 90.0, 150.0],
+        [0.0, 30.0, 150.0],
         "Values to try for the argument of periapsis in degrees.",
     )
     add_param(
