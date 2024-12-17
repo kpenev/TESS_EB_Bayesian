@@ -83,7 +83,7 @@ def parse_command_line(
     )
     add_param(
         "t0-supconj-factor",
-        numpy.linspace(0.0, 1.0, 3),
+        list(numpy.linspace(0.0, 1.0, 3)),
         "Values to try for the time of superior conjunction in units of the "
         "orbital period.",
     )
@@ -184,13 +184,9 @@ class CalculateScenario:
                         assert pickle.load(pickle_f) == self.param_names
                         param_values = tuple(pickle.load(pickle_f))
                         print(f"Unpickling {param_values!r}")
-                        if param_values in self.plot_data:
-                            self.plot_data[param_values] = (
-                                self.plot_data[param_values],
-                                pickle.load(pickle_f),
-                            )
-                        else:
-                            self.plot_data[param_values] = pickle.load(pickle_f)
+                        if param_values not in self.plot_data:
+                            self.plot_data[param_values] = ()
+                        self.plot_data[param_values] += (pickle.load(pickle_f),)
                         assert pickle.load(pickle_f) == "END RECORD"
                 except EOFError:
                     pass
@@ -342,6 +338,7 @@ def run_tests(configuration, *get_plot_data_args, sub_scenario_titles=None):
     model = {}
     for param_values, scenario_data in sorted(plot_data.items()):
         print(f'Plotting parameters: {param_values}')
+        print(f'Scenario data lenghths: {[len(d) for d in scenario_data]}')
 
         for sub_scenario, (
             model["times"],
