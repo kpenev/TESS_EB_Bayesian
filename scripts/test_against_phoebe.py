@@ -33,7 +33,11 @@ from phoebe_model import (
 # pylint: enable=unused-import
 
 
-def parse_command_line():
+def parse_command_line(
+    default_masses=[0.4, 0.7],
+    default_inclinations=[0.0, 30.0, 85.0, 90.0, 135.0],
+    default_ntimes=301,
+):
     """Return the command line configuration."""
 
     def add_param(arg_name, default, description):
@@ -56,7 +60,7 @@ def parse_command_line():
     )
     add_param(
         "mstar",
-        [0.4, 0.7],
+        default_masses,
         "Values to try for the masses of the stars. The primary and "
         "secondary star masses are independently taken from this list.",
     )
@@ -69,7 +73,7 @@ def parse_command_line():
     add_param("ecc", [0.0, 0.4, 0.8], "Values to try for the eccentricity.")
     add_param(
         "incl",
-        [0.0, 30.0, 85.0, 90.0, 135.0],
+        default_inclinations,
         "Values to try for the inclination in degrees.",
     )
     add_param(
@@ -86,7 +90,7 @@ def parse_command_line():
     parser.add_argument(
         "--ntimes",
         type=int,
-        default=301,
+        default=default_ntimes,
         help="The number of lightcurve points to generate (evenly spaced from "
         "0 to the orbital period).",
     )
@@ -142,6 +146,19 @@ def parse_command_line():
 class CalculateScenario:
     """Callable that calculates eBEER and PHOEBE models given binary params."""
 
+    def _get_eval_times(self, _):
+        """Return the times at which to evaluate the model."""
+
+        return (
+            numpy.linspace(
+                0.0,
+                phoebe_binary["orbit"]["component"]["period"].get_value(
+                    units.day
+                ),
+                self._ntimes,
+            ),
+        )
+
     def __init__(
         self,
         *,
@@ -167,8 +184,13 @@ class CalculateScenario:
                         assert pickle.load(pickle_f) == self.param_names
                         param_values = tuple(pickle.load(pickle_f))
                         print(f"Unpickling {param_values!r}")
-                        self.plot_data[param_values] = pickle.load(pickle_f)
-
+                        if param_values in self.plot_data:
+                            self.plot_data[param_values] = (
+                                self.plot_data[param_values],
+                                pickle.load(pickle_f),
+                            )
+                        else:
+                            self.plot_data[param_values] = pickle.load(pickle_f)
                         assert pickle.load(pickle_f) == "END RECORD"
                 except EOFError:
                     pass
@@ -181,67 +203,67 @@ class CalculateScenario:
             return
 
         parameters = dict(zip(self.param_names, param_values))
-        phoebe_binary = create_phoebe_binary(**parameters)
-        # print(f'Phoebe binary:\n{phoebe_binary}')
-        phoebe_binary.set_value_all("ntriangles", self._ntriangles)
-        times = numpy.linspace(
-            0.0,
-            phoebe_binary["orbit"]["component"]["period"].get_value(units.day),
-            self._ntimes,
-        )
-        phoebe_binary.set_value_all("times", times * units.day)
+        for times in self._get_eval_times(parameters):
+            phoebe_binary = create_phoebe_binary(**parameters)
+            # print(f'Phoebe binary:\n{phoebe_binary}')
+            phoebe_binary.set_value_all("ntriangles", self._ntriangles)
 
-        reference_flux = get_phoebe_reference_flux(phoebe_binary)
+            phoebe_binary.set_value_all("times", times * units.day)
 
-        phoebe_modulation = {
-            modulation: globals()[f"get_phoebe_{modulation}_mod"](
-                phoebe_binary, reference_flux
+            reference_flux = get_phoebe_reference_flux(phoebe_binary)
+
+            phoebe_modulation = {
+                modulation: globals()[f"get_phoebe_{modulation}_mod"](
+                    phoebe_binary, reference_flux
+                )
+                for modulation in ["ellipticity", "reflection", "eclipse"]
+            }
+            phoebe_modulation["out_of_eclipse"] = get_phoebe_multieffect_mod(
+                phoebe_binary, reference_flux, exclude=("eclipse", "beaming")
             )
-            for modulation in ["ellipticity", "reflection", "eclipse"]
-        }
-        phoebe_modulation["out_of_eclipse"] = get_phoebe_multieffect_mod(
-            phoebe_binary, reference_flux, exclude=("eclipse", "beaming")
-        )
-        phoebe_modulation["everything"] = get_phoebe_multieffect_mod(
-            phoebe_binary, reference_flux, exclude=("beaming",)
-        )
-        phoebe_rv = {
-            component: phoebe_binary[component]["rvs"]["rv01"][
-                "model"
-            ].get_value("km/s")
-            for component in ["primary", "secondary"]
-        }
+            phoebe_modulation["everything"] = get_phoebe_multieffect_mod(
+                phoebe_binary, reference_flux, exclude=("beaming",)
+            )
+            phoebe_rv = {
+                component: phoebe_binary[component]["rvs"]["rv01"][
+                    "model"
+                ].get_value("km/s")
+                for component in ["primary", "secondary"]
+            }
 
-        approx_modulation = get_ebeer_flux_modulations(
-            phoebe_binary,
-            times,
-            phoebe_modulation["out_of_eclipse"]["combined"] + 1.0,
-            exclude=("beaming", "eclipse"),
-        )
-        ebeer_rv = get_ebeer_rvs(phoebe_binary, times, phoebe_rv)
-        result = (
-            times,
-            approx_modulation,
-            phoebe_modulation,
-            ebeer_rv,
-            phoebe_rv,
-        )
-        self.plot_data[tuple(param_values)] = result
-        self._pickle_lock.acquire()
-        with open(self._pickle_fnaame, "ab") as pickle_f:
-            pickle.dump("START RECORD", pickle_f)
-            pickle.dump(self.param_names, pickle_f)
-            pickle.dump(param_values, pickle_f)
-            pickle.dump(result, pickle_f)
-            pickle.dump("END RECORD", pickle_f)
-        self._pickle_lock.release()
-        # print(ebeer_binary)
+            approx_modulation = get_ebeer_flux_modulations(
+                phoebe_binary,
+                times,
+                phoebe_modulation["out_of_eclipse"]["combined"] + 1.0,
+                exclude=("beaming", "eclipse"),
+            )
+            ebeer_rv = get_ebeer_rvs(phoebe_binary, times, phoebe_rv)
+            result = (
+                times,
+                approx_modulation,
+                phoebe_modulation,
+                ebeer_rv,
+                phoebe_rv,
+            )
+            param_values = tuple(param_values)
+            self._pickle_lock.acquire()
+            if param_values not in self.plot_data:
+                self.plot_data[param_values] = ()
+            self.plot_data[param_values] += (result,)
+            with open(self._pickle_fnaame, "ab") as pickle_f:
+                pickle.dump("START RECORD", pickle_f)
+                pickle.dump(self.param_names, pickle_f)
+                pickle.dump(param_values, pickle_f)
+                pickle.dump(result, pickle_f)
+                pickle.dump("END RECORD", pickle_f)
+            self._pickle_lock.release()
+            # print(ebeer_binary)
 
 
 # pylint: disable=too-few-public-methods
 
 
-def get_plot_data(configuration):
+def get_plot_data(configuration, CalculateScenarioClass=CalculateScenario):
     """Calculate everything to make the plots specified by configuration."""
 
     param_names = [
@@ -262,7 +284,7 @@ def get_plot_data(configuration):
         )
     )
 
-    calculate_scenario = CalculateScenario(
+    calculate_scenario = CalculateScenarioClass(
         param_names=param_names,
         ntriangles=configuration.ntriangles,
         ntimes=configuration.ntimes,
@@ -278,6 +300,9 @@ def get_plot_data(configuration):
         with Pool(configuration.nthreads) as workers:
             workers.map(calculate_scenario, scenarios)
 
+    print('Calculated plot data for scenarios: '
+          +
+          repr(calculate_scenario.plot_data.keys()))
     return (
         param_names,
         {
@@ -288,10 +313,10 @@ def get_plot_data(configuration):
     )
 
 
-def run_tests(configuration):
+def run_tests(configuration, *get_plot_data_args, sub_scenario_titles=None):
     """Run the tests specified on the command line."""
 
-    param_names, plot_data = get_plot_data(configuration)
+    param_names, plot_data = get_plot_data(configuration, *get_plot_data_args)
 
     if not configuration.plots and not configuration.difference_plots:
         return
@@ -315,165 +340,181 @@ def run_tests(configuration):
 
     print(f"Plotting {len(plot_data)} scenarios")
     model = {}
-    for param_values, (
-        model["times"],
-        model["ebeer_modulation"],
-        model["phoebe_modulation"],
-        model["ebeer_rv"],
-        model["phoebe_rv"],
-    ) in sorted(plot_data.items()):
+    for param_values, scenario_data in sorted(plot_data.items()):
+        print(f'Plotting parameters: {param_values}')
 
-        if configuration.refit_ebeer:
-            phoebe_binary = create_phoebe_binary(
-                **dict(zip(param_names, param_values))
-            )
-            model["ebeer_modulation"] = get_ebeer_flux_modulations(
-                phoebe_binary,
-                model["times"],
-                model["phoebe_modulation"]["out_of_eclipse"]["combined"] + 1.0,
-                exclude=("beaming", "eclipse"),
-            )
-            model["ebeer_rv"] = get_ebeer_rvs(
-                phoebe_binary, model["times"], model["phoebe_rv"]
-            )
-
-        plot_config = {
-            "primary": {"color": "blue"},
-            "secondary": {"color": "red"},
-            "combined": {"color": "black"},
-        }
-
-        for plot_mode, save_pdf in pdf.items():
-            pyplot.subplots_adjust(left=0.15, right=0.95, top=0.8, bottom=0.1)
-            for subplot, modulation_key in enumerate(
-                [
-                    "ellipticity",
-                    "reflection",
-                    "beaming",
-                    "eclipse",
-                    "out_of_eclipse",
-                    "everything",
-                ]
-            ):
-                pyplot.subplot(2, 3, subplot + 1)
-
-                for component_config in plot_config.values():
-                    component_config["linestyle"] = "-"
-                    component_config["alpha"] = 0.6
-
-                phoebe_modulation = model["phoebe_modulation"].get(
-                    modulation_key, model["phoebe_rv"]
+        for sub_scenario, (
+            model["times"],
+            model["ebeer_modulation"],
+            model["phoebe_modulation"],
+            model["ebeer_rv"],
+            model["phoebe_rv"],
+        ) in enumerate(scenario_data):
+            print(f'Plotting sub scenario {sub_scenario}.')
+            if configuration.refit_ebeer:
+                phoebe_binary = create_phoebe_binary(
+                    **dict(zip(param_names, param_values))
                 )
-                ebeer_modulation = model["ebeer_modulation"].get(
-                    modulation_key, model["ebeer_rv"]
+                model["ebeer_modulation"] = get_ebeer_flux_modulations(
+                    phoebe_binary,
+                    model["times"],
+                    model["phoebe_modulation"]["out_of_eclipse"]["combined"]
+                    + 1.0,
+                    exclude=("beaming", "eclipse"),
                 )
-                if modulation_key == "eclipse":
-                    phoebe_modulation = {
-                        "combined": phoebe_modulation["combined"] + 1
-                    }
-                scaling = (
-                    1000
-                    if modulation_key
-                    in ["ellipticity", "reflection", "out_of_eclipse"]
-                    else 1
+                model["ebeer_rv"] = get_ebeer_rvs(
+                    phoebe_binary, model["times"], model["phoebe_rv"]
                 )
 
-                if plot_mode == "direct":
+            plot_config = {
+                "primary": {"color": "blue"},
+                "secondary": {"color": "red"},
+                "combined": {"color": "black"},
+            }
 
-                    plot_modulations(
-                        model["times"],
-                        phoebe_modulation,
-                        scaling,
-                        "PHOEBE {component}",
-                        **plot_config,
-                    )
+            for plot_mode, save_pdf in pdf.items():
+                pyplot.subplots_adjust(
+                    left=0.15, right=0.95, top=0.8, bottom=0.1
+                )
+                for subplot, modulation_key in enumerate(
+                    [
+                        "ellipticity",
+                        "reflection",
+                        "beaming",
+                        "eclipse",
+                        "out_of_eclipse",
+                        "everything",
+                    ]
+                ):
+                    pyplot.subplot(2, 3, subplot + 1)
+
                     for component_config in plot_config.values():
-                        component_config["linestyle"] = ":"
-                        component_config["alpha"] = 1.0
+                        component_config["linestyle"] = "-"
+                        component_config["alpha"] = 0.6
 
-                    plot_modulations(
-                        model["times"],
-                        ebeer_modulation,
-                        scaling,
-                        "eBEER {component}",
-                        **plot_config,
+                    phoebe_modulation = model["phoebe_modulation"].get(
+                        modulation_key, model["phoebe_rv"]
                     )
-                else:
-                    scaling *= 1000
-                    difference = {
-                        component: (
-                            ebeer_modulation[component]
-                            - phoebe_modulation[component]
-                        )
-                        for component in (
-                            (
-                                []
-                                if modulation_key == "beaming"
-                                else ["combined"]
-                            )
-                            + (
-                                []
-                                if modulation_key in ["eclipse", "everything"]
-                                else ["primary", "secondary"]
-                            )
-                        )
-                    }
-                    plot_modulations(
-                        model["times"],
-                        difference,
-                        scaling,
-                        "eBEER {component}",
-                        **plot_config,
+                    ebeer_modulation = model["ebeer_modulation"].get(
+                        modulation_key, model["ebeer_rv"]
+                    )
+                    if modulation_key == "eclipse":
+                        phoebe_modulation = {
+                            "combined": phoebe_modulation["combined"] + 1
+                        }
+                    scaling = (
+                        1000
+                        if modulation_key
+                        in ["ellipticity", "reflection", "out_of_eclipse"]
+                        else 1
                     )
 
-                pyplot.title(modulation_key)
+                    if plot_mode == "direct":
 
-                if scaling == 1000:
-                    pyplot.ylabel("ppt")
-                elif scaling == 1000000:
-                    pyplot.ylabel("ppm")
-            pyplot.gcf().text(
-                0.1,
-                0.87,
-                "Scenario: "
-                + ", ".join(
-                    f"{plot_param_translate[name]}: {value}"
-                    for name, value in zip(param_names, param_values)
+                        plot_modulations(
+                            model["times"],
+                            phoebe_modulation,
+                            scaling,
+                            "PHOEBE {component}",
+                            **plot_config,
+                        )
+                        for component_config in plot_config.values():
+                            component_config["linestyle"] = ":"
+                            component_config["alpha"] = 1.0
+
+                        plot_modulations(
+                            model["times"],
+                            ebeer_modulation,
+                            scaling,
+                            "eBEER {component}",
+                            **plot_config,
+                        )
+                    else:
+                        scaling *= 1000
+                        difference = {
+                            component: (
+                                ebeer_modulation[component]
+                                - phoebe_modulation[component]
+                            )
+                            for component in (
+                                (
+                                    []
+                                    if modulation_key == "beaming"
+                                    else ["combined"]
+                                )
+                                + (
+                                    []
+                                    if modulation_key
+                                    in ["eclipse", "everything"]
+                                    else ["primary", "secondary"]
+                                )
+                            )
+                        }
+                        plot_modulations(
+                            model["times"],
+                            difference,
+                            scaling,
+                            "eBEER {component}",
+                            **plot_config,
+                        )
+
+                    pyplot.title(modulation_key)
+
+                    if scaling == 1000:
+                        pyplot.ylabel("ppt")
+                    elif scaling == 1000000:
+                        pyplot.ylabel("ppm")
+                pyplot.gcf().text(
+                    0.1,
+                    0.87,
+                    (
+                        (sub_scenario_titles[sub_scenario] + "\n")
+                        if sub_scenario_titles
+                        else ""
+                    )
+                    + "Scenario: "
+                    + ", ".join(
+                        f"{plot_param_translate[name]}: {value}"
+                        for name, value in zip(param_names, param_values)
+                    )
+                    + "\nBest fit coef: "
+                    + ", ".join(
+                        [
+                            r"$\alpha_{{refl,1}}="
+                            "{reflection_coef[0]:0.3g}$".format_map(
+                                model["ebeer_modulation"]
+                            ),
+                            r"$\alpha_{{refl,2}}="
+                            "{reflection_coef[1]:0.3g}$".format_map(
+                                model["ebeer_modulation"]
+                            ),
+                            r"$\alpha_{{beam,1}}="
+                            "{beaming_coef[0]:0.3g}$".format_map(
+                                model["ebeer_rv"]
+                            ),
+                            r"$\alpha_{{beam,2}}="
+                            "{beaming_coef[1]:0.3g}$".format_map(
+                                model["ebeer_rv"]
+                            ),
+                        ]
+                    )
+                    + "\nBest fit $t_{0,perpass}$: "
+                    + ", ".join(
+                        [
+                            "Ellip.+Refl.: ",
+                            f"{float(model['ebeer_modulation']['t0_perpass']):.3g}",
+                            "Primary RV: {t0_perpass[0]:.3g}".format_map(
+                                model["ebeer_rv"]
+                            ),
+                            "Secondary RV: {t0_perpass[1]:0.3g}".format_map(
+                                model["ebeer_rv"]
+                            ),
+                        ]
+                    ),
                 )
-                + "\nBest fit coef: "
-                + ", ".join(
-                    [
-                        r"$\alpha_{{refl,1}}="
-                        "{reflection_coef[0]:0.3g}$".format_map(
-                            model["ebeer_modulation"]
-                        ),
-                        r"$\alpha_{{refl,2}}="
-                        "{reflection_coef[1]:0.3g}$".format_map(
-                            model["ebeer_modulation"]
-                        ),
-                        r"$\alpha_{{beam,1}}="
-                        "{beaming_coef[0]:0.3g}$".format_map(model["ebeer_rv"]),
-                        r"$\alpha_{{beam,2}}="
-                        "{beaming_coef[1]:0.3g}$".format_map(model["ebeer_rv"]),
-                    ]
-                )
-                + "\nBest fit $t_{0,perpass}$: "
-                + ", ".join(
-                    [
-                        "Ellip.+Refl.: ",
-                        f"{float(model['ebeer_modulation']['t0_perpass']):.3g}",
-                        "Primary RV: {t0_perpass[0]:.3g}".format_map(
-                            model["ebeer_rv"]
-                        ),
-                        "Secondary RV: {t0_perpass[1]:0.3g}".format_map(
-                            model["ebeer_rv"]
-                        ),
-                    ]
-                ),
-            )
-            save_pdf.savefig()
-            pyplot.close()
-            print("Added plot")
+                save_pdf.savefig()
+                pyplot.close()
+                print("Added plot")
 
     for save_pdf in pdf.values():
         save_pdf.close()
