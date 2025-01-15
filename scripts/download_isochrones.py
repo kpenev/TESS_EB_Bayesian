@@ -25,7 +25,7 @@ def parse_command_line():
         nargs=3,
         metavar=("min", "max", "step"),
         default=(6.0, 6.13, 0.02),
-        help='The grid of log10(age) to generate isochrones for.'
+        help="The grid of log10(age) to generate isochrones for.",
     )
     parser.add_argument(
         "--feh-grid",
@@ -33,7 +33,7 @@ def parse_command_line():
         nargs=3,
         metavar=("min", "max", "step"),
         default=(-2.5, -2.0, 0.1),
-        help='The grid of [Fe/H] to generate isochrones for.'
+        help="The grid of [Fe/H] to generate isochrones for.",
     )
     parser.add_argument(
         "--output",
@@ -44,7 +44,7 @@ def parse_command_line():
             "data",
             "isochrone_data.ssv",
         ),
-        help='The output file to write the isochrone data to.'
+        help="The output file to write the isochrone data to.",
     )
     return parser.parse_args()
 
@@ -72,13 +72,13 @@ def main(config):
         feh_slices = get_isochrones(
             config.log_age_grid, config.feh_grid, temp_dir
         )
-        with open(config.output, "w", encoding='utf-8') as destination:
+        with open(config.output, "w", encoding="utf-8") as destination:
             skip = False
             for feh_slice_fname in feh_slices:
-                with open(feh_slice_fname, 'r', encoding='utf-8') as feh_slice:
+                with open(feh_slice_fname, "r", encoding="utf-8") as feh_slice:
                     for line in feh_slice:
                         if line.strip() == "#isochrone terminated":
-                            pass
+                            continue
                         if skip:
                             if line[0] == "#":
                                 header = line
