@@ -1,16 +1,45 @@
 """Unified interface for binary parameters needed by the likelihood function."""
 
+from collections import namedtuple
+
 import numpy
-from astropy import units
+from astropy import units, constants
 import batman
 import phoebe
-from poliastro.core.angles import E_to_nu, M_to_E
+
+from general_purpose_python_modules.kepler_angles import E_to_nu, M_to_E
+from general_purpose_python_modules.cmd_utils import CMDInterpolator
+
+InputParams = namedtuple(
+    "InputParams",
+    [
+        "mtotal",
+        "mratio",
+        "age_gyr",
+        "feh",
+        "per",
+        "esinw",
+        "ecosw",
+        "incl",
+        "perpass_phase",
+        "primary_limb_dark_1",
+        "secondary_limb_dark_2",
+        "secondary_limb_dark_1",
+        "secondary_limb_dark_2",
+    ],
+)
 
 
 # This is set by BATMAN
 # pylint: disable=too-many-instance-attributes
 class BinaryParams(batman.TransitParams):
     """Extend the batman parameters with everything needed by model."""
+
+    @classmethod
+    def set_cmd_data_fname(cls, cmd_data_fname):
+        """Set the file name for the CMD data."""
+
+        cls._cmd_interpolator = CMDInterpolator(cmd_data_fname)
 
     @staticmethod
     def _eclipse_phase_difference(esinw, ecosw, coti=0.0):
@@ -133,6 +162,75 @@ class BinaryParams(batman.TransitParams):
             self._linear_limbdark_both[component] = self._u_both[component]
             self._gravdark_both[component] = star["gravb_bol"].get_value("")
 
+    def _init_from_mcmc(self, sample_params: InputParams):
+        """Set the binary parameters from an MCMC sample."""
+
+        self.t0_perpass = sample_params.perpass_phase * sample_params.per
+        for param in ["per", "mtot", "mratio", "incl"]:
+            setattr(self, param, getattr(sample_params, param))
+        self.ecc = (sample_params.ecosw**2 + sample_params.esinw**2) ** 0.5
+        self.w = (
+            numpy.arctan2(sample_params.esinw, sample_params.ecosw)
+            * 180.0
+            / numpy.pi
+        )
+
+        mprimary = self.mtotal / (1.0 + self.mratio)
+        interp_kwargs = {
+            "MH": sample_params.feh,
+            "logAge": 9.0 + numpy.log10(sample_params.age_gyr),
+        }
+
+        interpolated = {
+            "primary": self._cmd_interpolator(
+                ("logL", "logTe") + self._passbands,
+                mprimary,
+                **interp_kwargs,
+            ),
+            "secondary": self._cmd_interpolator(
+                ("logL", "logTe") + self._passbands,
+                mprimary * self.mratio,
+                **interp_kwargs,
+            ),
+        }
+        radii = {
+            component: (
+                10.0 ** (comp_interp[0] / 2.0 - 2.0 * comp_interp[1])
+                / (2.0 * units.K**2)
+                * numpy.sqrt(units.L_sun / (numpy.pi * constants.sigma_sb))
+            )
+            for component, comp_interp in interpolated.items()
+        }
+        self.rstar = radii["primary"]
+        self.rp = radii["secondary"] / radii["primary"]
+
+        # TODO: self._t0_both['primary'] =
+        self._t0_both["secondary"] = self._t0_both["primary"] + (
+            self.per
+            * self._eclipse_phase_difference(
+                sample_params.esinw, sample_params.ecosw
+            )
+        )
+        self.teff_ratio = (
+            interpolated["secondary"][1] / interpolated["primary"][1]
+        )
+        self._u_both = {
+            "primary": [
+                sample_params.primary_limb_dark_1,
+                sample_params.primary_limb_dark_2,
+            ],
+            "secondary": [
+                sample_params.secondary_limb_dark_1,
+                sample_params.secondary_limb_dark_2,
+            ],
+        }
+        #From least squares diff between linear and quadratic profiles
+        self._linear_limbdark_both = {
+            component: limb_dark[0] + 0.3 * limb_dark[1]
+            for component, limb_dark in self._u_both.items()
+        }
+        # TODO: self._gravdark_both
+
     def __init__(self, *, from_phoebe=None, from_mcmc=None):
         """Set the model parameters either from PHOEBE binary or MCMC sample."""
 
@@ -242,7 +340,7 @@ class BinaryParams(batman.TransitParams):
             target_coef[secondary] = 0.0
         # False positive
         # pylint: disable=attribute-defined-outside-init
-        setattr(self, f'{effect}_coef', coef[0])
+        setattr(self, f"{effect}_coef", coef[0])
         # pylint: enable=attribute-defined-outside-init
 
     def set_reflection_coef(self, coef):
