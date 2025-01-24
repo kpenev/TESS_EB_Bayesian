@@ -21,9 +21,9 @@ class GravDarkInterpolator:
         raw_data = raw_data[raw_data["xi"] == 2]
         raw_data = raw_data[
             numpy.argsort(
-                1e6 * raw_data["Z"]
-                + 1e3 * raw_data["logg"]
-                + raw_data["logTeff"]
+                1e6 * raw_data["Z"].astype(float)
+                + 1e3 * raw_data["logg"].astype(float)
+                + raw_data["logTeff"].astype(float)
             )
         ]
         self._grid = tuple(
@@ -35,17 +35,26 @@ class GravDarkInterpolator:
             if i == 0:
                 feh, logg = raw_data[0]["Z"], raw_data[0]["logg"]
             if raw_data[i]["Z"] != feh or raw_data[i]["logg"] != logg:
+                assert (
+                    feh
+                    == self._grid[0][1][
+                        len(self._data) // self._grid[1][1].size
+                    ]
+                )
+                assert (
+                    logg
+                    == self._grid[1][1][len(self._data) % self._grid[1][1].size]
+                )
                 self._data.append(raw_data[:i])
+                assert (
+                    self._data[-1]["logTeff"][1:]
+                    > self._data[-1]["logTeff"][:-1]
+                ).all()
                 raw_data = raw_data[i:]
                 i = 0
             else:
                 i += 1
         self._data.append(raw_data)
-        for track in self._data:
-            print(
-                "log10(Teff) range: "
-                f"{track['logTeff'][0]} --- {track['logTeff'][-1]}"
-            )
 
     def __call__(self, **interpolate_to):
         """Return the gravity darkening coefficient for given parameters."""
@@ -64,12 +73,34 @@ class GravDarkInterpolator:
 
 
 if __name__ == "__main__":
+    with fits.open(paths.grav_dark["TESS"], "readonly") as grav_dark_f:
+        raw_data = grav_dark_f[1].data
+    raw_data = raw_data[raw_data["xi"] == 2]
+    raw_data = raw_data[
+        numpy.argsort(
+            1e6 * raw_data["Z"] + 1e3 * raw_data["logg"] + raw_data["logTeff"]
+        )
+    ]
+
     interp = GravDarkInterpolator()
-    logteff = numpy.linspace(3.5, 5.0, 100)
-    gravdark = [interp(logg=4.5, Z=0.0, logTeff=lgt) for lgt in logteff]
-    gravdark1 = [interp(logg=4.5, Z=0.01, logTeff=lgt) for lgt in logteff]
+    logg = 4.5
+    logteff = numpy.linspace(3.6, 4.6, 1000)
+    gravdark = {
+        feh: [interp(logg=logg, Z=feh, logTeff=lgt) for lgt in logteff]
+        for feh in [-2.5, -numpy.pi / 2, 0.0, 0.99, 1.0]
+    }
+    for feh, plot_y in gravdark.items():
+        pyplot.plot(logteff, plot_y, label=f"[Fe/H] = {feh}")
+        if feh in interp._grid[0][1]:
+            raw_selection = raw_data[
+                numpy.logical_and(raw_data["Z"] == feh, raw_data["logg"] == 4.5)
+            ]
+            pyplot.plot(
+                raw_selection["logTeff"],
+                raw_selection["y"],
+                "o",
+                label=f"raw [Fe/H]={feh}",
+            )
 
-    pyplot.plot(logteff, gravdark, '-k')
-    pyplot.plot(logteff, gravdark1, ':r')
-
+    pyplot.legend()
     pyplot.show()
