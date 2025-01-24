@@ -72,7 +72,9 @@ class GravDarkInterpolator:
         raise ValueError(f"Unknown grid quantity {quantity}!")
 
 
-if __name__ == "__main__":
+def make_test_plots():
+    """Create plots showing the interpolation in action."""
+
     with fits.open(paths.grav_dark["TESS"], "readonly") as grav_dark_f:
         raw_data = grav_dark_f[1].data
     raw_data = raw_data[raw_data["xi"] == 2]
@@ -91,7 +93,7 @@ if __name__ == "__main__":
     }
     for feh, plot_y in gravdark.items():
         pyplot.plot(logteff, plot_y, label=f"[Fe/H] = {feh}")
-        if feh in interp._grid[0][1]:
+        if numpy.isclose(feh, raw_data["Z"]).any():
             raw_selection = raw_data[
                 numpy.logical_and(raw_data["Z"] == feh, raw_data["logg"] == 4.5)
             ]
@@ -104,3 +106,7 @@ if __name__ == "__main__":
 
     pyplot.legend()
     pyplot.show()
+
+
+if __name__ == "__main__":
+    make_test_plots()
