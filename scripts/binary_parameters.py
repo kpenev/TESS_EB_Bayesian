@@ -7,8 +7,15 @@ from astropy import units, constants
 import batman
 import phoebe
 
-from general_purpose_python_modules.kepler_angles import E_to_nu, M_to_E
+from general_purpose_python_modules.kepler_angles import (
+    E_to_nu,
+    M_to_E,
+    nu_to_E,
+    E_to_M,
+)
 from general_purpose_python_modules.cmd_utils import CMDInterpolator
+
+from gravity_darkening import GravDarkInterpolator
 
 InputParams = namedtuple(
     "InputParams",
@@ -103,7 +110,13 @@ class BinaryParams(batman.TransitParams):
 
         return (central_transits_rhs + inclination_correction) / numpy.pi + 0.5
 
-    def _init_from_phoebe(self, phoebe_binary):
+    def _set_per_star(self):
+        """Set the per-star attributes to match the primary."""
+
+        for attr in self._per_star_attr:
+            setattr(self, attr, getattr(self, f"_{attr}_both")["primary"])
+
+    def set_from_phoebe(self, phoebe_binary):
         """Set BATMAN params independent of component given a PHOEBE binary."""
 
         orbit = phoebe_binary["orbit@component"]
@@ -161,8 +174,9 @@ class BinaryParams(batman.TransitParams):
             )
             self._linear_limbdark_both[component] = self._u_both[component]
             self._gravdark_both[component] = star["gravb_bol"].get_value("")
+        self._set_per_star()
 
-    def _init_from_mcmc(self, sample_params: InputParams):
+    def set_from_mcmc(self, sample_params: InputParams):
         """Set the binary parameters from an MCMC sample."""
 
         self.t0_perpass = sample_params.perpass_phase * sample_params.per
@@ -193,18 +207,34 @@ class BinaryParams(batman.TransitParams):
                 **interp_kwargs,
             ),
         }
-        radii = {
-            component: (
+        radii = {}
+        for component, comp_interp in interpolated.items():
+            radii[component] = (
                 10.0 ** (comp_interp[0] / 2.0 - 2.0 * comp_interp[1])
                 / (2.0 * units.K**2)
                 * numpy.sqrt(units.L_sun / (numpy.pi * constants.sigma_sb))
             )
-            for component, comp_interp in interpolated.items()
-        }
-        self.rstar = radii["primary"]
+            self._gravdark_both[component] = self._gravdark_interp(
+                logg=numpy.log10(
+                    (
+                        constants.G
+                        * mprimary
+                        * units.M_sun
+                        / radii[component] ** 2
+                    ).to_value(units.cm / units.s**2)
+                ),
+                Z=sample_params.feh,
+                logTeff=comp_interp[1],
+            )
+        self.rstar = radii["primary"].to_value(units.R_sun)
         self.rp = radii["secondary"] / radii["primary"]
 
-        # TODO: self._t0_both['primary'] =
+        self._t0_both["primary"] = (
+            self.t0_perpass
+            + E_to_M(nu_to_E(numpy.pi / 2 - self.w, self.ecc), self.ecc)
+            / (2.0 * numpy.pi)
+            * self.per
+        )
         self._t0_both["secondary"] = self._t0_both["primary"] + (
             self.per
             * self._eclipse_phase_difference(
@@ -224,18 +254,17 @@ class BinaryParams(batman.TransitParams):
                 sample_params.secondary_limb_dark_2,
             ],
         }
-        #From least squares diff between linear and quadratic profiles
+        # From least squares diff between linear and quadratic profiles
         self._linear_limbdark_both = {
             component: limb_dark[0] + 0.3 * limb_dark[1]
             for component, limb_dark in self._u_both.items()
         }
-        # TODO: self._gravdark_both
+        self._set_per_star()
 
     def __init__(self, *, from_phoebe=None, from_mcmc=None):
         """Set the model parameters either from PHOEBE binary or MCMC sample."""
 
         super().__init__()
-        assert from_phoebe or from_mcmc
         self._reflection_coef_both = {"primary": 0.0, "secondary": 0.0}
         self._beaming_coef_both = {"primary": 0.0, "secondary": 0.0}
         self._per_star_attr = [
@@ -253,12 +282,16 @@ class BinaryParams(batman.TransitParams):
         self.teff_ratio = 1.0
         self.t0_perpass = 0.0
         self.inverted = False
+        for attr in self._per_star_attr:
+            setattr(self, f"_{attr}_both", {})
+
+        self._gravdark_interp = GravDarkInterpolator()
 
         if from_phoebe:
-            self._init_from_phoebe(from_phoebe)
-
-        for attr in self._per_star_attr:
-            setattr(self, attr, getattr(self, f"_{attr}_both")["primary"])
+            self.set_from_phoebe(from_phoebe)
+            assert not from_mcmc
+        if from_mcmc:
+            self.set_from_mcmc(from_mcmc)
 
     def swap_components(self):
         """Swap which star is considered primary vs secondary."""
