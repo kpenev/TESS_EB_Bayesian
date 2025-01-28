@@ -16,6 +16,7 @@ from general_purpose_python_modules.kepler_angles import (
 from general_purpose_python_modules.cmd_utils import CMDInterpolator
 
 from gravity_darkening import GravDarkInterpolator
+from paths import cmd_data_fname
 
 InputParams = namedtuple(
     "InputParams",
@@ -30,7 +31,7 @@ InputParams = namedtuple(
         "incl",
         "perpass_phase",
         "primary_limb_dark_1",
-        "secondary_limb_dark_2",
+        "primary_limb_dark_2",
         "secondary_limb_dark_1",
         "secondary_limb_dark_2",
     ],
@@ -42,11 +43,7 @@ InputParams = namedtuple(
 class BinaryParams(batman.TransitParams):
     """Extend the batman parameters with everything needed by model."""
 
-    @classmethod
-    def set_cmd_data_fname(cls, cmd_data_fname):
-        """Set the file name for the CMD data."""
-
-        cls._cmd_interpolator = CMDInterpolator(cmd_data_fname)
+    _cmd_interpolator = CMDInterpolator(cmd_data_fname)
 
     @staticmethod
     def _eclipse_phase_difference(esinw, ecosw, coti=0.0):
@@ -114,6 +111,7 @@ class BinaryParams(batman.TransitParams):
         """Set the per-star attributes to match the primary."""
 
         for attr in self._per_star_attr:
+            print(f"Setting {attr}")
             setattr(self, attr, getattr(self, f"_{attr}_both")["primary"])
 
     def set_from_phoebe(self, phoebe_binary):
@@ -142,7 +140,6 @@ class BinaryParams(batman.TransitParams):
             )
         )
 
-        self._prot_both = {}
         self._linear_limbdark_both = {}
         self._gravdark_both = {}
         self._u_both = {}
@@ -180,7 +177,7 @@ class BinaryParams(batman.TransitParams):
         """Set the binary parameters from an MCMC sample."""
 
         self.t0_perpass = sample_params.perpass_phase * sample_params.per
-        for param in ["per", "mtot", "mratio", "incl"]:
+        for param in ["per", "mtotal", "mratio", "incl"]:
             setattr(self, param, getattr(sample_params, param))
         self.ecc = (sample_params.ecosw**2 + sample_params.esinw**2) ** 0.5
         self.w = (
@@ -198,12 +195,12 @@ class BinaryParams(batman.TransitParams):
         interpolated = {
             "primary": self._cmd_interpolator(
                 ("logL", "logTe") + self._passbands,
-                mprimary,
+                Mini=mprimary,
                 **interp_kwargs,
             ),
             "secondary": self._cmd_interpolator(
                 ("logL", "logTe") + self._passbands,
-                mprimary * self.mratio,
+                Mini=mprimary * self.mratio,
                 **interp_kwargs,
             ),
         }
@@ -244,6 +241,9 @@ class BinaryParams(batman.TransitParams):
         self.teff_ratio = (
             interpolated["secondary"][1] / interpolated["primary"][1]
         )
+        self._limb_dark_both = {
+            component: "quadratic" for component in ["primary", "secondary"]
+        }
         self._u_both = {
             "primary": [
                 sample_params.primary_limb_dark_1,
@@ -265,8 +265,6 @@ class BinaryParams(batman.TransitParams):
         """Set the model parameters either from PHOEBE binary or MCMC sample."""
 
         super().__init__()
-        self._reflection_coef_both = {"primary": 0.0, "secondary": 0.0}
-        self._beaming_coef_both = {"primary": 0.0, "secondary": 0.0}
         self._per_star_attr = [
             "t0",
             "u",
@@ -283,7 +281,9 @@ class BinaryParams(batman.TransitParams):
         self.t0_perpass = 0.0
         self.inverted = False
         for attr in self._per_star_attr:
-            setattr(self, f"_{attr}_both", {})
+            setattr(self, f"_{attr}_both", {"primary": 0.0, "secondary": 0.0})
+
+        self._passbands = tuple(b + "mag" for b in "UBVRIJHK")
 
         self._gravdark_interp = GravDarkInterpolator()
 

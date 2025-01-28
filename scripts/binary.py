@@ -6,6 +6,7 @@ from scipy.optimize import minimize
 from scipy.linalg import lstsq
 
 from ebeer import EBEERBinary
+from binary_parameters import InputParams
 
 
 class Binary(EBEERBinary):
@@ -91,7 +92,7 @@ class Binary(EBEERBinary):
 
         if secondary_flux_fraction > 0:
             self.swap_components()
-            if 'eclipse' not in exclude:
+            if "eclipse" not in exclude:
                 eclipse = batman.TransitModel(self, times).light_curve(self)
             add_primary_rhs(rhs, secondary_flux_fraction, eclipse)
             add_primary_lhs(lhs_matrix, secondary_flux_fraction, eclipse, 1)
@@ -282,3 +283,23 @@ class Binary(EBEERBinary):
         return (primary_flux + secondary_flux_fraction * secondary_flux) / (
             1 + secondary_flux_fraction
         )
+
+
+if __name__ == "__main__":
+    binary = Binary(
+        from_mcmc=InputParams(
+            mtotal=2.0,
+            mratio=1.0,
+            age_gyr=4.6,
+            feh=0.0,
+            per=3.0,
+            esinw=0.3,
+            ecosw=0.3,
+            incl=90.0,
+            perpass_phase=0.23,
+            primary_limb_dark_1=0.6,
+            primary_limb_dark_2=0.3,
+            secondary_limb_dark_1=0.6,
+            secondary_limb_dark_2=0.3,
+        )
+    )

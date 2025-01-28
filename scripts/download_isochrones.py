@@ -32,7 +32,7 @@ def parse_command_line():
         type=float,
         nargs=3,
         metavar=("min", "max", "step"),
-        default=(-2.5, 1.0, 0.1),
+        default=(-2.1, 1.0, 0.1),
         help="The grid of [Fe/H] to generate isochrones for.",
     )
     parser.add_argument(
