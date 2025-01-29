@@ -28,12 +28,18 @@ InputParams = namedtuple(
         "per",
         "esinw",
         "ecosw",
-        "incl",
+        "inc",
         "perpass_phase",
         "primary_limb_dark_1",
         "primary_limb_dark_2",
         "secondary_limb_dark_1",
         "secondary_limb_dark_2",
+        "primary_prot",
+        "secondary_prot",
+        "primary_reflection_coef",
+        "secondary_reflection_coef",
+        "primary_beaming_coef",
+        "secondary_beaming_coef",
     ],
 )
 
@@ -177,7 +183,7 @@ class BinaryParams(batman.TransitParams):
         """Set the binary parameters from an MCMC sample."""
 
         self.t0_perpass = sample_params.perpass_phase * sample_params.per
-        for param in ["per", "mtotal", "mratio", "incl"]:
+        for param in ["per", "inc"]:
             setattr(self, param, getattr(sample_params, param))
         self.ecc = (sample_params.ecosw**2 + sample_params.esinw**2) ** 0.5
         self.w = (
@@ -186,7 +192,7 @@ class BinaryParams(batman.TransitParams):
             / numpy.pi
         )
 
-        mprimary = self.mtotal / (1.0 + self.mratio)
+        mprimary = sample_params.mtotal / (1.0 + sample_params.mratio)
         interp_kwargs = {
             "MH": sample_params.feh,
             "logAge": 9.0 + numpy.log10(sample_params.age_gyr),
@@ -194,20 +200,22 @@ class BinaryParams(batman.TransitParams):
 
         interpolated = {
             "primary": self._cmd_interpolator(
-                ("logL", "logTe") + self._passbands,
+                ("Mass", "logL", "logTe") + self._passbands,
                 Mini=mprimary,
                 **interp_kwargs,
             ),
             "secondary": self._cmd_interpolator(
-                ("logL", "logTe") + self._passbands,
-                Mini=mprimary * self.mratio,
+                ("Mass", "logL", "logTe") + self._passbands,
+                Mini=mprimary * sample_params.mratio,
                 **interp_kwargs,
             ),
         }
+        self.mtotal = interpolated["primary"][0] + interpolated["secondary"][0]
+        self.mratio = interpolated["secondary"][0] / interpolated["primary"][0]
         radii = {}
         for component, comp_interp in interpolated.items():
             radii[component] = (
-                10.0 ** (comp_interp[0] / 2.0 - 2.0 * comp_interp[1])
+                10.0 ** (comp_interp[1] / 2.0 - 2.0 * comp_interp[2])
                 / (2.0 * units.K**2)
                 * numpy.sqrt(units.L_sun / (numpy.pi * constants.sigma_sb))
             )
@@ -215,14 +223,23 @@ class BinaryParams(batman.TransitParams):
                 logg=numpy.log10(
                     (
                         constants.G
-                        * mprimary
+                        * comp_interp[0]
                         * units.M_sun
                         / radii[component] ** 2
                     ).to_value(units.cm / units.s**2)
                 ),
                 Z=sample_params.feh,
-                logTeff=comp_interp[1],
+                logTeff=comp_interp[2],
             )
+        self.a = (
+            (
+                (self.per * units.day) ** 2
+                * (constants.G * self.mtotal * units.M_sun)
+                / (4.0 * numpy.pi**2)
+            )
+            ** (1.0 / 3.0)
+            / radii["primary"]
+        ).to_value()
         self.rstar = radii["primary"].to_value(units.R_sun)
         self.rp = radii["secondary"] / radii["primary"]
 
@@ -238,27 +255,23 @@ class BinaryParams(batman.TransitParams):
                 sample_params.esinw, sample_params.ecosw
             )
         )
-        self.teff_ratio = (
-            interpolated["secondary"][1] / interpolated["primary"][1]
+        self.teff_ratio = 10.0 ** (
+            interpolated["secondary"][2] - interpolated["primary"][2]
         )
-        self._limb_dark_both = {
-            component: "quadratic" for component in ["primary", "secondary"]
-        }
-        self._u_both = {
-            "primary": [
-                sample_params.primary_limb_dark_1,
-                sample_params.primary_limb_dark_2,
-            ],
-            "secondary": [
-                sample_params.secondary_limb_dark_1,
-                sample_params.secondary_limb_dark_2,
-            ],
-        }
-        # From least squares diff between linear and quadratic profiles
-        self._linear_limbdark_both = {
-            component: limb_dark[0] + 0.3 * limb_dark[1]
-            for component, limb_dark in self._u_both.items()
-        }
+        for component in ["primary", "secondary"]:
+            self._limb_dark_both[component] = "quadratic"
+            self._u_both[component] = [
+                getattr(sample_params, f"{component}_limb_dark_1"),
+                getattr(sample_params, f"{component}_limb_dark_2"),
+            ]
+            # From least squares diff between linear and quadratic profiles
+            self._linear_limbdark_both[component] = (
+                self._u_both[component][0] + 0.3 * self._u_both[component][1]
+            )
+            for param in ["prot", "reflection_coef", "beaming_coef"]:
+                getattr(self, f"_{param}_both")[component] = getattr(
+                    sample_params, f"{component}_{param}"
+                )
         self._set_per_star()
 
     def __init__(self, *, from_phoebe=None, from_mcmc=None):
@@ -275,13 +288,20 @@ class BinaryParams(batman.TransitParams):
             "reflection_coef",
             "beaming_coef",
         ]
-        self.mratio = 1.0
-        self.rstar = 1.0
-        self.teff_ratio = 1.0
-        self.t0_perpass = 0.0
+        self.per = None
+        self.rp = None
+        self.a = None
+        self.inc = None
+        self.ecc = None
+        self.w = None
+        self.mtotal = None
+        self.mratio = None
+        self.rstar = None
+        self.teff_ratio = None
+        self.t0_perpass = None
         self.inverted = False
         for attr in self._per_star_attr:
-            setattr(self, f"_{attr}_both", {"primary": 0.0, "secondary": 0.0})
+            setattr(self, f"_{attr}_both", {"primary": None, "secondary": None})
 
         self._passbands = tuple(b + "mag" for b in "UBVRIJHK")
 
@@ -406,9 +426,9 @@ class BinaryParams(batman.TransitParams):
             f"Binary: Mtot={self.mtotal}, q={self.mratio}, R1={self.rstar}, "
             f"R2/R1={self.rp}, Teff2/Teff1={self.teff_ratio} Porb={self.per}, "
             f"a={self.a}, e={self.ecc}, i={self.inc}, w={self.w}, "
-            f"t0={self.t0}, t_perpass={self.t0_perpass}, u={self._u_both}, "
-            f"LDcoef={self._limb_dark_both}, Prot={self._prot_both}, "
-            f"LinLDcoef={self._linear_limbdark_both}, "
+            f"t0={self._t0_both}, t_perpass={self.t0_perpass}, "
+            f"u={self._u_both}, LDmodel={self._limb_dark_both}, "
+            f"Prot={self._prot_both}, LinLDcoef={self._linear_limbdark_both}, "
             f"GDcoef={self._gravdark_both}, reflect "
             f"coef={self._reflection_coef_both}, beaming "
             f"coef={self._beaming_coef_both}"

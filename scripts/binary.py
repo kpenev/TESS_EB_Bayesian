@@ -286,20 +286,28 @@ class Binary(EBEERBinary):
 
 
 if __name__ == "__main__":
-    binary = Binary(
-        from_mcmc=InputParams(
-            mtotal=2.0,
-            mratio=1.0,
-            age_gyr=4.6,
-            feh=0.0,
-            per=3.0,
-            esinw=0.3,
-            ecosw=0.3,
-            incl=90.0,
-            perpass_phase=0.23,
-            primary_limb_dark_1=0.6,
-            primary_limb_dark_2=0.3,
-            secondary_limb_dark_1=0.6,
-            secondary_limb_dark_2=0.3,
+    print(
+        Binary(
+            from_mcmc=InputParams(
+                mtotal=1.5,
+                mratio=0.5,
+                age_gyr=4.6,
+                feh=0.0,
+                per=3.0,
+                esinw=0.3,
+                ecosw=0.3,
+                inc=90.0,
+                perpass_phase=0.23,
+                primary_limb_dark_1=0.6,
+                primary_limb_dark_2=0.3,
+                secondary_limb_dark_1=0.6,
+                secondary_limb_dark_2=0.3,
+                primary_prot=3.0,
+                secondary_prot=3.0,
+                primary_reflection_coef=0.1,
+                secondary_reflection_coef=0.1,
+                primary_beaming_coef=0.1,
+                secondary_beaming_coef=0.1,
+            )
         )
     )
