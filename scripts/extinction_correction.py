@@ -50,8 +50,8 @@ def get_last_healpix(fname):
         return max(file["metadata"].keys())
 
 
-class BroadbandPhotometry:
-    """Querry observed broad band magnitudes and predict extinction"""
+class Green19Correction:
+    """Querry Green et. al. (2019) broad band magnitudes and extinction"""
 
     def _find_tic(self, tic_entry):
         """Return opened file and index within it containing given TIC entry."""
@@ -63,6 +63,7 @@ class BroadbandPhotometry:
         ).galactic
         for healpix in healpix_and_neighbors(gal_coords):
             file_index = numpy.searchsorted(self._last_healpix, healpix)
+            healpix_key = str(healpix)
             with h5py.File(
                 path.join(
                     broadband_data_dir,
@@ -71,11 +72,20 @@ class BroadbandPhotometry:
                 "r",
             ) as extinction_f:
                 index = numpy.where(
-                    extinction_f["gaia"][f"{healpix}"]["gaia_id"]
+                    extinction_f["gaia"][healpix_key]["gaia_id"]
                     == int(tic_entry["GAIA"]),
                 )[0]
                 if index.size > 0:
-                    return extinction_f["gaia"][f"{healpix}"][index]
+                    index = int(index)
+                    return {
+                        "mag": extinction_f["data"][healpix_key][index]["mag"],
+                        "mag_err": extinction_f["data"][healpix_key][index][
+                            "mag_err"
+                        ],
+                        "percentiles": extinction_f["percentiles"][healpix_key][
+                            index
+                        ],
+                    }
 
         raise RuntimeError(
             f"TIC ID: {tic_entry['ID']} = Gaia ID: {tic_entry['GAIA']} "
@@ -91,8 +101,11 @@ class BroadbandPhotometry:
                 for fname in sorted(glob(path.join(broadband_data_dir, "*.h5")))
             ]
         )
+        self._extinction_coef = numpy.array(
+            [3.518, 2.617, 1.971, 1.549, 1.263, 0.7927, 0.4690, 0.3026]
+        )
 
-    def __call__(self, tic_ids):
+    def get_map_data(self, tic_ids):
         """Return all info from Green et. al. (2019) for the given TIC."""
 
         return [
@@ -100,6 +113,42 @@ class BroadbandPhotometry:
             for tic_entry in Catalogs.query_criteria(catalog="Tic", ID=tic_ids)
         ]
 
+    def get_absolute_magnitudes(self, tic_ids):
+        """Return absolute mags and uncertainties per Green et. al. (2019)."""
+
+        return [
+            (
+                (
+                    map_data["mag"]
+                    - map_data["percentiles"]["dm"][1]
+                    - map_data["percentiles"]["E"][1] * self._extinction_coef
+                ),
+                numpy.sqrt(
+                    map_data["mag_err"] ** 2
+                    + (
+                        map_data["percentiles"]["dm"][2]
+                        - map_data["percentiles"]["dm"][0]
+                    )
+                    ** 2
+                    / 4
+                    + (
+                        map_data["percentiles"]["E"][2]
+                        - map_data["percentiles"]["E"][0]
+                    )
+                    ** 2
+                    * self._extinction_coef**2
+                    / 4
+                ),
+            )
+            for map_data in self.get_map_data(tic_ids)
+        ]
+
 
 if __name__ == "__main__":
-    print(repr(BroadbandPhotometry()([282024596, 94322581])))
+    print(
+        repr(
+            Green19Correction().get_absolute_magnitudes(
+                [282024596, 94322581]
+            )
+        )
+    )
