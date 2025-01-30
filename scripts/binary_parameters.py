@@ -172,12 +172,12 @@ class BinaryParams(batman.TransitParams):
             else:
                 self.mratio *= star["component@mass"].get_value(units.Msun)
 
-            #False positive
-            #pylint: disable=no-member
+            # False positive
+            # pylint: disable=no-member
             self._prot_both[component] = star["component@period"].get_value(
                 units.day
             )
-            #pylint: enable=no-member
+            # pylint: enable=no-member
             self._linear_limbdark_both[component] = self._u_both[component]
             self._gravdark_both[component] = star["gravb_bol"].get_value("")
         self._set_per_star()
@@ -275,6 +275,9 @@ class BinaryParams(batman.TransitParams):
                 getattr(self, f"_{param}_both")[component] = getattr(
                     sample_params, f"{component}_{param}"
                 )
+            self._absmag_both[component] = numpy.array(
+                interpolated[component][3:]
+            )
         self._set_per_star()
 
     def __init__(self, *, from_phoebe=None, from_mcmc=None):
@@ -290,6 +293,7 @@ class BinaryParams(batman.TransitParams):
             "gravdark",
             "reflection_coef",
             "beaming_coef",
+            "absmag",
         ]
         self.per = None
         self.rp = None
@@ -306,7 +310,7 @@ class BinaryParams(batman.TransitParams):
         for attr in self._per_star_attr:
             setattr(self, f"_{attr}_both", {"primary": None, "secondary": None})
 
-        self._passbands = tuple(b + "mag" for b in "UBVRIJHK")
+        self._passbands = tuple(b + "P1mag" for b in "grizy") + ('mbolmag',)
 
         self._gravdark_interp = GravDarkInterpolator()
 
@@ -372,10 +376,10 @@ class BinaryParams(batman.TransitParams):
             this_star["ld_mode_bol"].set_value("manual")
             this_star["ld_func_bol"].set_value("linear")
             this_star["ld_coeffs_bol"].set_value(self._u_both[star_rank])
-            #False positive
-            #pylint: disable=no-member
+            # False positive
+            # pylint: disable=no-member
             this_star["period"].set_value(self._prot_both[star_rank])
-            #pylint: enable=no-member
+            # pylint: enable=no-member
 
     def secondary_flux_fraction(self):
         """Return the fraction of the flux coming from the secondary."""
@@ -436,8 +440,9 @@ class BinaryParams(batman.TransitParams):
             f"u={self._u_both}, LDmodel={self._limb_dark_both}, "
             f"Prot={self._prot_both}, LinLDcoef={self._linear_limbdark_both}, "
             f"GDcoef={self._gravdark_both}, reflect "
-            f"coef={self._reflection_coef_both}, beaming "
-            f"coef={self._beaming_coef_both}"
+            f"coef={self._reflection_coef_both}, "
+            f"beaming coef={self._beaming_coef_both}, "
+            f"Absolute magnitudes={self._absmag_both}"
         )
         # pylint: enable=no-member
 

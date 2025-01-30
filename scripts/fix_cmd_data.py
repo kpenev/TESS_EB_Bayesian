@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 """Fix the order of lines in the input data to handle few discontinuities."""
 
 from paths import cmd_data_fname
@@ -29,4 +31,3 @@ if __name__ == "__main__":
                     #print('Holding back:\n\t' + line)
         for buf_line in reversed(buffer):
             fixed.write(buf_line)
-

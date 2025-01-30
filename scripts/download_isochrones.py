@@ -60,6 +60,7 @@ def get_isochrones(log_age_grid, feh_grid, temp_dir):
             age=tuple(value * units.yr * units.dex for value in log_age_grid),
             feh=feh,
             cmd_version="3.7",
+            photsys="panstarrs1",
             output_fname=feh_slices[-1],
         )
     return feh_slices
