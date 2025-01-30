@@ -172,9 +172,12 @@ class BinaryParams(batman.TransitParams):
             else:
                 self.mratio *= star["component@mass"].get_value(units.Msun)
 
+            #False positive
+            #pylint: disable=no-member
             self._prot_both[component] = star["component@period"].get_value(
                 units.day
             )
+            #pylint: enable=no-member
             self._linear_limbdark_both[component] = self._u_both[component]
             self._gravdark_both[component] = star["gravb_bol"].get_value("")
         self._set_per_star()
@@ -369,7 +372,10 @@ class BinaryParams(batman.TransitParams):
             this_star["ld_mode_bol"].set_value("manual")
             this_star["ld_func_bol"].set_value("linear")
             this_star["ld_coeffs_bol"].set_value(self._u_both[star_rank])
+            #False positive
+            #pylint: disable=no-member
             this_star["period"].set_value(self._prot_both[star_rank])
+            #pylint: enable=no-member
 
     def secondary_flux_fraction(self):
         """Return the fraction of the flux coming from the secondary."""
