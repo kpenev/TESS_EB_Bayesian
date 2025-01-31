@@ -275,9 +275,10 @@ class BinaryParams(batman.TransitParams):
                 getattr(self, f"_{param}_both")[component] = getattr(
                     sample_params, f"{component}_{param}"
                 )
-            self._absmag_both[component] = numpy.array(
-                interpolated[component][3:]
-            )
+        self.absmag = -2.5 * numpy.log10(
+            10.0 ** (-interpolated["primary"][3:] / 2.5)
+            + 10.0 ** (-interpolated["secondary"][3:] / 2.5)
+        )
         self._set_per_star()
 
     def __init__(self, *, from_phoebe=None, from_mcmc=None):
@@ -293,7 +294,6 @@ class BinaryParams(batman.TransitParams):
             "gravdark",
             "reflection_coef",
             "beaming_coef",
-            "absmag",
         ]
         self.per = None
         self.rp = None
@@ -307,10 +307,11 @@ class BinaryParams(batman.TransitParams):
         self.teff_ratio = None
         self.t0_perpass = None
         self.inverted = False
+        self.absmag = None
         for attr in self._per_star_attr:
             setattr(self, f"_{attr}_both", {"primary": None, "secondary": None})
 
-        self._passbands = tuple(b + "P1mag" for b in "grizy") + ('mbolmag',)
+        self._passbands = tuple(b + "P1mag" for b in "grizy") + ("mbolmag",)
 
         self._gravdark_interp = GravDarkInterpolator()
 
@@ -442,7 +443,7 @@ class BinaryParams(batman.TransitParams):
             f"GDcoef={self._gravdark_both}, reflect "
             f"coef={self._reflection_coef_both}, "
             f"beaming coef={self._beaming_coef_both}, "
-            f"Absolute magnitudes={self._absmag_both}"
+            f"Absolute magnitudes={self.absmag}"
         )
         # pylint: enable=no-member
 
