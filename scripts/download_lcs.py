@@ -43,9 +43,8 @@ from data_fnames import data_fnames
 def get_astroquery(tic, sector, provenance="SPOC", plot=False):
     """Return the lightcurve using astroquery interface."""
 
-    sector_tic_fname_part = "s{sector}-{tic:016d}".format(
-        sector=("*" if sector == "all" else "{0:04d}".format(sector)), tic=tic
-    )
+    sector_str = "*" if sector == "all" else f"{sector:04d}"
+    sector_tic_fname_part = f"s{sector_str}-{tic:016d}"
 
     if provenance == "QLP":
         fits_list = glob(
@@ -85,7 +84,9 @@ def get_astroquery(tic, sector, provenance="SPOC", plot=False):
     else:
         # False positive
         # pylint: disable=no-member
-        objects = Observations.query_object("TIC" + str(tic), radius=0.001)
+        objects = Observations.query_criteria(
+            target_name=tic, project="TESS", provenance_name=provenance
+        )
         # pylint: enable=no-member
 
         print("\tFound %d objects:\n" % len(objects) + repr(objects))
@@ -96,9 +97,6 @@ def get_astroquery(tic, sector, provenance="SPOC", plot=False):
             objects["dataproduct_type"] == "timeseries",
         )
         selection = numpy.logical_and(selection, objects["project"] == "TESS")
-        selection = numpy.logical_and(
-            selection, objects["provenance_name"] == provenance
-        )
 
         print(
             "\tAvailable sectors: "
@@ -144,12 +142,18 @@ def get_astroquery(tic, sector, provenance="SPOC", plot=False):
                 assert product_selection.sum() == 1
             download = Observations.download_products(
                 products[product_selection]
-            )
+            ).to_pandas()
+            print(f"Download: type={type(download)}: {download!r}")
+            assert len(download["Local Path"]) == 1
+            print(f"Local path: {download['Local Path']}")
             fits_list.append(
-                (download["Local Path"], get_object["sequence_number"])
+                (
+                    download["Local Path"].iloc[0],
+                    get_object["sequence_number"],
+                )
             )
 
-    result = dict()
+    result = {}
     for fits_path, fits_sector in fits_list:
         print(f"Opening: {fits_path!r}")
         with fits.open(fits_path, "readonly") as fits_f:
@@ -170,7 +174,7 @@ def get_astroquery(tic, sector, provenance="SPOC", plot=False):
         result[fits_sector] = lightcurve
 
     if sector == "all":
-        print("Returning %d LCs" % len(result))
+        print(f"Returning {len(result)} LCs")
         return result
     return result[sector]
 

@@ -49,7 +49,10 @@ InputParams = namedtuple(
 class BinaryParams(batman.TransitParams):
     """Extend the batman parameters with everything needed by model."""
 
-    _cmd_interpolator = CMDInterpolator(cmd_data_fname)
+    _cmd_interpolators = tuple(
+        (photsys, CMDInterpolator(cmd_data_fname.format(photsys=photsys)))
+        for photsys in ["panstarss1", "2mass"]
+    )
 
     @staticmethod
     def _eclipse_phase_difference(esinw, ecosw, coti=0.0):
@@ -201,18 +204,28 @@ class BinaryParams(batman.TransitParams):
             "logAge": 9.0 + numpy.log10(sample_params.age_gyr),
         }
 
-        interpolated = {
-            "primary": self._cmd_interpolator(
-                ("Mass", "logL", "logTe") + self._passbands,
-                Mini=mprimary,
-                **interp_kwargs,
-            ),
-            "secondary": self._cmd_interpolator(
-                ("Mass", "logL", "logTe") + self._passbands,
-                Mini=mprimary * sample_params.mratio,
-                **interp_kwargs,
-            ),
-        }
+        interpolated = {}
+        for photsys, interpolator in self._cmd_interpolators:
+            for component, mass in [
+                ("primary", mprimary),
+                ("secondary", mprimary * sample_params.mratio),
+            ]:
+                if component not in interpolated:
+                    interpolated[component] = interpolator(
+                        ("Mass", "logL", "logTe") + self._passbands[photsys],
+                        Mini=mass,
+                        **interp_kwargs,
+                    )
+                else:
+                    interpolated[component] = numpy.append(
+                        interpolated[component],
+                        interpolator(
+                            self._passbands[photsys],
+                            Mini=mprimary,
+                            **interp_kwargs,
+                        ),
+                    )
+
         self.mtotal = interpolated["primary"][0] + interpolated["secondary"][0]
         self.mratio = interpolated["secondary"][0] / interpolated["primary"][0]
         radii = {}
@@ -311,7 +324,10 @@ class BinaryParams(batman.TransitParams):
         for attr in self._per_star_attr:
             setattr(self, f"_{attr}_both", {"primary": None, "secondary": None})
 
-        self._passbands = tuple(b + "P1mag" for b in "grizy") + ("mbolmag",)
+        self._passbands = {
+            "panstarss1": tuple(b + "P1mag" for b in "grizy"),
+            "2mass": tuple(b + "mag" for b in ["J", "H", "Ks"]),
+        }
 
         self._gravdark_interp = GravDarkInterpolator()
 

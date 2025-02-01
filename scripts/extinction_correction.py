@@ -34,6 +34,8 @@ def verify_monotonic():
 def healpix_and_neighbors(galactic_coords):
     """Iterate over the given pixel and its nearest neighbors."""
 
+#    for pixel in range(11285):
+#        yield pixel
     pixel = pixelfunc.ang2pix(
         32, galactic_coords.l.deg, galactic_coords.b.deg, nest=True, lonlat=True
     )
@@ -47,7 +49,7 @@ def get_last_healpix(fname):
     """Return the last healpix in each of the Green et. al. (2019) files."""
 
     with h5py.File(fname, "r") as file:
-        return max(file["metadata"].keys())
+        return max(map(int, file["metadata"].keys()))
 
 
 class Green19Correction:
@@ -71,6 +73,8 @@ class Green19Correction:
                 ),
                 "r",
             ) as extinction_f:
+                if healpix_key not in extinction_f["gaia"]:
+                    continue
                 index = numpy.where(
                     extinction_f["gaia"][healpix_key]["gaia_id"]
                     == int(tic_entry["GAIA"]),
@@ -145,10 +149,4 @@ class Green19Correction:
 
 
 if __name__ == "__main__":
-    print(
-        repr(
-            Green19Correction().get_absolute_magnitudes(
-                [282024596, 94322581]
-            )
-        )
-    )
+    print(repr(Green19Correction().get_absolute_magnitudes(18250189)))
