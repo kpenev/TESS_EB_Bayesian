@@ -6,7 +6,7 @@ from paths import cmd_data_fname
 import numpy
 
 if __name__ == "__main__":
-    for photsys in ["panstarss1", "2mass"]:
+    for photsys in ["panstarss1", "2mass_spitzer_wise"]:
         formatted_fname = cmd_data_fname.format(photsys=photsys)
         buffer = []
         with (

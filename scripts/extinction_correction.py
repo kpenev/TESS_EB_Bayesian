@@ -34,8 +34,6 @@ def verify_monotonic():
 def healpix_and_neighbors(galactic_coords):
     """Iterate over the given pixel and its nearest neighbors."""
 
-#    for pixel in range(11285):
-#        yield pixel
     pixel = pixelfunc.ang2pix(
         32, galactic_coords.l.deg, galactic_coords.b.deg, nest=True, lonlat=True
     )
@@ -82,10 +80,20 @@ class Green19Correction:
                 if index.size > 0:
                     index = int(index)
                     return {
-                        "mag": extinction_f["data"][healpix_key][index]["mag"],
-                        "mag_err": extinction_f["data"][healpix_key][index][
-                            "mag_err"
-                        ],
+                        "mag": numpy.concatenate(
+                            (
+                                extinction_f["data"][healpix_key][index]["mag"],
+                                [tic_entry["w1mag"], tic_entry["w2mag"]],
+                            )
+                        ),
+                        "mag_err": numpy.concatenate(
+                            (
+                                extinction_f["data"][healpix_key][index][
+                                    "mag_err"
+                                ],
+                                [tic_entry["e_w1mag"], tic_entry["e_w2mag"]],
+                            )
+                        ),
                         "percentiles": extinction_f["percentiles"][healpix_key][
                             index
                         ],
@@ -105,8 +113,20 @@ class Green19Correction:
                 for fname in sorted(glob(path.join(broadband_data_dir, "*.h5")))
             ]
         )
+        # Order is: PANSTARRS (g, r, i, z, y) 2MASS (J, H, Ks), WISE (W1, W2)
         self._extinction_coef = numpy.array(
-            [3.518, 2.617, 1.971, 1.549, 1.263, 0.7927, 0.4690, 0.3026]
+            [
+                3.518,
+                2.617,
+                1.971,
+                1.549,
+                1.263,
+                0.7927,
+                0.4690,
+                0.3026,
+                0.132,
+                0.179,
+            ]
         )
 
     def get_map_data(self, tic_ids):
