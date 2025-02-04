@@ -289,7 +289,7 @@ if __name__ == "__main__":
     print(
         Binary(
             from_mcmc=InputParams(
-                mtotal=1.5,
+                mtotal=numpy.pi / 2,
                 mratio=0.5,
                 age_gyr=4.6,
                 feh=0.0,

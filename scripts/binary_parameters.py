@@ -51,7 +51,7 @@ class BinaryParams(batman.TransitParams):
 
     _cmd_interpolators = tuple(
         (photsys, CMDInterpolator(cmd_data_fname.format(photsys=photsys)))
-        for photsys in ["panstarss1", "2mass"]
+        for photsys in ["panstarss1", "2mass_spitzer_wise"]
     )
 
     @staticmethod
@@ -326,7 +326,9 @@ class BinaryParams(batman.TransitParams):
 
         self._passbands = {
             "panstarss1": tuple(b + "P1mag" for b in "grizy"),
-            "2mass": tuple(b + "mag" for b in ["J", "H", "Ks"]),
+            "2mass_spitzer_wise": tuple(
+                b + "mag" for b in ["J", "H", "Ks", "W1", "W2"]
+            ),
         }
 
         self._gravdark_interp = GravDarkInterpolator()
