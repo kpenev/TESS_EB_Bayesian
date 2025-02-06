@@ -157,7 +157,7 @@ def get_astroquery(tic, sector, provenance="SPOC", plot=False):
     for fits_path, fits_sector in fits_list:
         print(f"Opening: {fits_path!r}")
         with fits.open(fits_path, "readonly") as fits_f:
-            lightcurve = fits_f[1].data[:]
+            lightcurve = fits_f[1].header, fits_f[1].data[:]
         if plot:
             if plot is True:
                 if provenance == "SPOC":
@@ -166,8 +166,8 @@ def get_astroquery(tic, sector, provenance="SPOC", plot=False):
                     plot = "SAP_FLUX"
 
             pyplot.plot(
-                lightcurve["TIME"],
-                lightcurve[plot] / numpy.nanmax(lightcurve[plot]),
+                lightcurve[1]["TIME"],
+                lightcurve[1][plot] / numpy.nanmax(lightcurve[1][plot]),
                 "+",
                 label="AQ " + provenance,
             )

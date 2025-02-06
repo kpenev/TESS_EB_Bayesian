@@ -6,13 +6,16 @@ from scipy.optimize import minimize
 from scipy.linalg import lstsq
 
 from ebeer import EBEERBinary
-#from binary_parameters import InputParams
+
+# from binary_parameters import InputParams
 
 
 class Binary(EBEERBinary):
     """Represent TESS eclipsing binaries."""
 
-    def _get_primary_lightcurve(self, times, true_anomaly, exclude=()):
+    def _get_primary_lightcurve(
+        self, times, true_anomaly, exclude=(), **eclipse_config
+    ):
         """Return ratio of primary flux to that of identical isolated star."""
 
         flux = numpy.ones(true_anomaly.shape)
@@ -23,7 +26,7 @@ class Binary(EBEERBinary):
         if "beaming" not in exclude:
             flux += self.beaming(true_anomaly)
         if "eclipse" not in exclude:
-            flux *= self.eclipse(times)
+            flux *= self.eclipse(times, **eclipse_config)
         return flux
 
     def _setup_fit_beer_coef_problem(
@@ -233,7 +236,9 @@ class Binary(EBEERBinary):
             **fit_coef_kwargs,
         )
 
-    def get_lightcurve(self, times, secondary_flux_fraction=None, exclude=()):
+    def get_lightcurve(
+        self, times, secondary_flux_fraction=None, exclude=(), **eclipse_config
+    ):
         """
         Return the flux modulation at the given times for current binary.
 
@@ -258,6 +263,9 @@ class Binary(EBEERBinary):
                 ``reflection``, ``ellipticity``, ``eclipse``.
                 Effects are enabled or disabled for both stars simultaneously.
 
+            eclip_config:    Extra parameters to pass to the BATMAN initializer
+                for eclipse modeling.
+
         Returns:
             Total eBEER + eclipses flux modulation either split by star or
             combined (see ``secondary_flux_fraction`` argument).
@@ -265,7 +273,7 @@ class Binary(EBEERBinary):
 
         true_anomaly = self.calc_true_anomaly(times)
         primary_flux = self._get_primary_lightcurve(
-            times, true_anomaly, exclude
+            times, true_anomaly, exclude, **eclipse_config
         )
 
         if secondary_flux_fraction is None:
@@ -274,7 +282,7 @@ class Binary(EBEERBinary):
         self.swap_components()
 
         secondary_flux = self._get_primary_lightcurve(
-            times, true_anomaly, exclude
+            times, true_anomaly, exclude, **eclipse_config
         )
 
         self.swap_components()
