@@ -6,7 +6,7 @@ from scipy.optimize import minimize
 from scipy.linalg import lstsq
 
 from ebeer import EBEERBinary
-from binary_parameters import InputParams
+#from binary_parameters import InputParams
 
 
 class Binary(EBEERBinary):
@@ -180,10 +180,12 @@ class Binary(EBEERBinary):
             return result
         return residuals
 
-    def eclipse(self, times):
+    def eclipse(self, times, **transit_config):
         """Return fraction of the primary flux observed due to eclipse."""
 
-        return batman.TransitModel(self, times).light_curve(self)
+        return batman.TransitModel(self, times, **transit_config).light_curve(
+            self
+        )
 
     def fit_lightcurve(self, times, lc_to_fit, **fit_coef_kwargs):
         """

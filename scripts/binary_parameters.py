@@ -1,7 +1,5 @@
 """Unified interface for binary parameters needed by the likelihood function."""
 
-from collections import namedtuple
-
 import numpy
 from astropy import units, constants
 import batman
@@ -17,31 +15,6 @@ from general_purpose_python_modules.cmd_utils import CMDInterpolator
 
 from gravity_darkening import GravDarkInterpolator
 from paths import cmd_data_fname
-
-InputParams = namedtuple(
-    "InputParams",
-    [
-        "mtotal",
-        "mratio",
-        "age_gyr",
-        "feh",
-        "per",
-        "esinw",
-        "ecosw",
-        "inc",
-        "perpass_phase",
-        "primary_limb_dark_1",
-        "primary_limb_dark_2",
-        "secondary_limb_dark_1",
-        "secondary_limb_dark_2",
-        "primary_prot",
-        "secondary_prot",
-        "primary_reflection_coef",
-        "secondary_reflection_coef",
-        "primary_beaming_coef",
-        "secondary_beaming_coef",
-    ],
-)
 
 
 # This is set by BATMAN
@@ -185,12 +158,21 @@ class BinaryParams(batman.TransitParams):
             self._gravdark_both[component] = star["gravb_bol"].get_value("")
         self._set_per_star()
 
-    def set_from_mcmc(self, sample_params: InputParams):
-        """Set the binary parameters from an MCMC sample."""
+    def set_from_mcmc(self, sample_params):
+        """
+        Set the binary parameters from an MCMC sample.
+
+        Args:
+            sample_params:    Object with attributes specifying the phyisical
+                parameters of the system being sampled. See `SampleParams` in
+                `log_likelihood.py` for the attribute names.
+
+        Returns:
+            None
+        """
 
         self.t0_perpass = sample_params.perpass_phase * sample_params.per
-        for param in ["per", "inc"]:
-            setattr(self, param, getattr(sample_params, param))
+        self.per = sample_params.per
         self.ecc = (sample_params.ecosw**2 + sample_params.esinw**2) ** 0.5
         self.w = (
             numpy.arctan2(sample_params.esinw, sample_params.ecosw)
@@ -200,7 +182,7 @@ class BinaryParams(batman.TransitParams):
 
         mprimary = sample_params.mtotal / (1.0 + sample_params.mratio)
         interp_kwargs = {
-            "MH": sample_params.feh,
+            "MH": sample_params.meh,
             "logAge": 9.0 + numpy.log10(sample_params.age_gyr),
         }
 
@@ -235,18 +217,21 @@ class BinaryParams(batman.TransitParams):
                 / (2.0 * units.K**2)
                 * numpy.sqrt(units.L_sun / (numpy.pi * constants.sigma_sb))
             )
-            self._gravdark_both[component] = self._gravdark_interp(
-                logg=numpy.log10(
-                    (
-                        constants.G
-                        * comp_interp[0]
-                        * units.M_sun
-                        / radii[component] ** 2
-                    ).to_value(units.cm / units.s**2)
-                ),
-                Z=sample_params.feh,
-                logTeff=comp_interp[2],
-            )
+            try:
+                self._gravdark_both[component] = self._gravdark_interp(
+                    logg=numpy.log10(
+                        (
+                            constants.G
+                            * comp_interp[0]
+                            * units.M_sun
+                            / radii[component] ** 2
+                        ).to_value(units.cm / units.s**2)
+                    ),
+                    Z=sample_params.meh,
+                    logTeff=comp_interp[2],
+                )
+            except ValueError:
+                self._gravdark_both[component] = numpy.nan
         self.a = (
             (
                 (self.per * units.day) ** 2
@@ -265,6 +250,23 @@ class BinaryParams(batman.TransitParams):
             / (2.0 * numpy.pi)
             * self.per
         )
+        self.inc = (
+            numpy.arccos(sample_params.primary_impact_param / self.a)
+            * 180.0
+            / numpy.pi
+        )
+        # If we wish to use true impact parameter:
+        # self.inc = numpy.arccos(
+        #    sample_params.primary_impact_param
+        #    / (
+        #        self.a
+        #        * numpy.sqrt(
+        #            (numpy.cos(ecc_anom) - self.ecc) ** 2
+        #            + ((1 - e) * numpy.sin(ecc_anom)) ** 2
+        #        )
+        #    )
+        # )
+
         self._t0_both["secondary"] = self._t0_both["primary"] + (
             self.per
             * self._eclipse_phase_difference(
