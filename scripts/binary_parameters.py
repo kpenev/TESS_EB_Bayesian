@@ -27,8 +27,7 @@ class BinaryParams(batman.TransitParams):
         for photsys in ["panstarss1", "2mass_spitzer_wise"]
     )
 
-    @staticmethod
-    def _eclipse_phase_difference(esinw, ecosw, coti=0.0):
+    def _eclipse_phase_difference(self, mid_transit=False):
         """
         Calculate the phase difference between secondary and primary eclipse.
 
@@ -42,12 +41,8 @@ class BinaryParams(batman.TransitParams):
         mid-transit.
 
         Args:
-            esinw(float):    Eccentricity times sin of longitude of periapsis.
-
-            ecosw(float):    Eccentricity times cos of longitude of periapsis.
-
-            coti(float):    1/tan of the inclination angle. Leave zero to
-                            disable the correction to Eq. 31 in Sterne 1940
+            mid_transit(bool):    If True, the phase of mid-transit is used. If
+                false, the time of conjunction.
 
         Returns:
             float:
@@ -55,14 +50,16 @@ class BinaryParams(batman.TransitParams):
                 and secondary eclipses.
         """
 
-        e_square = esinw**2 + ecosw**2
+        e_square = self.ecc**2
+        esinw = self.ecc * numpy.sin(self.w * numpy.pi / 180.0)
+        ecosw = self.ecc * numpy.cos(self.w * numpy.pi / 180.0)
 
         central_transits_rhs = ecosw * (1.0 - e_square) ** 0.5 / (
             1.0 - esinw**2
         ) + numpy.arctan(ecosw / (1.0 - e_square) ** 0.5)
 
-        if coti:
-            coti2 = coti**2
+        if mid_transit:
+            coti2 = numpy.tan(self.inc * numpy.pi / 180.0) ** (-2)
             inclination_correction = (
                 0.5
                 * ecosw
@@ -115,11 +112,7 @@ class BinaryParams(batman.TransitParams):
         #                   90.0)
 
         self._t0_both["secondary"] = self._t0_both["primary"] + (
-            self.per
-            * self._eclipse_phase_difference(
-                orbit["esinw"].get_value(""),
-                orbit["ecosw"].get_value(""),
-            )
+            self.per * self._eclipse_phase_difference()
         )
 
         self._linear_limbdark_both = {}
@@ -172,13 +165,8 @@ class BinaryParams(batman.TransitParams):
         """
 
         self.t0_perpass = sample_params.perpass_phase * sample_params.per
-        self.per = sample_params.per
-        self.ecc = (sample_params.ecosw**2 + sample_params.esinw**2) ** 0.5
-        self.w = (
-            numpy.arctan2(sample_params.esinw, sample_params.ecosw)
-            * 180.0
-            / numpy.pi
-        )
+        for param in ["per", "ecc", "w"]:
+            setattr(self, param, getattr(sample_params, param))
 
         mprimary = sample_params.mtotal / (1.0 + sample_params.mratio)
         interp_kwargs = {
@@ -246,7 +234,10 @@ class BinaryParams(batman.TransitParams):
 
         self._t0_both["primary"] = (
             self.t0_perpass
-            + E_to_M(nu_to_E(numpy.pi / 2 - self.w, self.ecc), self.ecc)
+            + E_to_M(
+                nu_to_E(numpy.pi / 2 - self.w * numpy.pi / 180, self.ecc),
+                self.ecc,
+            )
             / (2.0 * numpy.pi)
             * self.per
         )
@@ -268,10 +259,7 @@ class BinaryParams(batman.TransitParams):
         # )
 
         self._t0_both["secondary"] = self._t0_both["primary"] + (
-            self.per
-            * self._eclipse_phase_difference(
-                sample_params.esinw, sample_params.ecosw
-            )
+            self.per * self._eclipse_phase_difference()
         )
         self.teff_ratio = 10.0 ** (
             interpolated["secondary"][2] - interpolated["primary"][2]

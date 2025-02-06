@@ -17,8 +17,8 @@ SampleParams = namedtuple(
         "age_gyr",
         "meh",
         "per",
-        "esinw",
-        "ecosw",
+        "ecc",
+        "w",
         "primary_impact_param",
         "perpass_phase",
         "primary_limb_dark_1",
@@ -60,8 +60,8 @@ class LogLikelihood:
             age_gyr=10.0 ** uniform_prior(-3, 1.1),
             meh=0.5 * next(sample_entry),
             per=uniform_prior(0.5, 300),
-            esinw=uniform_prior(-0.99, 0.99),
-            ecosw=uniform_prior(-0.99, 0.99),
+            ecc=uniform_prior(0, 1),
+            w=uniform_prior(0, 360),
             primary_impact_param=uniform_prior(-10, 10),
             perpass_phase=uniform_prior(-1, 1),
             primary_limb_dark_1=uniform_prior(0, 1),
@@ -88,9 +88,79 @@ class LogLikelihood:
         for lc_collection in self._lcs.values():
             for header, _ in lc_collection.values():
                 assert header["TIMEPIXR"] == 0.5
-        self._sed = Green19Correction().get_absolute_magnitudes(tic_id)
+        self._sed = Green19Correction().get_absolute_magnitudes(tic_id)[0]
+        self._bad_spoc_mask = 0
+        for bad_ind in [1, 2, 3, 4, 5, 6, 8, 10, 13, 15]:
+            self._bad_spoc_mask |= 1 << (bad_ind - 1)
         print(f"LCs: {self._lcs!r}")
         print(f"SED: {self._sed!r}")
+
+    def calc_lc_log_likelihood(self, binary, lc_sys_err):
+        """Return log-likelihood of observing the TESS LCs for given binary."""
+
+        result = 0.0
+        for provenance, lc_collection in self._lcs.items():
+            for sector, (header, observed_lc) in lc_collection.items():
+                # TODO: figure out QLP
+                usable = numpy.logical_and(
+                    numpy.isfinite(observed_lc["PDCSAP_FLUX"]),
+                    numpy.isfinite(observed_lc["PDCSAP_FLUX_ERR"]),
+                )
+                usable = numpy.logical_and(
+                    usable,
+                    numpy.logical_not(
+                        observed_lc["QUALITY"] & self._bad_spoc_mask
+                    ),
+                )
+                print(
+                    f"{provenance} LC for sector {sector} has {usable.sum()} "
+                    "usable points"
+                )
+                observed_lc = observed_lc[usable]
+
+                lc_sq_errors = (
+                    observed_lc["PDCSAP_FLUX_ERR"] ** 2 + lc_sys_err**2
+                )
+                model_lc = binary.get_lightcurve(
+                    observed_lc["TIME"],
+                    supersample_factor=100,
+                    exp_time=header["INT_TIME"] * header["NUM_FRM"],
+                )
+
+                print(f"Model LC: {model_lc}")
+
+                model_lc *= (
+                    model_lc * observed_lc["PDCSAP_FLUX"] / lc_sq_errors
+                ).sum() / (model_lc**2 / lc_sq_errors).sum()
+
+                print(f"Square LC errors: {lc_sq_errors}")
+                result -= (
+                    (observed_lc["PDCSAP_FLUX"] - model_lc) ** 2 / lc_sq_errors
+                    + numpy.log(lc_sq_errors)
+                ).sum()
+                print(f"Log likelihood now: {result/2}")
+
+        return result / 2
+
+    def calc_sed_log_likelihood(self, binary, sed_sys_err):
+        """Return log-likelihood of observed SED for given binary."""
+
+        sed_sq_errors = self._sed[1] ** 2 + sed_sys_err**2
+        print(
+            "Adding SED log-likelihood."
+            f"Observed: {self._sed[0]}, model:{binary.absmag}, "
+            f"unc^2: {sed_sq_errors}"
+        )
+
+        result = (
+            -(
+                (self._sed[0] - binary.absmag) ** 2 / sed_sq_errors
+                + numpy.log(sed_sq_errors)
+            ).sum()
+            / 2
+        )
+        print(f"SED log-likelihood: {result}")
+        return result
 
     def __call__(self, mcmc_sample):
         """Return the log-likelihood of the given MCMC sample."""
@@ -99,40 +169,12 @@ class LogLikelihood:
         print(f"Sample params: {sample_params}")
         binary = Binary(from_mcmc=sample_params)
         print(f"Binary: {binary}")
-        result = 0.0
-        for provenance, lc_collection in self._lcs.items():
-            for sector, (header, observed_lc) in lc_collection.items():
-                finite = numpy.logical_and(
-                    numpy.isfinite(observed_lc["PDCSAP_FLUX"]),
-                    numpy.isfinite(observed_lc["PDCSAP_FLUX_ERR"]),
-                )
-                print(
-                    f"{provenance} LC for sector {sector} has {finite.sum()} "
-                    "finite points"
-                )
-                observed_lc = observed_lc[finite]
 
-                model_lc = binary.get_lightcurve(
-                    observed_lc["TIME"],
-                    supersample_factor=100,
-                    exp_time=header["INT_TIME"] * header["NUM_FRM"],
-                )
-                print(f'Model LC: {model_lc}')
-                lc_sq_errors = (
-                    observed_lc["PDCSAP_FLUX_ERR"] ** 2
-                    + sample_params.lc_sys**2
-                )
-                print(f'Square LC errors: {lc_sq_errors}')
-                result -= (
-                    (observed_lc["PDCSAP_FLUX"] - model_lc) ** 2 / lc_sq_errors
-                    + numpy.log(lc_sq_errors)
-                ).sum()
-                print(f'Log likelihood now: {result}')
-        result /= 2
-        print(f"Log LogLikelihood: {result!r}")
-        return result
+        return self.calc_lc_log_likelihood(
+            binary, sample_params.lc_sys
+        ) + self.calc_sed_log_likelihood(binary, sample_params.sed_sys)
 
 
 if __name__ == "__main__":
     log_likelihood = LogLikelihood(18250189)
-    log_likelihood(norm.rvs(size=21))
+    print(f"Final log likelihood: {log_likelihood(norm.rvs(size=21))!r}")
