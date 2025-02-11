@@ -27,6 +27,10 @@ class BinaryParams(batman.TransitParams):
         for photsys in ["panstarss1", "2mass_spitzer_wise"]
     )
 
+    meh_range = _cmd_interpolators[0][1].get_range("MH")
+    log_age_range = _cmd_interpolators[0][1].get_range("logAge")
+
+
     def _eclipse_phase_difference(self, mid_transit=False):
         """
         Calculate the phase difference between secondary and primary eclipse.
