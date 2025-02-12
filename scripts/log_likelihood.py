@@ -27,7 +27,7 @@ SampleParams = namedtuple(
         "ecc",
         "w",
         "primary_impact_param",
-        "perpass_phase",
+        "eclipse_time",
         "primary_limb_dark_1",
         "primary_limb_dark_2",
         "secondary_limb_dark_1",
@@ -184,7 +184,18 @@ class LogLikelihood:
             ).scalar_one_or_none()
 
             if cached_sed:
-                sed = [getattr(cached_sed, f + "p1") for f in "grizy"]
+                sed = (
+                    numpy.array(
+                        [getattr(cached_sed, f + "p1") for f in "grizy"]
+                        + [getattr(cached_sed, f + "2m") for f in "jhk"]
+                        + [cached_sed.w1, cached_sed.w2]
+                    ),
+                    numpy.array(
+                        [getattr(cached_sed, f + "p1_err") for f in "grizy"]
+                        + [getattr(cached_sed, f + "2m_err") for f in "jhk"]
+                        + [cached_sed.w1_err, cached_sed.w2_err]
+                    ),
+                )
 
             if cached_bls:
                 bls = {
@@ -206,11 +217,22 @@ class LogLikelihood:
             cache_session.add(
                 CachedSED(
                     tic_id=tic_id,
-                    gp1=self._sed[0],
-                    rp1=self._sed[1],
-                    ip1=self._sed[2],
-                    zp1=self._sed[3],
-                    yp1=self._sed[4],
+                    **{f + "p1": mag for f, mag in zip("grizy", self._sed[0])},
+                    **{
+                        f + "2m": mag for f, mag in zip("jhk", self._sed[0][5:])
+                    },
+                    w1=self._sed[0][8],
+                    w2=self._sed[0][9],
+                    **{
+                        f + "p1_err": err
+                        for f, err in zip("grizy", self._sed[1])
+                    },
+                    **{
+                        f + "2m_err": err
+                        for f, err in zip("jhk", self._sed[1][5:])
+                    },
+                    w1_err=self._sed[1][8],
+                    w2_err=self._sed[1][9],
                 )
             )
             cache_session.add(CachedBLS(tic_id=tic_id, **self._best_fit_bls))
@@ -300,11 +322,11 @@ class LogLikelihood:
             self._sed = Green19Correction().get_absolute_magnitudes(tic_id)[0]
             overwrite_cache = True
 
-        if overwrite_cache:
-            self._cache(tic_id)
-
         self._logger.debug("LCs: %s", repr(self._lcs))
         self._logger.debug("SED: %s", repr(self._sed))
+
+        if overwrite_cache:
+            self._cache(tic_id)
 
     def calc_lc_log_likelihood(self, binary, lc_sys_err):
         """Return log-likelihood of observing the TESS LCs for given binary."""
@@ -315,7 +337,7 @@ class LogLikelihood:
             model_lc = binary.get_lightcurve(
                 lightcurve["time"],
                 supersample_factor=100,
-                exp_time=header["INT_TIME"] * header["NUM_FRM"],
+                exp_time=header["exptime"],
             )
 
             self._logger.debug("Model LC:\n%s", repr(model_lc))
@@ -371,7 +393,7 @@ class LogLikelihood:
 
 
 if __name__ == "__main__":
-    test_tic = 11119600
+    test_tic = 18250189
     eb_cat = pandas.read_csv(prsa_ebs, index_col="tess_id")
     print(f"Prsa EB params for TIC {test_tic}: {eb_cat.loc[test_tic]!r}")
     logging.basicConfig(level=logging.INFO)
