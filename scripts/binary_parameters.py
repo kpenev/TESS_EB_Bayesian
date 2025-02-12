@@ -30,7 +30,6 @@ class BinaryParams(batman.TransitParams):
     meh_range = _cmd_interpolators[0][1].get_range("MH")
     log_age_range = _cmd_interpolators[0][1].get_range("logAge")
 
-
     def _eclipse_phase_difference(self, mid_transit=False):
         """
         Calculate the phase difference between secondary and primary eclipse.
@@ -168,7 +167,6 @@ class BinaryParams(batman.TransitParams):
             None
         """
 
-        self.t0_perpass = sample_params.perpass_phase * sample_params.per
         for param in ["per", "ecc", "w"]:
             setattr(self, param, getattr(sample_params, param))
 
@@ -236,15 +234,6 @@ class BinaryParams(batman.TransitParams):
         self.rstar = radii["primary"].to_value(units.R_sun)
         self.rp = radii["secondary"] / radii["primary"]
 
-        self._t0_both["primary"] = (
-            self.t0_perpass
-            + E_to_M(
-                nu_to_E(numpy.pi / 2 - self.w * numpy.pi / 180, self.ecc),
-                self.ecc,
-            )
-            / (2.0 * numpy.pi)
-            * self.per
-        )
         self.inc = (
             numpy.arccos(sample_params.primary_impact_param / self.a)
             * 180.0
@@ -262,9 +251,20 @@ class BinaryParams(batman.TransitParams):
         #    )
         # )
 
+        self._t0_both["primary"] = sample_params.eclipse_time
         self._t0_both["secondary"] = self._t0_both["primary"] + (
             self.per * self._eclipse_phase_difference()
         )
+        self.t0_perpass = (
+            self._t0_both["primary"]
+            - E_to_M(
+                nu_to_E(numpy.pi / 2 - self.w * numpy.pi / 180, self.ecc),
+                self.ecc,
+            )
+            / (2.0 * numpy.pi)
+            * self.per
+        )
+
         self.teff_ratio = 10.0 ** (
             interpolated["secondary"][2] - interpolated["primary"][2]
         )

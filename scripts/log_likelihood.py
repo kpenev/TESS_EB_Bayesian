@@ -3,14 +3,18 @@
 from collections import namedtuple
 import logging
 
+import pandas
 from matplotlib import pyplot
 import numpy
 from scipy.stats import norm, truncnorm
 from astropy.timeseries import BoxLeastSquares
+from sqlalchemy import select, delete
 
 from download_lcs import get_astroquery as download_lcs
 from extinction_correction import Green19Correction
 from binary import Binary
+from paths import prsa_ebs
+from cache_interface import CacheSession, CachedSED, CachedBLS
 
 SampleParams = namedtuple(
     "SampleParams",
@@ -59,7 +63,6 @@ class LogLikelihood:
             return low + (high - low) * norm.cdf(next(sample_entry))
 
         # TODO: pick good priors for eBEER coefficients
-        # TODO: limit [M/H] to CMD interpolation range
         return SampleParams(
             mtotal=uniform_prior(0.2, 4),
             mratio=uniform_prior(0.01, 2),
@@ -71,7 +74,12 @@ class LogLikelihood:
             ecc=uniform_prior(0, 1),
             w=uniform_prior(0, 360),
             primary_impact_param=uniform_prior(-10, 10),
-            perpass_phase=uniform_prior(-1, 1),
+            eclipse_time=uniform_prior(
+                self._best_fit_bls["transit_time"]
+                - 5.0 * self._best_fit_bls["period"],
+                self._best_fit_bls["transit_time"]
+                + 5.0 * self._best_fit_bls["period"],
+            ),
             primary_limb_dark_1=uniform_prior(0, 1),
             primary_limb_dark_2=uniform_prior(0, 1),
             secondary_limb_dark_1=uniform_prior(0, 1),
@@ -87,26 +95,31 @@ class LogLikelihood:
         )
 
     @staticmethod
-    def _get_best_fit_bls(observed_lc):
+    def _get_best_fit_bls(lightcurve):
         """Return the best fit orbital period and time of primary transit."""
 
         print(
             "Plotting:\n\t"
             + "\n\t".join(
                 [
-                    f't:{observed_lc["TIME"]!r}',
-                    f'y:{observed_lc["PDCSAP_FLUX"]!r}',
-                    f'dy:{observed_lc["PDCSAP_FLUX_ERR"]!r}',
+                    f't:{lightcurve["time"]!r}',
+                    f'y:{lightcurve["flux"]!r}',
+                    f'dy:{lightcurve["flux_err"]!r}',
                 ]
             )
         )
         model = BoxLeastSquares(
-            observed_lc["TIME"],
-            observed_lc["PDCSAP_FLUX"],
-            dy=observed_lc["PDCSAP_FLUX_ERR"],
+            lightcurve["time"],
+            lightcurve["flux"],
+            dy=lightcurve["flux_err"],
         )
         periodogram = model.autopower(numpy.linspace(0.02, 0.2, 100))
         best_index = numpy.argmax(periodogram.power)
+        if periodogram.duration[best_index] > 0.15:
+            assert periodogram.period[best_index] > 2
+            periodogram = model.autopower(numpy.linspace(0.1, 1.0, 100))
+            best_index = numpy.argmax(periodogram.power)
+
         result = {
             param: getattr(periodogram, param)[best_index]
             for param in ["period", "duration", "transit_time"]
@@ -114,9 +127,9 @@ class LogLikelihood:
 
         return result
 
-        pyplot.plot(observed_lc["TIME"], observed_lc["PDCSAP_FLUX"], "-g")
+        pyplot.plot(lightcurve["time"], lightcurve["flux"], "-g")
         transit_time = result["transit_time"]
-        while transit_time < observed_lc["TIME"][-1]:
+        while transit_time < lightcurve["time"][-1]:
             pyplot.axvline(x=transit_time - result["duration"] / 2, color="r")
             pyplot.axvline(x=transit_time + result["duration"] / 2, color="b")
             transit_time += result["period"]
@@ -131,53 +144,99 @@ class LogLikelihood:
         averaged = {
             param: 0 for param in ["period", "duration", "transit_time"]
         }
-        for bls_collection in best_fit_bls.values():
-            for bls_results in bls_collection.values():
-                min_transit_time = min(
-                    min_transit_time, bls_results["transit_time"]
+        for bls_results in best_fit_bls:
+            min_transit_time = min(
+                min_transit_time, bls_results["transit_time"]
+            )
+            total_points += bls_results["num_points"]
+            for param in ["period", "duration"]:
+                averaged[param] += (
+                    bls_results[param] * bls_results["num_points"]
                 )
-                total_points += bls_results["num_points"]
-                for param in ["period", "duration"]:
-                    averaged[param] += (
-                        bls_results[param] * bls_results["num_points"]
-                    )
         for param in ["period", "duration"]:
             averaged[param] /= total_points
 
-        for bls_collection in best_fit_bls.values():
-            for bls_results in bls_collection.values():
-                averaged["transit_time"] += (
-                    bls_results["transit_time"]
-                    - numpy.round(
-                        (bls_results["transit_time"] - min_transit_time)
-                        / averaged["period"]
-                    )
-                    * averaged["period"]
-                ) * bls_results["num_points"]
+        for bls_results in best_fit_bls:
+            averaged["transit_time"] += (
+                bls_results["transit_time"]
+                - numpy.round(
+                    (bls_results["transit_time"] - min_transit_time)
+                    / averaged["period"]
+                )
+                * averaged["period"]
+            ) * bls_results["num_points"]
         averaged["transit_time"] /= total_points
         return averaged
 
-    def __init__(self, tic_id):
+    def _get_cached(self, tic_id):
+        """Set-up using cached information for given TIC ID if available."""
+
+        sed = bls = None
+        # False positive
+        # pylint: disable=no-member
+        with CacheSession.begin() as cache_session:
+            # pylint: enable=no-member
+            cached_sed = cache_session.execute(
+                select(CachedSED).filter_by(tic_id=tic_id)
+            ).scalar_one_or_none()
+            cached_bls = cache_session.execute(
+                select(CachedBLS).filter_by(tic_id=tic_id)
+            ).scalar_one_or_none()
+
+            if cached_sed:
+                sed = [getattr(cached_sed, f + "p1") for f in "grizy"]
+
+            if cached_bls:
+                bls = {
+                    param: getattr(cached_bls, param)
+                    for param in ["period", "transit_time", "duration"]
+                }
+        return sed, bls
+
+    def _cache(self, tic_id):
+        """Add the SED ind best fit BLS to cache (overwriting if necessary)."""
+
+        # False positive
+        # pylint: disable=no-member
+        with CacheSession.begin() as cache_session:
+            # pylint: enable=no-member
+            cache_session.execute(delete(CachedSED).filter_by(tic_id=tic_id))
+            cache_session.execute(delete(CachedBLS).filter_by(tic_id=tic_id))
+
+            cache_session.add(
+                CachedSED(
+                    tic_id=tic_id,
+                    gp1=self._sed[0],
+                    rp1=self._sed[1],
+                    ip1=self._sed[2],
+                    zp1=self._sed[3],
+                    yp1=self._sed[4],
+                )
+            )
+            cache_session.add(CachedBLS(tic_id=tic_id, **self._best_fit_bls))
+
+    def __init__(self, tic_id, overwrite_cache=False):
         """Prepare to evaluate the log-likelihood for the given TIC ID."""
 
-        self._lcs = {
+        lcs = {
             provenance: download_lcs(tic_id, "all", provenance=provenance)
             for provenance in ["SPOC", "QLP"]
         }
+
+        # https://outerspace.stsci.edu/display/TESS/2.0+-+Data+Product+Overview#id-2.0-DataProductOverview-Table:CadenceQualityFlags
         bad_spoc_mask = 0
-        # See: https://outerspace.stsci.edu/display/TESS/2.0+-+Data+Product+Overview#id-2.0-DataProductOverview-Table:CadenceQualityFlags
         for bad_ind in [1, 2, 3, 4, 5, 6, 8, 10, 13, 15]:
             bad_spoc_mask |= 1 << (bad_ind - 1)
 
-        best_fit_bls = {}
-        for provenance, lc_collection in self._lcs.items():
+        self._sed, self._best_fit_bls = self._get_cached(tic_id)
+
+        best_fit_bls = []
+        self._lcs = []
+        for provenance, lc_collection in lcs.items():
             # TODO: figure out QLP
             if provenance == "QLP":
                 continue
-            print(f"Provenance: {provenance}")
-            best_fit_bls[provenance] = {}
             for sector, (header, observed_lc) in lc_collection.items():
-
                 assert header["TIMEPIXR"] == 0.5
                 usable = numpy.logical_and(
                     numpy.isfinite(observed_lc["PDCSAP_FLUX"]),
@@ -188,21 +247,47 @@ class LogLikelihood:
                     numpy.logical_not(observed_lc["QUALITY"] & bad_spoc_mask),
                 )
                 observed_lc = observed_lc[usable]
-                lc_collection[sector] = (header, observed_lc)
-                bls_results = self._get_best_fit_bls(observed_lc)
-                bls_results["num_points"] = usable.sum()
-                best_fit_bls[provenance][sector] = bls_results
-                self._logger.debug(
-                    "%s LC for sector %d has %s usable points, BLS results: "
-                    "period = %s, transit time = %s, duration = %s",
-                    provenance,
-                    sector,
-                    repr(bls_results["num_points"]),
-                    bls_results["period"],
-                    bls_results["transit_time"],
-                    bls_results["duration"],
+                formatted_lc = numpy.empty(
+                    usable.sum(),
+                    dtype=[
+                        ("time", ">f8"),
+                        ("flux", ">f4"),
+                        ("flux_err", ">f4"),
+                    ],
                 )
-        self._best_fit_bls = self._average_best_fit_bls(best_fit_bls)
+                formatted_lc["time"] = observed_lc["TIME"]
+                formatted_lc["flux"] = observed_lc["PDCSAP_FLUX"]
+                formatted_lc["flux_err"] = observed_lc["PDCSAP_FLUX_ERR"]
+                self._lcs.append(
+                    (
+                        {
+                            "exptime": header["INT_TIME"] * header["NUM_FRM"],
+                            "sector": sector,
+                            "provenance": provenance,
+                        },
+                        formatted_lc,
+                    )
+                )
+
+                if self._best_fit_bls is None or overwrite_cache:
+                    bls_results = self._get_best_fit_bls(formatted_lc)
+                    bls_results["num_points"] = formatted_lc.size
+                    best_fit_bls.append(bls_results)
+                    self._logger.debug(
+                        "%s LC for sector %d has %s usable points, BLS "
+                        "results: period = %s, transit time = %s, "
+                        "duration = %s",
+                        provenance,
+                        sector,
+                        repr(formatted_lc.size),
+                        bls_results["period"],
+                        bls_results["transit_time"],
+                        bls_results["duration"],
+                    )
+        if self._best_fit_bls is None or overwrite_cache:
+            self._best_fit_bls = self._average_best_fit_bls(best_fit_bls)
+            overwrite_cache = True
+
         self._logger.info(
             "Averaged best fit BLS: "
             "period = %s, transit time = %s, duration = %s",
@@ -211,7 +296,13 @@ class LogLikelihood:
             self._best_fit_bls["duration"],
         )
 
-        self._sed = Green19Correction().get_absolute_magnitudes(tic_id)[0]
+        if self._sed is None or overwrite_cache:
+            self._sed = Green19Correction().get_absolute_magnitudes(tic_id)[0]
+            overwrite_cache = True
+
+        if overwrite_cache:
+            self._cache(tic_id)
+
         self._logger.debug("LCs: %s", repr(self._lcs))
         self._logger.debug("SED: %s", repr(self._sed))
 
@@ -219,32 +310,26 @@ class LogLikelihood:
         """Return log-likelihood of observing the TESS LCs for given binary."""
 
         result = 0.0
-        for provenance, lc_collection in self._lcs.items():
-            # TODO: figure out QLP
-            if provenance == "QLP":
-                continue
-            for sector, (header, observed_lc) in lc_collection.items():
-                lc_sq_errors = (
-                    observed_lc["PDCSAP_FLUX_ERR"] ** 2 + lc_sys_err**2
-                )
-                model_lc = binary.get_lightcurve(
-                    observed_lc["TIME"],
-                    supersample_factor=100,
-                    exp_time=header["INT_TIME"] * header["NUM_FRM"],
-                )
+        for header, lightcurve in self._lcs:
+            lc_sq_errors = lightcurve["flux_err"] ** 2 + lc_sys_err**2
+            model_lc = binary.get_lightcurve(
+                lightcurve["time"],
+                supersample_factor=100,
+                exp_time=header["INT_TIME"] * header["NUM_FRM"],
+            )
 
-                self._logger.debug("Model LC:\n%s", repr(model_lc))
+            self._logger.debug("Model LC:\n%s", repr(model_lc))
 
-                model_lc *= (
-                    model_lc * observed_lc["PDCSAP_FLUX"] / lc_sq_errors
-                ).sum() / (model_lc**2 / lc_sq_errors).sum()
+            model_lc *= (model_lc * lightcurve["flux"] / lc_sq_errors).sum() / (
+                model_lc**2 / lc_sq_errors
+            ).sum()
 
-                self._logger.debug("Square LC errors: %s", repr(lc_sq_errors))
-                result -= (
-                    (observed_lc["PDCSAP_FLUX"] - model_lc) ** 2 / lc_sq_errors
-                    + numpy.log(lc_sq_errors)
-                ).sum()
-                self._logger.debug("Log likelihood now: %s", repr(result / 2))
+            self._logger.debug("Square LC errors: %s", repr(lc_sq_errors))
+            result -= (
+                (lightcurve["flux"] - model_lc) ** 2 / lc_sq_errors
+                + numpy.log(lc_sq_errors)
+            ).sum()
+            self._logger.debug("Log likelihood now: %s", repr(result / 2))
 
         return result / 2
 
@@ -277,17 +362,18 @@ class LogLikelihood:
         binary = Binary(from_mcmc=sample_params)
         self._logger.debug("Binary: %s", binary)
 
-        return self.calc_lc_log_likelihood(
+        result = self.calc_lc_log_likelihood(
             binary, sample_params.lc_sys
         ) + self.calc_sed_log_likelihood(binary, sample_params.sed_sys)
 
+        log_likelihood._logger.info("Final log likelihood: %s", repr(result))
+        return result
+
 
 if __name__ == "__main__":
+    test_tic = 11119600
+    eb_cat = pandas.read_csv(prsa_ebs, index_col="tess_id")
+    print(f"Prsa EB params for TIC {test_tic}: {eb_cat.loc[test_tic]!r}")
     logging.basicConfig(level=logging.INFO)
-    log_likelihood = LogLikelihood(11119600)
-    log_likelihood.get_best_fit_bls()
-    exit(0)
-    for _ in range(20):
-        log_likelihood._logger.info(
-            "Final log likelihood: %s", repr(log_likelihood(norm.rvs(size=21)))
-        )
+    log_likelihood = LogLikelihood(test_tic)
+    log_likelihood(norm.rvs(size=21))
