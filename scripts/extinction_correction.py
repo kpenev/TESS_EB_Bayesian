@@ -134,7 +134,10 @@ class Green19Correction:
 
         return [
             self._find_tic(tic_entry)
+            #False positive
+            #pylint: disable=no-member
             for tic_entry in Catalogs.query_criteria(catalog="Tic", ID=tic_ids)
+            #pylint: enable=no-member
         ]
 
     def get_absolute_magnitudes(self, tic_ids):

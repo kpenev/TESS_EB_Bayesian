@@ -1,10 +1,10 @@
 """Define the log-likelihood function to use for MCMC."""
 
-from collections import namedtuple
 import logging
 
 import pandas
-from matplotlib import pyplot
+from matplotlib import pyplot, use
+from matplotlib.backends.backend_pdf import PdfPages
 import numpy
 from scipy.stats import norm, truncnorm
 from astropy.timeseries import BoxLeastSquares
@@ -15,34 +15,7 @@ from extinction_correction import Green19Correction
 from binary import Binary
 from paths import prsa_ebs
 from cache_interface import CacheSession, CachedSED, CachedBLS
-
-SampleParams = namedtuple(
-    "SampleParams",
-    [
-        "mtotal",
-        "mratio",
-        "age_gyr",
-        "meh",
-        "per",
-        "ecc",
-        "w",
-        "primary_impact_param",
-        "eclipse_time",
-        "primary_limb_dark_1",
-        "primary_limb_dark_2",
-        "secondary_limb_dark_1",
-        "secondary_limb_dark_2",
-        "primary_prot",
-        "secondary_prot",
-        "primary_reflection_coef",
-        "secondary_reflection_coef",
-        "primary_beaming_coef",
-        "secondary_beaming_coef",
-        "lc_sys",
-        "sed_sys",
-    ],
-)
-
+from sample_params import SampleParams
 
 class LogLikelihood:
     """Class for calculating the log-likelihood function for a given EB."""
@@ -62,7 +35,6 @@ class LogLikelihood:
         def uniform_prior(low, high):
             return low + (high - low) * norm.cdf(next(sample_entry))
 
-        # TODO: pick good priors for eBEER coefficients
         return SampleParams(
             mtotal=uniform_prior(0.2, 4),
             mratio=uniform_prior(0.01, 2),
@@ -86,10 +58,10 @@ class LogLikelihood:
             secondary_limb_dark_2=uniform_prior(0, 1),
             primary_prot=uniform_prior(1, 100),
             secondary_prot=uniform_prior(1, 100),
-            primary_reflection_coef=uniform_prior(0, 2),
-            secondary_reflection_coef=uniform_prior(0, 2),
-            primary_beaming_coef=uniform_prior(0, 2),
-            secondary_beaming_coef=uniform_prior(0, 2),
+            primary_reflection_coef=10.0 ** uniform_prior(-2, 2),
+            secondary_reflection_coef=10.0 ** uniform_prior(-2, 2),
+            primary_beaming_coef=10.0 ** uniform_prior(-2, 2),
+            secondary_beaming_coef=10.0 ** uniform_prior(-2, 2),
             lc_sys=10.0 ** uniform_prior(-10, 0),
             sed_sys=10.0 ** uniform_prior(-10, 0),
         )
@@ -119,6 +91,12 @@ class LogLikelihood:
             assert periodogram.period[best_index] > 2
             periodogram = model.autopower(numpy.linspace(0.1, 1.0, 100))
             best_index = numpy.argmax(periodogram.power)
+        elif periodogram.duration[best_index] < 0.04:
+            assert periodogram.period[best_index] < 0.5
+            periodogram = model.autopower(
+                numpy.linspace(0.01, 0.05, 100), maximum_period=0.5
+            )
+            best_index = numpy.argmax(periodogram.power)
 
         result = {
             param: getattr(periodogram, param)[best_index]
@@ -127,13 +105,55 @@ class LogLikelihood:
 
         return result
 
-        pyplot.plot(lightcurve["time"], lightcurve["flux"], "-g")
-        transit_time = result["transit_time"]
-        while transit_time < lightcurve["time"][-1]:
-            pyplot.axvline(x=transit_time - result["duration"] / 2, color="r")
-            pyplot.axvline(x=transit_time + result["duration"] / 2, color="b")
-            transit_time += result["period"]
-        pyplot.show()
+    def plot_best_fit_bls(self, plot_fname):
+        """Create plots showing the best fit BLS paramaters on top of LCs."""
+
+        use("PDF")
+        with PdfPages(plot_fname) as pdf:
+            for header, lightcurve in self._lcs:
+                for label, axis in pyplot.subplot_mosaic(
+                    [["full", "full"], ["first", "last"]]
+                )[1].items():
+                    pyplot.sca(axis)
+                    pyplot.plot(
+                        lightcurve["time"],
+                        lightcurve["flux"],
+                        ".k",
+                        markersize=1,
+                    )
+                    transit_time = self._best_fit_bls["transit_time"]
+                    while transit_time < lightcurve["time"][-1]:
+                        if transit_time > lightcurve["time"][0]:
+                            pyplot.axvline(
+                                x=transit_time
+                                - self._best_fit_bls["duration"] / 2,
+                                color="r",
+                                linewidth=1,
+                            )
+                            pyplot.axvline(
+                                x=transit_time, color="g", linewidth=1
+                            )
+                            pyplot.axvline(
+                                x=transit_time
+                                + self._best_fit_bls["duration"] / 2,
+                                color="b",
+                                linewidth=1,
+                            )
+                        transit_time += self._best_fit_bls["period"]
+                        if label == "first":
+                            pyplot.xlim(
+                                lightcurve["time"][0],
+                                lightcurve["time"][0]
+                                + 3 * self._best_fit_bls["period"],
+                            )
+                        elif label == "last":
+                            pyplot.xlim(
+                                lightcurve["time"][-1]
+                                - 3 * self._best_fit_bls["period"],
+                                lightcurve["time"][-1],
+                            )
+                pyplot.suptitle(f"TIC {self.tic_id}, sector {header['sector']}")
+                pdf.savefig()
 
     @staticmethod
     def _average_best_fit_bls(best_fit_bls):
@@ -237,6 +257,12 @@ class LogLikelihood:
             )
             cache_session.add(CachedBLS(tic_id=tic_id, **self._best_fit_bls))
 
+    @property
+    def tic_id(self):
+        """The TIC identifier of the EB being modeled."""
+
+        return self._tic_id
+
     def __init__(self, tic_id, overwrite_cache=False):
         """Prepare to evaluate the log-likelihood for the given TIC ID."""
 
@@ -244,6 +270,7 @@ class LogLikelihood:
             provenance: download_lcs(tic_id, "all", provenance=provenance)
             for provenance in ["SPOC", "QLP"]
         }
+        self._tic_id = tic_id
 
         # https://outerspace.stsci.edu/display/TESS/2.0+-+Data+Product+Overview#id-2.0-DataProductOverview-Table:CadenceQualityFlags
         bad_spoc_mask = 0
@@ -257,6 +284,9 @@ class LogLikelihood:
         for provenance, lc_collection in lcs.items():
             # TODO: figure out QLP
             if provenance == "QLP":
+                if len(lc_collection) > 0:
+                    print(next(iter(lc_collection.values()))[0])
+                    exit(1)
                 continue
             for sector, (header, observed_lc) in lc_collection.items():
                 assert header["TIMEPIXR"] == 0.5
@@ -384,12 +414,24 @@ class LogLikelihood:
         binary = Binary(from_mcmc=sample_params)
         self._logger.debug("Binary: %s", binary)
 
-        result = self.calc_lc_log_likelihood(
-            binary, sample_params.lc_sys
-        ) + self.calc_sed_log_likelihood(binary, sample_params.sed_sys)
+        result = (
+            norm.logpdf(mcmc_sample).sum()
+            + self.calc_lc_log_likelihood(binary, sample_params.lc_sys)
+            + self.calc_sed_log_likelihood(binary, sample_params.sed_sys)
+        )
 
         log_likelihood._logger.info("Final log likelihood: %s", repr(result))
-        return result
+        return (result,) + sample_params
+
+
+class LogLikelihoodPriorsOnly(LogLikelihood):
+    """Allows MCMC sampling using just the priors for testing."""
+
+    def __call__(self, mcmc_sample):
+        """Return the log-likelihood of the given MCMC sample."""
+
+        sample_params = self._prior_transform(mcmc_sample)
+        return (norm.logpdf(mcmc_sample).sum(),) + sample_params
 
 
 if __name__ == "__main__":
@@ -397,5 +439,6 @@ if __name__ == "__main__":
     eb_cat = pandas.read_csv(prsa_ebs, index_col="tess_id")
     print(f"Prsa EB params for TIC {test_tic}: {eb_cat.loc[test_tic]!r}")
     logging.basicConfig(level=logging.INFO)
-    log_likelihood = LogLikelihood(test_tic)
+    log_likelihood = LogLikelihoodPriorsOnly(test_tic)
+    log_likelihood.plot_best_fit_bls("best_fit_bls.pdf")
     log_likelihood(norm.rvs(size=21))

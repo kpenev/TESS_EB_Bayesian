@@ -12,3 +12,5 @@ prsa_ebs = path.join(
 )
 
 cache_db = path.join(data_dir, "mcmc_cache.sqlite")
+results_dir = path.join(path.dirname(path.dirname(path.abspath(__file__))),
+                        "results")
