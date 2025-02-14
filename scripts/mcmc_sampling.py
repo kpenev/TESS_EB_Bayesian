@@ -43,9 +43,9 @@ def parse_command_line():
         "tic_id", type=int, help="The TIC identifier to sample."
     )
     parser.add_argument(
-        '--priors-only',
-        action='store_true',
-        help='If passed, the distribution sampled is just the priors.'
+        "--priors-only",
+        action="store_true",
+        help="If passed, the distribution sampled is just the priors.",
     )
     parser.add_argument(
         "--samples-fname-pattern",
@@ -151,7 +151,10 @@ def main(config):
 
     setup_process(**vars(config))
     backend = get_backend(config)
-    log_likelihood = LogLikelihoodPriorsOnly(config.tic_id)
+    log_likelihood = (
+        LogLikelihoodPriorsOnly if config.priors_only else LogLikelihood
+    )(config.tic_id)
+
     initial_state = (
         None
         if backend.iteration > 0

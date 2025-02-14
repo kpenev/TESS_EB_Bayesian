@@ -93,7 +93,6 @@ class BinaryParams(batman.TransitParams):
         """Set the per-star attributes to match the primary."""
 
         for attr in self._per_star_attr:
-            print(f"Setting {attr}")
             setattr(self, attr, getattr(self, f"_{attr}_both")["primary"])
 
     def set_from_phoebe(self, phoebe_binary):

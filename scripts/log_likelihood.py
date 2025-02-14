@@ -43,7 +43,7 @@ class LogLikelihood:
                 norm.cdf(next(sample_entry)), *Binary.meh_range, scale=0.5
             ),
             per=uniform_prior(0.5, 300),
-            ecc=uniform_prior(0, 1),
+            ecc=uniform_prior(0, 0.99),
             w=uniform_prior(0, 360),
             primary_impact_param=uniform_prior(-10, 10),
             eclipse_time=uniform_prior(
@@ -417,7 +417,7 @@ class LogLikelihood:
             + self.calc_sed_log_likelihood(binary, sample_params.sed_sys)
         )
 
-        log_likelihood._logger.info("Final log likelihood: %s", repr(result))
+        self._logger.debug("Final log likelihood: %s", repr(result))
         return (result,) + sample_params
 
 
