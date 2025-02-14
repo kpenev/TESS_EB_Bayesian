@@ -284,9 +284,6 @@ class LogLikelihood:
         for provenance, lc_collection in lcs.items():
             # TODO: figure out QLP
             if provenance == "QLP":
-                if len(lc_collection) > 0:
-                    print(next(iter(lc_collection.values()))[0])
-                    exit(1)
                 continue
             for sector, (header, observed_lc) in lc_collection.items():
                 assert header["TIMEPIXR"] == 0.5
