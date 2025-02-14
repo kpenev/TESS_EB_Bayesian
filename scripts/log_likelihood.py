@@ -22,6 +22,7 @@ class LogLikelihood:
     """Class for calculating the log-likelihood function for a given EB."""
 
     _logger = logging.getLogger(__name__)
+    period_range = (0.5, 300)
 
     def _prior_transform(self, mcmc_sample):
         """
@@ -43,7 +44,7 @@ class LogLikelihood:
             meh=truncnorm.ppf(
                 norm.cdf(next(sample_entry)), *Binary.meh_range, scale=0.5
             ),
-            per=uniform_prior(0.5, 300),
+            per=uniform_prior(*self.period_range),
             ecc=uniform_prior(0, 0.96),
             w=uniform_prior(0, 360),
             primary_impact_param=uniform_prior(-10, 10),
@@ -264,6 +265,12 @@ class LogLikelihood:
 
         return self._tic_id
 
+    @property
+    def best_fit_bls(self):
+        """The best fit BLS parameters."""
+
+        return self._best_fit_bls
+
     def __init__(self, tic_id, overwrite_cache=False):
         """Prepare to evaluate the log-likelihood for the given TIC ID."""
 
@@ -337,6 +344,8 @@ class LogLikelihood:
         if self._best_fit_bls is None or overwrite_cache:
             self._best_fit_bls = self._average_best_fit_bls(best_fit_bls)
             overwrite_cache = True
+
+        assert self._best_fit_bls['period'] > self.period_range[0]
 
         self._logger.info(
             "Averaged best fit BLS: "
