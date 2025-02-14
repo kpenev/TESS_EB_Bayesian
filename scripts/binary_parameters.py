@@ -220,6 +220,7 @@ class BinaryParams(batman.TransitParams):
                     logTeff=comp_interp[2],
                 )
             except ValueError:
+                self._out_of_range.append(f'{component}:logg')
                 self._gravdark_both[component] = numpy.nan
         self.a = (
             (
@@ -233,11 +234,15 @@ class BinaryParams(batman.TransitParams):
         self.rstar = radii["primary"].to_value(units.R_sun)
         self.rp = radii["secondary"] / radii["primary"]
 
-        self.inc = (
-            numpy.arccos(sample_params.primary_impact_param / self.a)
-            * 180.0
-            / numpy.pi
-        )
+        if numpy.abs(sample_params.primary_impact_param) > self.a:
+            self._out_of_range.append('impact_param')
+            self.inc = numpy.nan
+        else:
+            self.inc = (
+                numpy.arccos(sample_params.primary_impact_param / self.a)
+                * 180.0
+                / numpy.pi
+            )
         # If we wish to use true impact parameter:
         # self.inc = numpy.arccos(
         #    sample_params.primary_impact_param
@@ -287,6 +292,12 @@ class BinaryParams(batman.TransitParams):
         )
         self._set_per_star()
 
+    @property
+    def out_of_range(self):
+        """Return list of parameters that are out of range."""
+
+        return self._out_of_range
+
     def __init__(self, *, from_phoebe=None, from_mcmc=None):
         """Set the model parameters either from PHOEBE binary or MCMC sample."""
 
@@ -314,6 +325,7 @@ class BinaryParams(batman.TransitParams):
         self.t0_perpass = None
         self.inverted = False
         self.absmag = None
+        self._out_of_range = []
         for attr in self._per_star_attr:
             setattr(self, f"_{attr}_both", {"primary": None, "secondary": None})
 
@@ -454,7 +466,8 @@ class BinaryParams(batman.TransitParams):
             f"GDcoef={self._gravdark_both}, reflect "
             f"coef={self._reflection_coef_both}, "
             f"beaming coef={self._beaming_coef_both}, "
-            f"Absolute magnitudes={self.absmag}"
+            f"Absolute magnitudes={self.absmag}. Out of range: "
+            f"{self.out_of_range}"
         )
         # pylint: enable=no-member
 

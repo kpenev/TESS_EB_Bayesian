@@ -17,6 +17,7 @@ from paths import prsa_ebs
 from cache_interface import CacheSession, CachedSED, CachedBLS
 from sample_params import SampleParams
 
+
 class LogLikelihood:
     """Class for calculating the log-likelihood function for a given EB."""
 
@@ -43,7 +44,7 @@ class LogLikelihood:
                 norm.cdf(next(sample_entry)), *Binary.meh_range, scale=0.5
             ),
             per=uniform_prior(0.5, 300),
-            ecc=uniform_prior(0, 0.99),
+            ecc=uniform_prior(0, 0.96),
             w=uniform_prior(0, 360),
             primary_impact_param=uniform_prior(-10, 10),
             eclipse_time=uniform_prior(
@@ -409,6 +410,12 @@ class LogLikelihood:
         sample_params = self._prior_transform(mcmc_sample)
         self._logger.debug("Sample params: %s", sample_params)
         binary = Binary(from_mcmc=sample_params)
+        if binary.out_of_range:
+            self._logger.warning(
+                "Out of range parameters:\n\t"
+                + "\n\t".join(binary.out_of_range)
+            )
+            return (-numpy.inf,) + sample_params
         self._logger.debug("Binary: %s", binary)
 
         result = (
