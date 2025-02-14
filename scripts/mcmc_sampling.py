@@ -199,9 +199,7 @@ def main(config):
     ) as pool:
         EnsembleSampler(
             *backend.shape, log_likelihood, backend=backend, pool=pool
-        ).run_mcmc(
-            initial_state, nsteps=1
-        )  # 1024**2)
+        ).run_mcmc(initial_state, nsteps=1024**2)
 
 
 if __name__ == "__main__":
