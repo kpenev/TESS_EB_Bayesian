@@ -279,8 +279,8 @@ class BinaryParams(batman.TransitParams):
                 getattr(sample_params, f"{component}_limb_dark_2"),
             ]
             if sum(self._u_both[component]) > 1:
-                self._u_both[component][0] = 1.0 - self._u_both[component][0]
-                self._u_both[component][1] = 1.0 - self._u_both[component][1]
+                self._u_both[component][0] = 1.0 - self._u_both[component][1]
+                self._u_both[component][1] = 1.0 - self._u_both[component][0]
 
 
             # From least squares diff between linear and quadratic profiles

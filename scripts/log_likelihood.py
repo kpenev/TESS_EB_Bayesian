@@ -64,10 +64,44 @@ class LogLikelihood:
             )
             best_index = numpy.argmax(periodogram.power)
 
+        index_range = (
+            numpy.where(
+                periodogram.power[:best_index]
+                < 0.3 * periodogram.power[best_index]
+            )[0][-1],
+            numpy.where(
+                periodogram.power[best_index:]
+                < 0.3 * periodogram.power[best_index]
+            )[0][0]
+            + best_index,
+        )
+        # pyplot.plot(periodogram.period, periodogram.power, "-k")
+        # for color, i in zip(
+        #    "rgb", [index_range[0], best_index, index_range[1]]
+        # ):
+        #    pyplot.axvline(x=periodogram.period[i], color=color)
+        # pyplot.show()
+
+        assert index_range[0] < best_index
+        assert index_range[1] > best_index
+
         result = {
             param: getattr(periodogram, param)[best_index]
             for param in ["period", "duration", "transit_time"]
         }
+        result["period_uncertainty"] = max(
+            result["period"] - periodogram.period[index_range[0]],
+            periodogram.period[index_range[1]] - result["period"],
+        )
+        pyplot.plot(periodogram.period, periodogram.power, "-k")
+        pyplot.axvline(
+            x=result["period"] - result["period_uncertainty"], color="r"
+        )
+        pyplot.axvline(x=result["period"], color="g")
+        pyplot.axvline(
+            x=result["period"] + result["period_uncertainty"], color="b"
+        )
+        pyplot.show()
 
         return result
 
@@ -128,7 +162,13 @@ class LogLikelihood:
         min_transit_time = numpy.inf
         total_points = 0
         averaged = {
-            param: 0 for param in ["period", "duration", "transit_time"]
+            param: 0
+            for param in [
+                "period",
+                "duration",
+                "transit_time",
+                "period_uncertainty",
+            ]
         }
         for bls_results in best_fit_bls:
             min_transit_time = min(
@@ -139,6 +179,10 @@ class LogLikelihood:
                 averaged[param] += (
                     bls_results[param] * bls_results["num_points"]
                 )
+            averaged["period_uncertainty"] = max(
+                averaged["period_uncertainty"],
+                bls_results["period_uncertainty"],
+            )
         for param in ["period", "duration"]:
             averaged[param] /= total_points
 
@@ -186,7 +230,12 @@ class LogLikelihood:
             if cached_bls:
                 bls = {
                     param: getattr(cached_bls, param)
-                    for param in ["period", "transit_time", "duration"]
+                    for param in [
+                        "period",
+                        "transit_time",
+                        "duration",
+                        "period_uncertainty",
+                    ]
                 }
         return sed, bls
 
@@ -373,7 +422,7 @@ class LogLikelihood:
                 norm.cdf(sample_entry), *self._range.meh, scale=0.5
             )
         low, high = getattr(self._range, param)
-        value = low + (high - low) * norm.cdf(next(sample_entry))
+        value = low + (high - low) * norm.cdf(sample_entry)
         if param in self._log_uniform:
             return 10.0**value
         return value
@@ -421,9 +470,15 @@ class LogLikelihood:
                 model_lc**2 / lc_sq_errors
             ).sum()
 
-            pyplot.plot(lightcurve["time"], lightcurve["flux"], "-r")
-            pyplot.plot(lightcurve["time"], model_lc, "-b")
-            pyplot.show()
+            if getattr(self, "enable_plots", False):
+                pyplot.plot(lightcurve["time"], lightcurve["flux"], "-r")
+                pyplot.plot(lightcurve["time"], model_lc, "-b")
+                if isinstance(self.enable_plots, str):
+                    pyplot.savefig(self.enable_plots.format_map(header))
+                else:
+                    pyplot.show()
+                pyplot.cla()
+                pyplot.clf()
 
             self._logger.debug("Square LC errors: %s", repr(lc_sq_errors))
             result -= (
@@ -498,30 +553,31 @@ if __name__ == "__main__":
     print(f"Prsa EB params for TIC {test_tic}: {eb_cat.loc[test_tic]!r}")
     logging.basicConfig(level=logging.DEBUG)
     log_likelihood = LogLikelihood(test_tic)
+    log_likelihood.enable_plots = True#"TESS189639080_s{sector}_best_fit_model3.pdf"
     log_likelihood(
         numpy.array(
             [
-                3.43006427e00,
-                -1.38472529e-01,
-                -7.26446667e-01,
-                -3.07858103e-01,
-                -2.37404131e00,
-                -1.51621602e-01,
-                -1.31875613e-01,
-                1.17938784e-03,
-                -7.99499993e-02,
-                -1.82006777e00,
-                1.57130943e00,
-                -3.45372307e-01,
-                -5.36256416e-02,
-                4.09258021e-01,
-                1.30624344e00,
-                1.22664323e-02,
-                -8.32499919e-01,
-                -7.73469419e-01,
-                -2.11364874e00,
-                8.98415083e-01,
-                4.75559945e-01,
+                -1.24408646e00,
+                -3.71483063e00,
+                1.41475127e-01,
+                8.34203817e-01,
+                -2.37418813e00,
+                -2.24196430e00,
+                -8.30168794e-02,
+                8.71420582e-06,
+                -1.08640447e-03,
+                1.72306533e00,
+                -7.87778788e-01,
+                -2.47859827e00,
+                3.18854784e00,
+                9.90237029e-01,
+                7.10868651e-01,
+                -3.36746148e-01,
+                5.12819850e-01,
+                -2.99760512e00,
+                2.40542923e00,
+                -7.98815313e-01,
+                -8.75360123e-01,
             ]
         )
     )
