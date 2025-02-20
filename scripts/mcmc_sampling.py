@@ -8,10 +8,8 @@ from multiprocessing import Pool
 
 from configargparse import ArgumentParser, DefaultsFormatter
 from emcee import EnsembleSampler
-from scipy.stats import norm
 
 from general_purpose_python_modules.multiprocessing_util import (
-    get_code_version_str,
     setup_process,
     setup_process_map,
 )
@@ -19,6 +17,7 @@ from general_purpose_python_modules.multiprocessing_util import (
 from hacked_emcee_hdf5_backend import HDFBackend
 from log_likelihood import SampleParams, LogLikelihood, LogLikelihoodPriorsOnly
 from paths import results_dir
+from init_mcmc import get_initial_mcmc_state
 
 _logger = logging.getLogger(__name__)
 
@@ -146,35 +145,6 @@ def get_backend(config):
     return backend
 
 
-def get_initial_state(num_walkers, best_fit_bls, period_range):
-    """Get suitable initial state to start MCMC from."""
-
-    num_params = len(SampleParams._fields)
-    initial_state = norm.rvs(size=num_walkers * num_params).reshape(
-        num_walkers, num_params
-    )
-    min_pinit_factor = 5
-    while best_fit_bls["period"] / min_pinit_factor < period_range[0]:
-        min_pinit_factor -= 1
-
-    max_pinit_factor = 5
-    while best_fit_bls["period"] * max_pinit_factor > period_range[1]:
-        max_pinit_factor -= 1
-
-    per_ind = SampleParams._fields.index("per")
-    for walker_ind in range(num_walkers):
-        pinit_bin = walker_ind % (max_pinit_factor + min_pinit_factor - 1)
-        if pinit_bin < min_pinit_factor:
-            period = best_fit_bls["period"] / (min_pinit_factor - pinit_bin)
-        else:
-            period = best_fit_bls["period"] * (pinit_bin + 2 - min_pinit_factor)
-        initial_state[walker_ind, per_ind] = norm.ppf(
-            (period - period_range[0]) / (period_range[1] - period_range[0])
-        )
-
-    return initial_state
-
-
 def main(config):
     """Avoid polluting global namespace."""
 
@@ -186,11 +156,7 @@ def main(config):
 
     initial_state = None
     if backend.iteration == 0:
-        initial_state = get_initial_state(
-            backend.shape[0],
-            log_likelihood.best_fit_bls,
-            log_likelihood.period_range,
-        )
+        initial_state = get_initial_mcmc_state(log_likelihood, config)
 
     with Pool(
         config.num_parallel,

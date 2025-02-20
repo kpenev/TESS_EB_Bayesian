@@ -22,51 +22,15 @@ class LogLikelihood:
     """Class for calculating the log-likelihood function for a given EB."""
 
     _logger = logging.getLogger(__name__)
-    period_range = (0.5, 300)
-
-    def _prior_transform(self, mcmc_sample):
-        """
-        Return the `InputParams`_ and systematic errors per given MCMC sample.
-
-        Apply a transformation to go identical random variables with Normal
-        priors to the paramaters needed to evaluate the likelihood.
-        """
-
-        sample_entry = iter(mcmc_sample)
-
-        def uniform_prior(low, high):
-            return low + (high - low) * norm.cdf(next(sample_entry))
-
-        return SampleParams(
-            mtotal=uniform_prior(0.2, 4),
-            mratio=uniform_prior(0.01, 2),
-            age_gyr=10.0 ** uniform_prior(-3, 1.1),
-            meh=truncnorm.ppf(
-                norm.cdf(next(sample_entry)), *Binary.meh_range, scale=0.5
-            ),
-            per=uniform_prior(*self.period_range),
-            ecc=uniform_prior(0, 0.96),
-            w=uniform_prior(0, 360),
-            primary_impact_param=uniform_prior(-10, 10),
-            eclipse_time=uniform_prior(
-                self._best_fit_bls["transit_time"]
-                - 5.0 * self._best_fit_bls["period"],
-                self._best_fit_bls["transit_time"]
-                + 5.0 * self._best_fit_bls["period"],
-            ),
-            primary_limb_dark_1=uniform_prior(0, 1),
-            primary_limb_dark_2=uniform_prior(0, 1),
-            secondary_limb_dark_1=uniform_prior(0, 1),
-            secondary_limb_dark_2=uniform_prior(0, 1),
-            primary_prot=uniform_prior(1, 100),
-            secondary_prot=uniform_prior(1, 100),
-            primary_reflection_coef=10.0 ** uniform_prior(-2, 2),
-            secondary_reflection_coef=10.0 ** uniform_prior(-2, 2),
-            primary_beaming_coef=10.0 ** uniform_prior(-2, 2),
-            secondary_beaming_coef=10.0 ** uniform_prior(-2, 2),
-            lc_sys=10.0 ** uniform_prior(-10, 0),
-            sed_sys=10.0 ** uniform_prior(-10, 0),
-        )
+    _log_uniform = [
+        "age_gyr",
+        "primary_reflection_coef",
+        "secondary_reflection_coef",
+        "primary_beaming_coef",
+        "secondary_beaming_coef",
+        "lc_sys",
+        "sed_sys",
+    ]
 
     @staticmethod
     def _get_best_fit_bls(lightcurve):
@@ -100,10 +64,44 @@ class LogLikelihood:
             )
             best_index = numpy.argmax(periodogram.power)
 
+        index_range = (
+            numpy.where(
+                periodogram.power[:best_index]
+                < 0.3 * periodogram.power[best_index]
+            )[0][-1],
+            numpy.where(
+                periodogram.power[best_index:]
+                < 0.3 * periodogram.power[best_index]
+            )[0][0]
+            + best_index,
+        )
+        # pyplot.plot(periodogram.period, periodogram.power, "-k")
+        # for color, i in zip(
+        #    "rgb", [index_range[0], best_index, index_range[1]]
+        # ):
+        #    pyplot.axvline(x=periodogram.period[i], color=color)
+        # pyplot.show()
+
+        assert index_range[0] < best_index
+        assert index_range[1] > best_index
+
         result = {
             param: getattr(periodogram, param)[best_index]
             for param in ["period", "duration", "transit_time"]
         }
+        result["period_uncertainty"] = max(
+            result["period"] - periodogram.period[index_range[0]],
+            periodogram.period[index_range[1]] - result["period"],
+        )
+        pyplot.plot(periodogram.period, periodogram.power, "-k")
+        pyplot.axvline(
+            x=result["period"] - result["period_uncertainty"], color="r"
+        )
+        pyplot.axvline(x=result["period"], color="g")
+        pyplot.axvline(
+            x=result["period"] + result["period_uncertainty"], color="b"
+        )
+        pyplot.show()
 
         return result
 
@@ -164,7 +162,13 @@ class LogLikelihood:
         min_transit_time = numpy.inf
         total_points = 0
         averaged = {
-            param: 0 for param in ["period", "duration", "transit_time"]
+            param: 0
+            for param in [
+                "period",
+                "duration",
+                "transit_time",
+                "period_uncertainty",
+            ]
         }
         for bls_results in best_fit_bls:
             min_transit_time = min(
@@ -175,6 +179,10 @@ class LogLikelihood:
                 averaged[param] += (
                     bls_results[param] * bls_results["num_points"]
                 )
+            averaged["period_uncertainty"] = max(
+                averaged["period_uncertainty"],
+                bls_results["period_uncertainty"],
+            )
         for param in ["period", "duration"]:
             averaged[param] /= total_points
 
@@ -222,7 +230,12 @@ class LogLikelihood:
             if cached_bls:
                 bls = {
                     param: getattr(cached_bls, param)
-                    for param in ["period", "transit_time", "duration"]
+                    for param in [
+                        "period",
+                        "transit_time",
+                        "duration",
+                        "period_uncertainty",
+                    ]
                 }
         return sed, bls
 
@@ -318,7 +331,9 @@ class LogLikelihood:
                 self._lcs.append(
                     (
                         {
-                            "exptime": header["INT_TIME"] * header["NUM_FRM"],
+                            "exptime": (
+                                header["INT_TIME"] * header["NUM_FRM"] / 86400
+                            ),
                             "sector": sector,
                             "provenance": provenance,
                         },
@@ -345,7 +360,36 @@ class LogLikelihood:
             self._best_fit_bls = self._average_best_fit_bls(best_fit_bls)
             overwrite_cache = True
 
-        assert self._best_fit_bls['period'] > self.period_range[0]
+        self._range = SampleParams(
+            mtotal=(0.2, 4),
+            mratio=(0.01, 2),
+            age_gyr=(-3, 1.1),
+            meh=Binary.meh_range,
+            per=(0.5, 300),
+            ecc=(0, 0.96),
+            w=(0, 360),
+            primary_impact_param=(-10, 10),
+            eclipse_time=(
+                self._best_fit_bls["transit_time"]
+                - 5.0 * self._best_fit_bls["period"],
+                self._best_fit_bls["transit_time"]
+                + 5.0 * self._best_fit_bls["period"],
+            ),
+            primary_limb_dark_1=(0, 1),
+            primary_limb_dark_2=(0, 1),
+            secondary_limb_dark_1=(0, 1),
+            secondary_limb_dark_2=(0, 1),
+            primary_prot=(1, 100),
+            secondary_prot=(1, 100),
+            primary_reflection_coef=(-2, 2),
+            secondary_reflection_coef=(-2, 2),
+            primary_beaming_coef=(-2, 2),
+            secondary_beaming_coef=(-2, 2),
+            lc_sys=(-10, 0),
+            sed_sys=(-10, 0),
+        )
+
+        assert self._best_fit_bls["period"] > self._range.per[0]
 
         self._logger.info(
             "Averaged best fit BLS: "
@@ -365,6 +409,49 @@ class LogLikelihood:
         if overwrite_cache:
             self._cache(tic_id)
 
+    def prior_transform(self, param, sample_entry):
+        """
+        Return the value of the given parameter given a sample entry.
+
+        Apply a transformation to go from identical random variables with Normal
+        priors to the paramaters needed to evaluate the likelihood.
+        """
+
+        if param == "meh":
+            return truncnorm.ppf(
+                norm.cdf(sample_entry), *self._range.meh, scale=0.5
+            )
+        low, high = getattr(self._range, param)
+        value = low + (high - low) * norm.cdf(sample_entry)
+        if param in self._log_uniform:
+            return 10.0**value
+        return value
+
+    def inverse_prior(self, param, value):
+        """Return value and index within sample to set param to given value."""
+
+        param_ind = SampleParams._fields.index(param)
+        if param == "meh":
+            return param_ind, norm.ppf(
+                truncnorm.cdf(value, *self._range.meh, scale=0.5)
+            )
+        if param in self._log_uniform:
+            value = numpy.log10(value)
+        low, high = getattr(self._range, param)
+        return param_ind, norm.ppf((value - low) / (high - low))
+
+    def get_sample_params(self, mcmc_sample):
+        """Return prior-transformed parameters given sample."""
+
+        return SampleParams(
+            *[
+                self.prior_transform(param, sample_entry)
+                for param, sample_entry in zip(
+                    SampleParams._fields, mcmc_sample
+                )
+            ]
+        )
+
     def calc_lc_log_likelihood(self, binary, lc_sys_err):
         """Return log-likelihood of observing the TESS LCs for given binary."""
 
@@ -382,6 +469,16 @@ class LogLikelihood:
             model_lc *= (model_lc * lightcurve["flux"] / lc_sq_errors).sum() / (
                 model_lc**2 / lc_sq_errors
             ).sum()
+
+            if getattr(self, "enable_plots", False):
+                pyplot.plot(lightcurve["time"], lightcurve["flux"], "-r")
+                pyplot.plot(lightcurve["time"], model_lc, "-b")
+                if isinstance(self.enable_plots, str):
+                    pyplot.savefig(self.enable_plots.format_map(header))
+                else:
+                    pyplot.show()
+                pyplot.cla()
+                pyplot.clf()
 
             self._logger.debug("Square LC errors: %s", repr(lc_sq_errors))
             result -= (
@@ -416,13 +513,13 @@ class LogLikelihood:
     def __call__(self, mcmc_sample):
         """Return the log-likelihood of the given MCMC sample."""
 
-        sample_params = self._prior_transform(mcmc_sample)
+        sample_params = self.get_sample_params(mcmc_sample)
         self._logger.debug("Sample params: %s", sample_params)
         binary = Binary(from_mcmc=sample_params)
         if binary.out_of_range:
             self._logger.warning(
-                "Out of range parameters:\n\t"
-                + "\n\t".join(binary.out_of_range)
+                "Out of range parameters:\n\t%s",
+                "\n\t".join(binary.out_of_range),
             )
             return (-numpy.inf,) + sample_params
         self._logger.debug("Binary: %s", binary)
@@ -433,7 +530,9 @@ class LogLikelihood:
             + self.calc_sed_log_likelihood(binary, sample_params.sed_sys)
         )
 
-        self._logger.debug("Final log likelihood: %s", repr(result))
+        self._logger.debug(
+            "Final log likelihood(%s): %s", repr(mcmc_sample), repr(result)
+        )
         return (result,) + sample_params
 
 
@@ -443,15 +542,43 @@ class LogLikelihoodPriorsOnly(LogLikelihood):
     def __call__(self, mcmc_sample):
         """Return the log-likelihood of the given MCMC sample."""
 
-        sample_params = self._prior_transform(mcmc_sample)
-        return (norm.logpdf(mcmc_sample).sum(),) + sample_params
+        return (norm.logpdf(mcmc_sample).sum(),) + self.get_sample_params(
+            mcmc_sample
+        )
 
 
 if __name__ == "__main__":
-    test_tic = 18250189
+    test_tic = 189639080
     eb_cat = pandas.read_csv(prsa_ebs, index_col="tess_id")
     print(f"Prsa EB params for TIC {test_tic}: {eb_cat.loc[test_tic]!r}")
-    logging.basicConfig(level=logging.INFO)
-    log_likelihood = LogLikelihoodPriorsOnly(test_tic)
+    logging.basicConfig(level=logging.DEBUG)
+    log_likelihood = LogLikelihood(test_tic)
+    log_likelihood.enable_plots = True#"TESS189639080_s{sector}_best_fit_model3.pdf"
+    log_likelihood(
+        numpy.array(
+            [
+                -1.24408646e00,
+                -3.71483063e00,
+                1.41475127e-01,
+                8.34203817e-01,
+                -2.37418813e00,
+                -2.24196430e00,
+                -8.30168794e-02,
+                8.71420582e-06,
+                -1.08640447e-03,
+                1.72306533e00,
+                -7.87778788e-01,
+                -2.47859827e00,
+                3.18854784e00,
+                9.90237029e-01,
+                7.10868651e-01,
+                -3.36746148e-01,
+                5.12819850e-01,
+                -2.99760512e00,
+                2.40542923e00,
+                -7.98815313e-01,
+                -8.75360123e-01,
+            ]
+        )
+    )
     log_likelihood.plot_best_fit_bls("best_fit_bls.pdf")
-    log_likelihood(norm.rvs(size=21))

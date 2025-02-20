@@ -122,6 +122,9 @@ class CachedBLS(DataModelBase):
     __tablename__ = "bls"
 
     period = mapped_column(Float, doc="The best fit BLS orbital period.")
+    period_uncertainty = mapped_column(
+        Float, doc="The best fit BLS orbital period."
+    )
     transit_time = mapped_column(
         Float, doc="The best fit BLS time of first transit."
     )

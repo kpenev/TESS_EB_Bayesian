@@ -118,7 +118,8 @@ class HDFBackend(Backend):
         self.unsaved_steps_fname = (os.path.splitext(filename)[0]
                                     +
                                     '.unsaved_steps')
-        self._flush_unsaved_steps()
+        if not read_only:
+            self._flush_unsaved_steps()
     #pylint: enable=super-init-not-called
 
     #Inherited from EMCEE
