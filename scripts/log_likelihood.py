@@ -272,6 +272,24 @@ class LogLikelihood:
             )
             cache_session.add(CachedBLS(tic_id=tic_id, **self._best_fit_bls))
 
+    def _iter_lc_and_model(self, binary, lc_sys_err):
+        """Iterate over LC data and model given binary parameters."""
+
+        for header, lightcurve in self._lcs:
+            lc_sq_errors = lightcurve["flux_err"] ** 2 + lc_sys_err**2
+            model_lc = binary.get_lightcurve(
+                lightcurve["time"],
+                supersample_factor=100,
+                exp_time=header["exptime"],
+            )
+
+            self._logger.debug("Model LC:\n%s", repr(model_lc))
+
+            model_lc *= (model_lc * lightcurve["flux"] / lc_sq_errors).sum() / (
+                model_lc**2 / lc_sq_errors
+            ).sum()
+            yield header, lightcurve, model_lc, lc_sq_errors
+
     @property
     def tic_id(self):
         """The TIC identifier of the EB being modeled."""
@@ -452,34 +470,75 @@ class LogLikelihood:
             ]
         )
 
+    def plot_lc_model_comparison(self, mcmc_sample, plot_fname):
+        """Create multi-page PDF showing the model over LC data for each LC."""
+
+        if plot_fname is not None:
+            assert plot_fname.endswith(".pdf")
+            use("PDF")
+        sample_params = self.get_sample_params(mcmc_sample)
+        binary = Binary(from_mcmc=sample_params)
+        with PdfPages(plot_fname) as pdf:
+            for header, lightcurve, model_lc, _ in self._iter_lc_and_model(
+                binary, sample_params.lc_sys
+            ):
+                pyplot.figure(figsize=[4.8, 6.4])
+                pyplot.subplot(211)
+                pyplot.plot(lightcurve["time"], lightcurve["flux"], "-r")
+                pyplot.plot(lightcurve["time"], model_lc, "-b")
+                pyplot.xlabel("Time [days]")
+                pyplot.ylabel("Flux [ppm]")
+                pyplot.subplot(212)
+                pyplot.plot(
+                    (lightcurve["time"] % binary.per) / binary.per,
+                    lightcurve["flux"],
+                    ",r",
+                    zorder=10
+                )
+                num_bins = 100
+                phase = (lightcurve["time"] % binary.per) / binary.per
+                bin_destinations = (phase) // (1.0 / num_bins)
+                binned_lc = {quantity: numpy.full(100, numpy.nan)
+                             for quantity in ['time', 'flux']}
+                for quantity, binned in binned_lc.items():
+                    for bin_ind in range(100):
+                        in_bin = bin_destinations == bin_ind
+                        binned[bin_ind] = numpy.median(
+                            lightcurve[quantity][in_bin]
+                        )
+                pyplot.plot(
+                    (binned_lc["time"] % binary.per) / binary.per,
+                    binned_lc["flux"],
+                    "og",
+                    markersize=3,
+                    zorder=20
+                )
+
+                phase_sort = numpy.argsort(phase)
+                pyplot.plot(
+                    phase[phase_sort],
+                    model_lc[phase_sort],
+                    "-b",
+                    zorder=30
+                )
+                pyplot.xlabel(f"Phase (Porb={binary.per!r})")
+                pyplot.ylabel("Flux [ppm]")
+
+                pyplot.suptitle(f"TIC {self.tic_id}, sector {header['sector']}")
+                if plot_fname is None:
+                    pyplot.show()
+                else:
+                    pdf.savefig()
+                pyplot.cla()
+                pyplot.clf()
+
     def calc_lc_log_likelihood(self, binary, lc_sys_err):
         """Return log-likelihood of observing the TESS LCs for given binary."""
 
         result = 0.0
-        for header, lightcurve in self._lcs:
-            lc_sq_errors = lightcurve["flux_err"] ** 2 + lc_sys_err**2
-            model_lc = binary.get_lightcurve(
-                lightcurve["time"],
-                supersample_factor=100,
-                exp_time=header["exptime"],
-            )
-
-            self._logger.debug("Model LC:\n%s", repr(model_lc))
-
-            model_lc *= (model_lc * lightcurve["flux"] / lc_sq_errors).sum() / (
-                model_lc**2 / lc_sq_errors
-            ).sum()
-
-            if getattr(self, "enable_plots", False):
-                pyplot.plot(lightcurve["time"], lightcurve["flux"], "-r")
-                pyplot.plot(lightcurve["time"], model_lc, "-b")
-                if isinstance(self.enable_plots, str):
-                    pyplot.savefig(self.enable_plots.format_map(header))
-                else:
-                    pyplot.show()
-                pyplot.cla()
-                pyplot.clf()
-
+        for _, lightcurve, model_lc, lc_sq_errors in self._iter_lc_and_model(
+            binary, lc_sys_err
+        ):
             self._logger.debug("Square LC errors: %s", repr(lc_sq_errors))
             result -= (
                 (lightcurve["flux"] - model_lc) ** 2 / lc_sq_errors
@@ -548,37 +607,38 @@ class LogLikelihoodPriorsOnly(LogLikelihood):
 
 
 if __name__ == "__main__":
+    # TODO: figure out why 323020176
     test_tic = 189639080
     eb_cat = pandas.read_csv(prsa_ebs, index_col="tess_id")
     print(f"Prsa EB params for TIC {test_tic}: {eb_cat.loc[test_tic]!r}")
     logging.basicConfig(level=logging.DEBUG)
     log_likelihood = LogLikelihood(test_tic)
-    log_likelihood.enable_plots = True#"TESS189639080_s{sector}_best_fit_model3.pdf"
-    log_likelihood(
+    log_likelihood.plot_lc_model_comparison(
         numpy.array(
             [
-                -1.24408646e00,
-                -3.71483063e00,
-                1.41475127e-01,
-                8.34203817e-01,
-                -2.37418813e00,
-                -2.24196430e00,
-                -8.30168794e-02,
-                8.71420582e-06,
-                -1.08640447e-03,
-                1.72306533e00,
-                -7.87778788e-01,
-                -2.47859827e00,
-                3.18854784e00,
-                9.90237029e-01,
-                7.10868651e-01,
-                -3.36746148e-01,
-                5.12819850e-01,
-                -2.99760512e00,
-                2.40542923e00,
-                -7.98815313e-01,
-                -8.75360123e-01,
+                -7.16296610e-01,
+                -1.73177338e00,
+                -3.69425598e-02,
+                2.11889673e00,
+                -2.69097332e00,
+                4.20840419e-01,
+                -5.74732707e-01,
+                -1.79540518e-04,
+                -2.39131676e-03,
+                -4.20747750e-01,
+                -4.79886659e-01,
+                9.92539655e-01,
+                -7.11375754e-02,
+                1.66991399e00,
+                -2.24555124e00,
+                -3.91818379e00,
+                7.88440429e-02,
+                2.08730450e-01,
+                1.93742491e00,
+                -1.92356518e-01,
+                3.85041561e00,
             ]
-        )
+        ),
+        "test.pdf",
     )
     log_likelihood.plot_best_fit_bls("best_fit_bls.pdf")
