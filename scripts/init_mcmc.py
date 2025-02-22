@@ -13,6 +13,10 @@ from astroquery.mast import Catalogs
 from general_purpose_python_modules.multiprocessing_util import (
     setup_process_map,
 )
+from general_purpose_python_modules.emcee_util import (
+    save_initial_position,
+    load_initial_positions,
+)
 
 from sample_params import SampleParams
 
@@ -49,7 +53,7 @@ def _get_optimize_start(log_likelihood, overwrite):
     return initial_state
 
 
-def _get_bounds(log_likelihood, fixed_params, eclipse_time_offset):
+def _get_bounds(log_likelihood, fixed_params):
     """Return the bounds to use when optimizing."""
 
     bounds = [(None, None) for _ in SampleParams._fields]
@@ -102,11 +106,9 @@ def _optimize_starting_positions(
         result = optimize.minimize(
             lambda x: -log_likelihood(x)[0],
             x0=initial_state,
-            method='Nelder-Mead',
-            bounds=_get_bounds(
-                log_likelihood, fixed_params, eclipse_time_offset
-            ),
-            options={'adapt': True, 'fatol': 100.0},
+            method="Nelder-Mead",
+            bounds=_get_bounds(log_likelihood, fixed_params),
+            options={"adapt": True, "fatol": 100.0},
         )
         if not result.success:
             _logger.warning("Optimization did not converge: %s", repr(result))
@@ -114,6 +116,7 @@ def _optimize_starting_positions(
             "log-likelihood(%s) = %s", repr(result.x), repr(result.fun)
         )
         result_queue.put(result.x)
+    _logger.info('Starting position optimizanio process finished.')
 
 
 def _estimate_mass(logg, teff):
@@ -142,11 +145,18 @@ def _estimate_mass(logg, teff):
     return result
 
 
-def get_initial_mcmc_state(log_likelihood, config):
+def get_initial_mcmc_state(log_likelihood, config, samples_fname):
     """Get suitable initial state to start MCMC from."""
 
+    starting_positions, positions_found = load_initial_positions(
+        samples_fname, config.num_walkers, len(SampleParams._fields)
+    )
+
     _logger.info(
-        "Looking for %d suitable starting positions.", config.num_walkers
+        "Found %d starting positions, looking for %d additional suitable "
+        "starting positions.",
+        positions_found,
+        config.num_walkers - positions_found,
     )
     fixed_param_queue = Queue()
     result_queue = Queue()
@@ -171,7 +181,7 @@ def get_initial_mcmc_state(log_likelihood, config):
     mprimary_uncertainty = (mprimary.max() - mprimary.min()) / 2
     mprimary = mprimary[1, 1]
 
-    for walker_ind in range(config.num_walkers):
+    for walker_ind in range(positions_found, config.num_walkers):
         fixed_param_queue.put(
             FixedParamType(
                 per=(
@@ -189,6 +199,8 @@ def get_initial_mcmc_state(log_likelihood, config):
                 mprimary=(mprimary, mprimary_uncertainty),
             )
         )
+    for _ in range(config.num_parallel):
+        fixed_param_queue.put('STOP')
 
     workers = [
         Process(
@@ -200,9 +212,12 @@ def get_initial_mcmc_state(log_likelihood, config):
     for process in workers:
         process.start()
 
-    initial_state = numpy.empty((config.num_walkers, len(SampleParams._fields)))
+    for position_ind in range(positions_found, config.num_walkers):
+        starting_positions[position_ind] = result_queue.get()
+        save_initial_position(
+            starting_positions[position_ind],
+            samples_fname,
+            nwalkers=config.num_walkers,
+        )
 
-    for positions_found in range(config.num_walkers):
-        initial_state[positions_found] = result_queue.get()
-
-    return initial_state
+    return starting_positions

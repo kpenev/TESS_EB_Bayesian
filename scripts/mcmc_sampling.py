@@ -117,10 +117,9 @@ def parse_command_line():
     return parser.parse_args()
 
 
-def get_backend(config):
+def get_backend(samples_fname, config):
     """Return properly configured EMCEE backend to store generated samples."""
 
-    samples_fname = config.samples_fname_pattern.format(tic_id=config.tic_id)
     samples_dir = path.dirname(samples_fname)
     try:
         makedirs(samples_dir)
@@ -149,14 +148,18 @@ def main(config):
     """Avoid polluting global namespace."""
 
     setup_process(**vars(config))
-    backend = get_backend(config)
+
+    samples_fname = config.samples_fname_pattern.format(tic_id=config.tic_id)
+    backend = get_backend(samples_fname, config)
     log_likelihood = (
         LogLikelihoodPriorsOnly if config.priors_only else LogLikelihood
     )(config.tic_id)
 
     initial_state = None
     if backend.iteration == 0:
-        initial_state = get_initial_mcmc_state(log_likelihood, config)
+        initial_state = get_initial_mcmc_state(
+            log_likelihood, config, samples_fname
+        )
 
     with Pool(
         config.num_parallel,
