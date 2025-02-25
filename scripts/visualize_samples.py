@@ -5,17 +5,22 @@
 from os import path, remove, makedirs
 from subprocess import run
 from glob import glob
+import logging
 
 from matplotlib import pyplot
+from matplotlib.backends.backend_pdf import PdfPages
 import numpy
 from configargparse import ArgumentParser, DefaultsFormatter
 import pandas
+import h5py
 
 from general_purpose_python_modules.visuals import make_corner_plot
+from general_purpose_python_modules.emcee_util import load_initial_positions
 
 from hacked_emcee_hdf5_backend import HDFBackend
 from sample_params import SampleParams
 from autowisp import Evaluator
+from log_likelihood import LogLikelihood
 
 
 def parse_command_line():
@@ -39,6 +44,12 @@ def parse_command_line():
         "filename.",
     )
     parser.add_argument(
+        "--initial-position-plot-fname",
+        default=None,
+        help="If specified, create a plot comparing model to observed LCs for "
+        "the initial positions at which walkers are started.",
+    )
+    parser.add_argument(
         "--plot-expressions",
         nargs="+",
         default=[],
@@ -53,18 +64,18 @@ def parse_command_line():
         "for each iteration and a movie is created.",
     )
     parser.add_argument(
-        '--x-range',
+        "--x-range",
         type=float,
         nargs=2,
         default=None,
-        help='The x range for plotting expressions.'
+        help="The x range for plotting expressions.",
     )
     parser.add_argument(
-        '--y-range',
+        "--y-range",
         type=float,
         nargs=2,
         default=None,
-        help='The y range for plotting expressions.'
+        help="The y range for plotting expressions.",
     )
     parser.add_argument(
         "--corner-plot-log-params",
@@ -242,8 +253,25 @@ def create_histogram_movie(plot_data, config, num_walkers):
             movie.add_frame()
 
 
+def create_initial_position_plot(config):
+    """Compare model to observed LCs for the initial walker positions."""
+
+    starting_positions = load_initial_positions(config.samples_fname)
+    with h5py.File(config.samples_fname, "r") as samples_file:
+        tic = int(samples_file.attrs["TIC"])
+    print(f'TIC: {tic!r} ({type(tic)})')
+    log_likelihood = LogLikelihood(tic)
+    with PdfPages(config.initial_position_plot_fname) as pdf:
+        for pos in starting_positions:
+            log_likelihood.plot_lc_model_comparison(pos, pdf)
+
+
 def main(config):
     """Avoid polluting global namespace."""
+
+    logging.basicConfig(level=logging.DEBUG)
+    if config.initial_position_plot_fname:
+        create_initial_position_plot(config)
 
     backend = HDFBackend(config.samples_fname, read_only=True)
     raw_data = backend.get_blobs()
