@@ -8,9 +8,11 @@ from os import path
 import numpy
 import h5py
 from astroquery.mast import Catalogs
+from astroquery.gaia import Gaia
 from astropy.coordinates import SkyCoord
 from astropy import units
 from healpy import pixelfunc
+from dustmaps.bayestar import BayestarQuery
 
 from paths import broadband_data_dir
 
@@ -50,11 +52,43 @@ def get_last_healpix(fname):
         return max(map(int, file["metadata"].keys()))
 
 
+def get_gaia_distance(gaia_id):
+    """Return 50-th, 16-th, & 84-th pencentiles of the Gaia distance estimate"""
+
+    gaia_distance_entry = Gaia.launch_job(
+        "SELECT * FROM external.gaiaedr3_distance WHERE source_id = "
+        + str(gaia_id)
+    ).get_results()
+    for mode in ["photogeo", "geo"]:
+        result = numpy.array(
+            tuple(
+                float(gaia_distance_entry[f"r_{quant}_{mode}"])
+                for quant in ["med", "lo", "hi"]
+            ),
+            dtype=[("med", float), ("lo", float), ("hi", float)],
+        )
+        if numpy.isfinite(result).all():
+            return result
+
+
 class Green19Correction:
     """Querry Green et. al. (2019) broad band magnitudes and extinction"""
 
-    def _find_tic(self, tic_entry):
-        """Return opened file and index within it containing given TIC entry."""
+    def _evaluate_map(self, tic_entry, galactic_coords):
+        """Return the same information as direct stellar params but from map."""
+
+        gaia_id = int(tic_entry["GAIA"])
+        distance = get_gaia_distance(gaia_id)
+        coords = SkyCoord(
+            ra=tic_entry["ra"] * units.deg,
+            dec=tic_entry["dec"] * units.deg,
+            distance=distance['med'] * units.pc,
+            frame="icrs",
+        )
+        reddening = bayestar(coords, mode="median")
+
+    def _get_tic_info(self, tic_entry):
+        """Return stellar and extinction parameters for the given TIC entry."""
 
         gal_coords = SkyCoord(
             ra=tic_entry["ra"] * units.deg,
@@ -129,15 +163,17 @@ class Green19Correction:
             ]
         )
 
+        self._bayestar = BayestarQuery("bayestar2019")
+
     def get_map_data(self, tic_ids):
         """Return all info from Green et. al. (2019) for the given TIC."""
 
         return [
             self._find_tic(tic_entry)
-            #False positive
-            #pylint: disable=no-member
+            # False positive
+            # pylint: disable=no-member
             for tic_entry in Catalogs.query_criteria(catalog="Tic", ID=tic_ids)
-            #pylint: enable=no-member
+            # pylint: enable=no-member
         ]
 
     def get_absolute_magnitudes(self, tic_ids):
