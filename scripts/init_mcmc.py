@@ -95,9 +95,7 @@ class OptimizeStartingPosition:
     def _to_optimize(self, x):
         """Return the negative log-likelihood for given optimize position."""
 
-        return -self._log_likelihood(
-            self._get_mcmc_sample(x), self._exclude_priors
-        )[0]
+        return -self._log_likelihood(self._get_mcmc_sample(x))[0]
 
     def __init__(self, log_likelihood):
         """Prepare the callable."""
@@ -107,14 +105,14 @@ class OptimizeStartingPosition:
             [
                 (SampleParams._fields.index(param), value)
                 for param, value in [
-                    ("primary_prot", numpy.inf),
-                    ("secondary_prot", numpy.inf),
-                    ("primary_reflection_coef", -numpy.inf),
-                    ("secondary_reflection_coef", -numpy.inf),
-                    ("primary_beaming_coef", -numpy.inf),
-                    ("secondary_beaming_coef", -numpy.inf),
-                    ("primary_limb_dark_2", -numpy.inf),
-                    ("secondary_limb_dark_2", -numpy.inf),
+                    ("primary_prot", 10.0),
+                    ("secondary_prot", 10.0),
+                    ("primary_reflection_coef", -10.0),
+                    ("secondary_reflection_coef", -10.0),
+                    ("primary_beaming_coef", -10.0),
+                    ("secondary_beaming_coef", -10.0),
+                    ("primary_limb_dark_2", -10.0),
+                    ("secondary_limb_dark_2", -10.0),
                 ]
             ]
         )
@@ -176,7 +174,7 @@ class OptimizeStartingPosition:
         _logger.info(
             "log-likelihood(%s) = %s", repr(result.x), repr(result.fun)
         )
-        return result.x
+        return self._get_mcmc_sample(result.x)
 
 
 # pylint: enable=too-few-public-methods
