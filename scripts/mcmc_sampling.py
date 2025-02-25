@@ -8,6 +8,7 @@ from multiprocessing import Pool
 
 from configargparse import ArgumentParser, DefaultsFormatter
 from emcee import EnsembleSampler
+import h5py
 
 from general_purpose_python_modules.multiprocessing_util import (
     setup_process,
@@ -136,6 +137,8 @@ def get_backend(samples_fname, config):
         )
     else:
         backend.reset(config.num_walkers, len(SampleParams._fields))
+        with h5py.File(samples_fname, 'a') as samples_file:
+            samples_file.attrs['TIC'] = config.tic_id
         _logger.info(
             "Starting new chain for TIC ID: %d.",
             config.tic_id,
@@ -160,6 +163,7 @@ def main(config):
         initial_state = get_initial_mcmc_state(
             log_likelihood, config, samples_fname
         )
+        _logger.info('Full set of initial positions found. Starting sampling.')
 
     with Pool(
         config.num_parallel,

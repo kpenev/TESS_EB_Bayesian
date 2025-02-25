@@ -3,6 +3,7 @@
 from collections import namedtuple
 from multiprocessing import Process, Queue
 import logging
+from traceback import format_exc
 
 import numpy
 from scipy.stats import norm, uniform
@@ -22,101 +23,183 @@ from sample_params import SampleParams
 
 _logger = logging.getLogger(__name__)
 
-FixedParamType = namedtuple(
-    "FixedParamType", ["per", "eclipse_time", "mprimary"]
+InitialParamType = namedtuple(
+    "InitialParamType", ["per", "eclipse_time", "mprimary"]
 )
 
 
-def _get_optimize_start(log_likelihood, overwrite):
-    """Return an initial starting point for optimization."""
+# Meant to serve as callable.
+# pylint: disable=too-few-public-methods
+class OptimizeStartingPosition:
+    """Callable to find initial position close local likelihood maxima."""
 
-    initial_state = norm.rvs(size=len(SampleParams._fields))
-    mratio = float(uniform.rvs(size=1))
-    for param in [
-        "mtotal",
-        "mratio",
-        "per",
-        "eclipse_time",
-        "primary_impact_param",
-    ]:
-        if param == "primary_impact_param":
-            ind, value = log_likelihood.inverse_prior(param, 0.0)
-        elif param == "mtotal":
-            ind, value = log_likelihood.inverse_prior(
-                param, overwrite.mprimary * (1.0 + mratio)
+    def _get_optimize_start(self, overwrite):
+        """Return an initial starting point for optimization."""
+
+        initial_state = norm.rvs(size=self._num_optimize)
+        mratio_range = self._log_likelihood.get_range("mratio")
+        mratio = float(
+            uniform.rvs(
+                mratio_range[0], mratio_range[1] - mratio_range[0], size=1
             )
-        elif param == "mratio":
-            ind, value = log_likelihood.inverse_prior(param, mratio)
-        else:
-            ind, value = getattr(overwrite, param)
-        initial_state[ind] = value
-    return initial_state
-
-
-def _get_bounds(log_likelihood, fixed_params):
-    """Return the bounds to use when optimizing."""
-
-    bounds = [(None, None) for _ in SampleParams._fields]
-
-    for param in ["per", "eclipse_time"]:
-        value = getattr(fixed_params, param)
-        #        if param == "eclipse_time":
-        #            value -= eclipse_time_offset
-        ind, low = log_likelihood.inverse_prior(param, value[0] - value[1])
-        high = log_likelihood.inverse_prior(param, value[0] + value[1])[1]
-        bounds[ind] = (low, high)
-    return bounds
-
-
-def _optimize_starting_positions(
-    fixed_params_queue, result_queue, log_likelihood, config
-):
-    """Find a position that maximizes log(prob) starting with given Porb."""
-
-    numpy.random.seed()
-    setup_process_map(vars(config))
-
-    for fixed_params in iter(fixed_params_queue.get, "STOP"):
-        _logger.info(
-            "Looking for starting position with: %s", repr(fixed_params)
         )
-
-        eclipse_time_offset = fixed_params.per[0] * numpy.round(
-            fixed_params.eclipse_time[0] / fixed_params.per[0]
-        )
-        overwrite = FixedParamType(
-            per=log_likelihood.inverse_prior("per", fixed_params.per[0]),
-            eclipse_time=(
-                log_likelihood.inverse_prior(
-                    "eclipse_time", fixed_params.eclipse_time[0]
+        _logger.debug("Setting mratio to: %s", repr(mratio))
+        for param in [
+            "mtotal",
+            "mratio",
+            "per",
+            "eclipse_time",
+            "primary_impact_param",
+        ]:
+            if param == "primary_impact_param":
+                ind, value = self._log_likelihood.inverse_prior(param, 0.0)
+            elif param == "mtotal":
+                ind, value = self._log_likelihood.inverse_prior(
+                    param, overwrite.mprimary * (1.0 + mratio)
                 )
-                # - eclipse_time_offset
-            ),
-            mprimary=fixed_params.mprimary[0],
+            elif param == "mratio":
+                ind, value = self._log_likelihood.inverse_prior(param, mratio)
+            else:
+                ind, value = getattr(overwrite, param)
+            initial_state[self._mcmc_to_optimize[ind]] = value
+        return initial_state
+
+    def _get_bounds(self, initial_params):
+        """Return the bounds to use when optimizing."""
+
+        bounds = [(None, None) for _ in range(self._num_optimize)]
+
+        for param in ["per", "eclipse_time"]:
+            value = getattr(initial_params, param)
+            ind, low = self._log_likelihood.inverse_prior(
+                param, value[0] - value[1]
+            )
+            high = self._log_likelihood.inverse_prior(
+                param, value[0] + value[1]
+            )[1]
+            bounds[self._mcmc_to_optimize[ind]] = (low, high)
+
+        return bounds
+
+    def _get_mcmc_sample(self, x):
+        """Return MCMC sample given optimize position."""
+
+        mcmc_sample = numpy.empty(len(SampleParams._fields))
+        for ind, value in self._do_not_optimize:
+            mcmc_sample[ind] = value
+
+        for i, value in enumerate(x):
+            mcmc_sample[self._optimize_to_mcmc[i]] = value
+        return mcmc_sample
+
+    def _to_optimize(self, x):
+        """Return the negative log-likelihood for given optimize position."""
+
+        return -self._log_likelihood(
+            self._get_mcmc_sample(x), self._exclude_priors
+        )[0]
+
+    def __init__(self, log_likelihood):
+        """Prepare the callable."""
+
+        self._log_likelihood = log_likelihood
+        self._do_not_optimize = sorted(
+            [
+                (SampleParams._fields.index(param), value)
+                for param, value in [
+                    ("primary_prot", numpy.inf),
+                    ("secondary_prot", numpy.inf),
+                    ("primary_reflection_coef", -numpy.inf),
+                    ("secondary_reflection_coef", -numpy.inf),
+                    ("primary_beaming_coef", -numpy.inf),
+                    ("secondary_beaming_coef", -numpy.inf),
+                    ("primary_limb_dark_2", -numpy.inf),
+                    ("secondary_limb_dark_2", -numpy.inf),
+                ]
+            ]
+        )
+        self._exclude_priors = numpy.full(len(SampleParams._fields), False)
+        self._exclude_priors[[i for i, _ in self._do_not_optimize]] = True
+        self._num_optimize = len(SampleParams._fields) - len(
+            self._do_not_optimize
+        )
+        self._optimize_to_mcmc = {}
+        skip = 0
+        for i in range(self._num_optimize):
+            while (
+                skip < len(self._do_not_optimize)
+                and i + skip == self._do_not_optimize[skip][0]
+            ):
+                skip += 1
+            self._optimize_to_mcmc[i] = i + skip
+        self._mcmc_to_optimize = dict(
+            (v, k) for k, v in self._optimize_to_mcmc.items()
         )
 
-        while True:
-            initial_state = _get_optimize_start(log_likelihood, overwrite)
-            blob = log_likelihood(initial_state)
+    def __call__(self, initial_params):
+        """Find a local maximum in log-likelihood for given parameters."""
+
+        _logger.info(
+            "Looking for starting position with: %s", repr(initial_params)
+        )
+
+        overwrite = InitialParamType(
+            per=self._log_likelihood.inverse_prior(
+                "per", initial_params.per[0]
+            ),
+            eclipse_time=(
+                self._log_likelihood.inverse_prior(
+                    "eclipse_time", initial_params.eclipse_time[0]
+                )
+            ),
+            mprimary=initial_params.mprimary[0],
+        )
+
+        log_likelihood = numpy.nan
+        while not numpy.isfinite(log_likelihood):
+            initial_state = self._get_optimize_start(overwrite)
+            log_likelihood = -self._to_optimize(initial_state)
             _logger.debug(
-                "Found log-likelihood(%s) = %s", repr(initial_state), repr(blob)
+                "Found log-likelihood(%s) = %s",
+                repr(initial_state),
+                repr(log_likelihood),
             )
-            if numpy.isfinite(blob).all():
-                break
         result = optimize.minimize(
-            lambda x: -log_likelihood(x)[0],
+            self._to_optimize,
             x0=initial_state,
             method="Nelder-Mead",
-            bounds=_get_bounds(log_likelihood, fixed_params),
-            options={"adapt": True, "fatol": 100.0},
+            bounds=self._get_bounds(initial_params),
+            options={"adaptive": True, "fatol": 100.0},
         )
         if not result.success:
             _logger.warning("Optimization did not converge: %s", repr(result))
         _logger.info(
             "log-likelihood(%s) = %s", repr(result.x), repr(result.fun)
         )
-        result_queue.put(result.x)
-    _logger.info('Starting position optimizanio process finished.')
+        return result.x
+
+
+# pylint: enable=too-few-public-methods
+
+
+def _optimize_starting_positions(
+    initial_params_queue, result_queue, log_likelihood, config
+):
+    """Find a position that maximizes log(prob) starting with given Porb."""
+
+    try:
+        numpy.random.seed()
+        setup_process_map(vars(config))
+        get_starting_position = OptimizeStartingPosition(log_likelihood)
+
+        for initial_params in iter(initial_params_queue.get, "STOP"):
+            result_queue.put(get_starting_position(initial_params))
+        _logger.info("Starting position optimizanio process finished.")
+    finally:
+        _logger.critical(
+            "Optimizing initial positions failed:\n%s", format_exc()
+        )
+        result_queue.put(None)
 
 
 def _estimate_mass(logg, teff):
@@ -149,7 +232,9 @@ def get_initial_mcmc_state(log_likelihood, config, samples_fname):
     """Get suitable initial state to start MCMC from."""
 
     starting_positions, positions_found = load_initial_positions(
-        samples_fname, config.num_walkers, len(SampleParams._fields)
+        samples_fname,
+        num_walkers=config.num_walkers,
+        num_params=len(SampleParams._fields),
     )
 
     _logger.info(
@@ -158,7 +243,7 @@ def get_initial_mcmc_state(log_likelihood, config, samples_fname):
         positions_found,
         config.num_walkers - positions_found,
     )
-    fixed_param_queue = Queue()
+    initial_param_queue = Queue()
     result_queue = Queue()
 
     # False positive
@@ -182,8 +267,8 @@ def get_initial_mcmc_state(log_likelihood, config, samples_fname):
     mprimary = mprimary[1, 1]
 
     for walker_ind in range(positions_found, config.num_walkers):
-        fixed_param_queue.put(
-            FixedParamType(
+        initial_param_queue.put(
+            InitialParamType(
                 per=(
                     log_likelihood.best_fit_bls["period"]
                     * (1 + walker_ind % 2),
@@ -200,12 +285,12 @@ def get_initial_mcmc_state(log_likelihood, config, samples_fname):
             )
         )
     for _ in range(config.num_parallel):
-        fixed_param_queue.put('STOP')
+        initial_param_queue.put("STOP")
 
     workers = [
         Process(
             target=_optimize_starting_positions,
-            args=(fixed_param_queue, result_queue, log_likelihood, config),
+            args=(initial_param_queue, result_queue, log_likelihood, config),
         )
         for _ in range(config.num_parallel)
     ]
@@ -213,9 +298,21 @@ def get_initial_mcmc_state(log_likelihood, config, samples_fname):
         process.start()
 
     for position_ind in range(positions_found, config.num_walkers):
-        starting_positions[position_ind] = result_queue.get()
+        position = result_queue.get()
+        _logger.debug(
+            "Saving initial position %d: %s",
+            position_ind,
+            repr(position),
+        )
+        if position is None:
+            # pylint: disable=invalid-name
+            for w in workers:
+                w.terminate()
+            # pylint: enable=invalid-name
+            raise RuntimeError("Failed to find initial walker positions.")
+        starting_positions[position_ind] = position
         save_initial_position(
-            starting_positions[position_ind],
+            position,
             samples_fname,
             nwalkers=config.num_walkers,
         )

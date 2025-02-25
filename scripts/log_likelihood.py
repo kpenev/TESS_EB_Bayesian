@@ -31,21 +31,14 @@ class LogLikelihood:
         "lc_sys",
         "sed_sys",
     ]
+    _bad_mask = 0
+    for bad_ind in [1, 2, 3, 4, 5, 6, 8, 10, 13, 15]:
+        _bad_mask |= 1 << (bad_ind - 1)
 
     @staticmethod
     def _get_best_fit_bls(lightcurve):
         """Return the best fit orbital period and time of primary transit."""
 
-        print(
-            "Plotting:\n\t"
-            + "\n\t".join(
-                [
-                    f't:{lightcurve["time"]!r}',
-                    f'y:{lightcurve["flux"]!r}',
-                    f'dy:{lightcurve["flux_err"]!r}',
-                ]
-            )
-        )
         model = BoxLeastSquares(
             lightcurve["time"],
             lightcurve["flux"],
@@ -93,66 +86,54 @@ class LogLikelihood:
             result["period"] - periodogram.period[index_range[0]],
             periodogram.period[index_range[1]] - result["period"],
         )
-        pyplot.plot(periodogram.period, periodogram.power, "-k")
-        pyplot.axvline(
-            x=result["period"] - result["period_uncertainty"], color="r"
-        )
-        pyplot.axvline(x=result["period"], color="g")
-        pyplot.axvline(
-            x=result["period"] + result["period_uncertainty"], color="b"
-        )
-        pyplot.show()
 
         return result
 
-    def plot_best_fit_bls(self, plot_fname):
+    def plot_best_fit_bls(self, pdf=None):
         """Create plots showing the best fit BLS paramaters on top of LCs."""
 
-        use("PDF")
-        with PdfPages(plot_fname) as pdf:
-            for header, lightcurve in self._lcs:
-                for label, axis in pyplot.subplot_mosaic(
-                    [["full", "full"], ["first", "last"]]
-                )[1].items():
-                    pyplot.sca(axis)
-                    pyplot.plot(
-                        lightcurve["time"],
-                        lightcurve["flux"],
-                        ".k",
-                        markersize=1,
-                    )
-                    transit_time = self._best_fit_bls["transit_time"]
-                    while transit_time < lightcurve["time"][-1]:
-                        if transit_time > lightcurve["time"][0]:
-                            pyplot.axvline(
-                                x=transit_time
-                                - self._best_fit_bls["duration"] / 2,
-                                color="r",
-                                linewidth=1,
-                            )
-                            pyplot.axvline(
-                                x=transit_time, color="g", linewidth=1
-                            )
-                            pyplot.axvline(
-                                x=transit_time
-                                + self._best_fit_bls["duration"] / 2,
-                                color="b",
-                                linewidth=1,
-                            )
-                        transit_time += self._best_fit_bls["period"]
-                        if label == "first":
-                            pyplot.xlim(
-                                lightcurve["time"][0],
-                                lightcurve["time"][0]
-                                + 3 * self._best_fit_bls["period"],
-                            )
-                        elif label == "last":
-                            pyplot.xlim(
-                                lightcurve["time"][-1]
-                                - 3 * self._best_fit_bls["period"],
-                                lightcurve["time"][-1],
-                            )
-                pyplot.suptitle(f"TIC {self.tic_id}, sector {header['sector']}")
+        for header, lightcurve in self._lcs:
+            for label, axis in pyplot.subplot_mosaic(
+                [["full", "full"], ["first", "last"]]
+            )[1].items():
+                pyplot.sca(axis)
+                pyplot.plot(
+                    lightcurve["time"],
+                    lightcurve["flux"],
+                    ".k",
+                    markersize=1,
+                )
+                transit_time = self._best_fit_bls["transit_time"]
+                while transit_time < lightcurve["time"][-1]:
+                    if transit_time > lightcurve["time"][0]:
+                        pyplot.axvline(
+                            x=transit_time - self._best_fit_bls["duration"] / 2,
+                            color="r",
+                            linewidth=1,
+                        )
+                        pyplot.axvline(x=transit_time, color="g", linewidth=1)
+                        pyplot.axvline(
+                            x=transit_time + self._best_fit_bls["duration"] / 2,
+                            color="b",
+                            linewidth=1,
+                        )
+                    transit_time += self._best_fit_bls["period"]
+                    if label == "first":
+                        pyplot.xlim(
+                            lightcurve["time"][0],
+                            lightcurve["time"][0]
+                            + 3 * self._best_fit_bls["period"],
+                        )
+                    elif label == "last":
+                        pyplot.xlim(
+                            lightcurve["time"][-1]
+                            - 3 * self._best_fit_bls["period"],
+                            lightcurve["time"][-1],
+                        )
+            pyplot.suptitle(f"TIC {self.tic_id}, sector {header['sector']}")
+            if pdf is None:
+                pyplot.show()
+            else:
                 pdf.savefig()
 
     @staticmethod
@@ -201,7 +182,8 @@ class LogLikelihood:
     def _get_cached(self, tic_id):
         """Set-up using cached information for given TIC ID if available."""
 
-        sed = bls = None
+        sed = None
+        bls = None
         # False positive
         # pylint: disable=no-member
         with CacheSession.begin() as cache_session:
@@ -212,8 +194,11 @@ class LogLikelihood:
             cached_bls = cache_session.execute(
                 select(CachedBLS).filter_by(tic_id=tic_id)
             ).scalar_one_or_none()
+            assert cached_bls is not None
 
             if cached_sed:
+                self._logger.debug("Found cached SED: %s", repr(cached_sed))
+
                 sed = (
                     numpy.array(
                         [getattr(cached_sed, f + "p1") for f in "grizy"]
@@ -228,6 +213,7 @@ class LogLikelihood:
                 )
 
             if cached_bls:
+                self._logger.debug("Found cached BLS: %s", repr(cached_bls))
                 bls = {
                     param: getattr(cached_bls, param)
                     for param in [
@@ -290,6 +276,63 @@ class LogLikelihood:
             ).sum()
             yield header, lightcurve, model_lc, lc_sq_errors
 
+    def _get_lc_format(self, sector, header, provenance):
+        """Return the relevant column names and exposure time for gvien LC."""
+
+        if provenance == "QLP":
+            for existing_header, _ in self._lcs:
+                if existing_header["sector"] == sector:
+                    return None, None
+
+            return ("KSPSAP_FLUX", "KSPSAP_FLUX_ERR"), header["TIMEDEL"]
+
+        assert header["TIMEPIXR"] == 0.5
+        # Iterable needs to be modified
+        # pylint: disable=consider-using-enumerate
+        for i in range(len(self._lcs)):
+            if self._lcs[i][0]["sector"] == sector:
+                assert self._lcs[i][0]["provenance"] == "QLP"
+                del self._lcs[i]
+                break
+        # pylint: enable=consider-using-enumerate
+
+        return ("PDCSAP_FLUX", "PDCSAP_FLUX_ERR"), header["INT_TIME"] * header[
+            "NUM_FRM"
+        ] / 86400
+
+    def _format_lc(self, sector, header, provenance, observed_lc):
+        """Return a lightcurve formatted uniformly regardless of provenance."""
+
+        flux_columns, exptime = self._get_lc_format(sector, header, provenance)
+        if exptime is None:
+            assert flux_columns is None
+            return None, None
+        usable = numpy.logical_and(
+            numpy.isfinite(observed_lc[flux_columns[0]]),
+            numpy.isfinite(observed_lc[flux_columns[1]]),
+        )
+        usable = numpy.logical_and(
+            usable,
+            numpy.logical_not(observed_lc["QUALITY"] & self._bad_mask),
+        )
+        observed_lc = observed_lc[usable]
+        formatted_lc = numpy.empty(
+            usable.sum(),
+            dtype=[
+                ("time", ">f8"),
+                ("flux", ">f4"),
+                ("flux_err", ">f4"),
+            ],
+        )
+        formatted_lc["time"] = observed_lc["TIME"]
+        formatted_lc["flux"] = observed_lc[flux_columns[0]]
+        formatted_lc["flux_err"] = observed_lc[flux_columns[1]]
+        return formatted_lc, {
+            "exptime": exptime,
+            "sector": sector,
+            "provenance": provenance,
+        }
+
     @property
     def tic_id(self):
         """The TIC identifier of the EB being modeled."""
@@ -302,6 +345,11 @@ class LogLikelihood:
 
         return self._best_fit_bls
 
+    def get_range(self, param):
+        """The support of the prior for a given parameter."""
+
+        return getattr(self._range, param)
+
     def __init__(self, tic_id, overwrite_cache=False):
         """Prepare to evaluate the log-likelihood for the given TIC ID."""
 
@@ -312,49 +360,21 @@ class LogLikelihood:
         self._tic_id = tic_id
 
         # https://outerspace.stsci.edu/display/TESS/2.0+-+Data+Product+Overview#id-2.0-DataProductOverview-Table:CadenceQualityFlags
-        bad_spoc_mask = 0
-        for bad_ind in [1, 2, 3, 4, 5, 6, 8, 10, 13, 15]:
-            bad_spoc_mask |= 1 << (bad_ind - 1)
 
         self._sed, self._best_fit_bls = self._get_cached(tic_id)
 
         best_fit_bls = []
         self._lcs = []
         for provenance, lc_collection in lcs.items():
-            # TODO: figure out QLP
-            if provenance == "QLP":
-                continue
             for sector, (header, observed_lc) in lc_collection.items():
-                assert header["TIMEPIXR"] == 0.5
-                usable = numpy.logical_and(
-                    numpy.isfinite(observed_lc["PDCSAP_FLUX"]),
-                    numpy.isfinite(observed_lc["PDCSAP_FLUX_ERR"]),
+                formatted_lc, formatted_header = self._format_lc(
+                    sector, header, provenance, observed_lc
                 )
-                usable = numpy.logical_and(
-                    usable,
-                    numpy.logical_not(observed_lc["QUALITY"] & bad_spoc_mask),
-                )
-                observed_lc = observed_lc[usable]
-                formatted_lc = numpy.empty(
-                    usable.sum(),
-                    dtype=[
-                        ("time", ">f8"),
-                        ("flux", ">f4"),
-                        ("flux_err", ">f4"),
-                    ],
-                )
-                formatted_lc["time"] = observed_lc["TIME"]
-                formatted_lc["flux"] = observed_lc["PDCSAP_FLUX"]
-                formatted_lc["flux_err"] = observed_lc["PDCSAP_FLUX_ERR"]
+                if formatted_lc is None:
+                    continue
                 self._lcs.append(
                     (
-                        {
-                            "exptime": (
-                                header["INT_TIME"] * header["NUM_FRM"] / 86400
-                            ),
-                            "sector": sector,
-                            "provenance": provenance,
-                        },
+                        formatted_header,
                         formatted_lc,
                     )
                 )
@@ -439,14 +459,14 @@ class LogLikelihood:
             return truncnorm.ppf(
                 norm.cdf(sample_entry), *self._range.meh, scale=0.5
             )
-        low, high = getattr(self._range, param)
+        low, high = self.get_range(param)
         value = low + (high - low) * norm.cdf(sample_entry)
         if param in self._log_uniform:
             return 10.0**value
         return value
 
     def inverse_prior(self, param, value):
-        """Return value and index within sample to set param to given value."""
+        """Return index and value within sample to set param to given value."""
 
         param_ind = SampleParams._fields.index(param)
         if param == "meh":
@@ -455,7 +475,7 @@ class LogLikelihood:
             )
         if param in self._log_uniform:
             value = numpy.log10(value)
-        low, high = getattr(self._range, param)
+        low, high = self.get_range(param)
         return param_ind, norm.ppf((value - low) / (high - low))
 
     def get_sample_params(self, mcmc_sample):
@@ -470,67 +490,66 @@ class LogLikelihood:
             ]
         )
 
-    def plot_lc_model_comparison(self, mcmc_sample, plot_fname):
+    def _bin_lightcurve(self, lightcurve, num_bins, phase):
+        """Bin the given lightcurve in phase."""
+
+        bin_destinations = (phase) // (1.0 / num_bins)
+        binned_lc = {
+            quantity: numpy.full(num_bins, numpy.nan)
+            for quantity in ["time", "flux"]
+        }
+        for quantity, binned in binned_lc.items():
+            for bin_ind in range(num_bins):
+                in_bin = bin_destinations == bin_ind
+                binned[bin_ind] = numpy.median(lightcurve[quantity][in_bin])
+        return binned_lc
+
+    def plot_lc_model_comparison(self, mcmc_sample, pdf=None):
         """Create multi-page PDF showing the model over LC data for each LC."""
 
-        if plot_fname is not None:
-            assert plot_fname.endswith(".pdf")
-            use("PDF")
         sample_params = self.get_sample_params(mcmc_sample)
         binary = Binary(from_mcmc=sample_params)
-        with PdfPages(plot_fname) as pdf:
-            for header, lightcurve, model_lc, _ in self._iter_lc_and_model(
-                binary, sample_params.lc_sys
-            ):
-                pyplot.figure(figsize=[4.8, 6.4])
-                pyplot.subplot(211)
-                pyplot.plot(lightcurve["time"], lightcurve["flux"], "-r")
-                pyplot.plot(lightcurve["time"], model_lc, "-b")
-                pyplot.xlabel("Time [days]")
-                pyplot.ylabel("Flux [ppm]")
-                pyplot.subplot(212)
-                pyplot.plot(
-                    (lightcurve["time"] % binary.per) / binary.per,
-                    lightcurve["flux"],
-                    ",r",
-                    zorder=10
-                )
-                num_bins = 100
-                phase = (lightcurve["time"] % binary.per) / binary.per
-                bin_destinations = (phase) // (1.0 / num_bins)
-                binned_lc = {quantity: numpy.full(100, numpy.nan)
-                             for quantity in ['time', 'flux']}
-                for quantity, binned in binned_lc.items():
-                    for bin_ind in range(100):
-                        in_bin = bin_destinations == bin_ind
-                        binned[bin_ind] = numpy.median(
-                            lightcurve[quantity][in_bin]
-                        )
-                pyplot.plot(
-                    (binned_lc["time"] % binary.per) / binary.per,
-                    binned_lc["flux"],
-                    "og",
-                    markersize=3,
-                    zorder=20
-                )
+        num_bins = 100
+        for header, lightcurve, model_lc, _ in self._iter_lc_and_model(
+            binary, sample_params.lc_sys
+        ):
+            pyplot.figure(figsize=[4.8, 6.4])
+            pyplot.subplot(211)
+            pyplot.plot(lightcurve["time"], lightcurve["flux"], "-r")
+            pyplot.plot(lightcurve["time"], model_lc, "-b")
+            pyplot.xlabel("Time [days]")
+            pyplot.ylabel("Flux [ppm]")
+            pyplot.subplot(212)
+            pyplot.plot(
+                (lightcurve["time"] % binary.per) / binary.per,
+                lightcurve["flux"],
+                ",r",
+                zorder=10,
+            )
+            phase = (lightcurve["time"] % binary.per) / binary.per
+            binned_lc = self._bin_lightcurve(lightcurve, num_bins, phase)
+            pyplot.plot(
+                (binned_lc["time"] % binary.per) / binary.per,
+                binned_lc["flux"],
+                "og",
+                markersize=3,
+                zorder=20,
+            )
 
-                phase_sort = numpy.argsort(phase)
-                pyplot.plot(
-                    phase[phase_sort],
-                    model_lc[phase_sort],
-                    "-b",
-                    zorder=30
-                )
-                pyplot.xlabel(f"Phase (Porb={binary.per!r})")
-                pyplot.ylabel("Flux [ppm]")
+            phase_sort = numpy.argsort(phase)
+            pyplot.plot(
+                phase[phase_sort], model_lc[phase_sort], "-b", zorder=30
+            )
+            pyplot.xlabel(f"Phase (Porb={binary.per!r})")
+            pyplot.ylabel("Flux [ppm]")
 
-                pyplot.suptitle(f"TIC {self.tic_id}, sector {header['sector']}")
-                if plot_fname is None:
-                    pyplot.show()
-                else:
-                    pdf.savefig()
-                pyplot.cla()
-                pyplot.clf()
+            pyplot.suptitle(f"TIC {self.tic_id}, sector {header['sector']}")
+            if pdf is None:
+                pyplot.show()
+            else:
+                pdf.savefig()
+            pyplot.cla()
+            pyplot.clf()
 
     def calc_lc_log_likelihood(self, binary, lc_sys_err):
         """Return log-likelihood of observing the TESS LCs for given binary."""
@@ -569,7 +588,7 @@ class LogLikelihood:
         self._logger.debug("SED log-likelihood: %s", result)
         return result
 
-    def __call__(self, mcmc_sample):
+    def __call__(self, mcmc_sample, exclude_priors=False):
         """Return the log-likelihood of the given MCMC sample."""
 
         sample_params = self.get_sample_params(mcmc_sample)
@@ -584,7 +603,7 @@ class LogLikelihood:
         self._logger.debug("Binary: %s", binary)
 
         result = (
-            norm.logpdf(mcmc_sample).sum()
+            norm.logpdf(mcmc_sample[numpy.logical_not(exclude_priors)]).sum()
             + self.calc_lc_log_likelihood(binary, sample_params.lc_sys)
             + self.calc_sed_log_likelihood(binary, sample_params.sed_sys)
         )
@@ -613,32 +632,35 @@ if __name__ == "__main__":
     print(f"Prsa EB params for TIC {test_tic}: {eb_cat.loc[test_tic]!r}")
     logging.basicConfig(level=logging.DEBUG)
     log_likelihood = LogLikelihood(test_tic)
-    log_likelihood.plot_lc_model_comparison(
-        numpy.array(
-            [
-                -7.16296610e-01,
-                -1.73177338e00,
-                -3.69425598e-02,
-                2.11889673e00,
-                -2.69097332e00,
-                4.20840419e-01,
-                -5.74732707e-01,
-                -1.79540518e-04,
-                -2.39131676e-03,
-                -4.20747750e-01,
-                -4.79886659e-01,
-                9.92539655e-01,
-                -7.11375754e-02,
-                1.66991399e00,
-                -2.24555124e00,
-                -3.91818379e00,
-                7.88440429e-02,
-                2.08730450e-01,
-                1.93742491e00,
-                -1.92356518e-01,
-                3.85041561e00,
-            ]
-        ),
-        "test.pdf",
-    )
+
+    # use("PDF")
+    with PdfPages("test.pdf") as output_pdf:
+        log_likelihood.plot_lc_model_comparison(
+            numpy.array(
+                [
+                    -1.22302493e00,
+                    -1.69260939e00,
+                    3.04427649e-01,
+                    1.07357590e00,
+                    -2.37418558e00,
+                    -3.13671460e00,
+                    2.49650346e00,
+                    8.60379866e-05,
+                    -2.52210796e-03,
+                    6.62451853e-01,
+                    -numpy.inf,
+                    2.58420045e00,
+                    -numpy.inf,
+                    numpy.inf,
+                    numpy.inf,
+                    -numpy.inf,
+                    -numpy.inf,
+                    -numpy.inf,
+                    -numpy.inf,
+                    1.13667091e00,
+                    2.40478964e00,
+                ]
+            ),
+            None,
+        )
     log_likelihood.plot_best_fit_bls("best_fit_bls.pdf")
