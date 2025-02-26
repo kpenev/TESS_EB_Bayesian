@@ -4,6 +4,7 @@
 
 from glob import glob
 from os import path
+import logging
 
 import numpy
 import h5py
@@ -13,8 +14,11 @@ from astropy.coordinates import SkyCoord
 from astropy import units
 from healpy import pixelfunc
 from dustmaps.bayestar import BayestarQuery
+from scipy.stats import norm
 
 from paths import broadband_data_dir
+
+_logger = logging.getLogger(__name__)
 
 
 def verify_monotonic():
@@ -59,86 +63,191 @@ def get_gaia_distance(gaia_id):
         "SELECT * FROM external.gaiaedr3_distance WHERE source_id = "
         + str(gaia_id)
     ).get_results()
+    quantiles = ["lo", "med", "hi"]
     for mode in ["photogeo", "geo"]:
         result = numpy.array(
-            tuple(
+            [
                 float(gaia_distance_entry[f"r_{quant}_{mode}"])
-                for quant in ["med", "lo", "hi"]
-            ),
-            dtype=[("med", float), ("lo", float), ("hi", float)],
+                for quant in quantiles
+            ]
         )
         if numpy.isfinite(result).all():
             return result
+    return None
+
+
+def get_panstarrs_mags(gaia_id, phot_mode="MeanPSFMag", filters="grizy"):
+    """
+    Return the Pan-STARRS magnitudes of the given Gaia ID.
+
+    See
+    https://outerspace.stsci.edu/display/PANSTARRS/PS1+FAQ+-+Frequently+asked+questions
+    for choice of photometry mode."""
+
+    ps1_id = int(
+        Gaia.launch_job(
+            "SELECT original_ext_source_id FROM "
+            "gaiadr3.panstarrs1_best_neighbour WHERE source_id = "
+            + str(gaia_id)
+        ).get_results()["original_ext_source_id"]
+    )
+    # False positive
+    # pylint: disable=no-member
+    ps1_result = Catalogs.query_criteria(
+        objID=ps1_id, catalog="Panstarrs", data_release="dr1", table="mean"
+    )
+    # pylint: enable=no-member
+    return (
+        [float(ps1_result[f"{fil}{phot_mode}"]) for fil in filters],
+        (
+            0.015**2
+            + numpy.array(
+                [float(ps1_result[f"{fil}{phot_mode}Err"]) for fil in filters]
+            )
+            ** 2
+        )
+        ** 0.5,
+    )
 
 
 class Green19Correction:
     """Querry Green et. al. (2019) broad band magnitudes and extinction"""
 
-    def _evaluate_map(self, tic_entry, galactic_coords):
+    def _evaluate_bayestar_map(self, tic_entry):
         """Return the same information as direct stellar params but from map."""
 
         gaia_id = int(tic_entry["GAIA"])
         distance = get_gaia_distance(gaia_id)
+        if distance is None:
+            raise RuntimeError(
+                "No distance found for TIC ID: "
+                f"{tic_entry['ID']} (Gaia ID: {gaia_id})"
+            )
         coords = SkyCoord(
             ra=tic_entry["ra"] * units.deg,
             dec=tic_entry["dec"] * units.deg,
-            distance=distance['med'] * units.pc,
+            distance=distance * units.pc,
             frame="icrs",
         )
-        reddening = bayestar(coords, mode="median")
+        reddening, flags = self._bayestar(
+            coords.galactic,
+            mode="percentile",
+            pct=self._1sigma_pct,
+            return_flags=True,
+        )
+        if not flags["converged"].all() or not flags["reliable_dist"].all():
+            message = (
+                "The extinction map is "
+                f"{'' if flags['reliable_dist'].all() else 'not'} reliable and "
+                f"is {'' if flags['converged'].all() else 'not'} converged for "
+                f"TIC ID {tic_entry['ID']} (Gaia ID: {gaia_id})"
+            )
+            if self._ignore_flags:
+                _logger.warning(message)
+            else:
+                raise RuntimeError(message)
+        return {
+            "dm": (5.0 * numpy.log10(distance) - 5.0),
+            "E": numpy.array(
+                [
+                    -(
+                        (
+                            (reddening[0, 1] - reddening[1, 1]) ** 2
+                            + (reddening[1, 0] - reddening[1, 1]) ** 2
+                        )
+                        ** 0.5
+                    ),
+                    0.0,
+                    (
+                        (reddening[2, 1] - reddening[1, 1]) ** 2
+                        + (reddening[1, 2] - reddening[1, 1]) ** 2
+                    )
+                    ** 0.5,
+                ],
+            )
+            + reddening[1, 1],
+        }
+
+    def _get_magnitudes(self, tic_entry):
+        """Return the magnitudes and uncertainties for the given TIC entry."""
+
+        tic_filters = ["J", "H", "K", "w1", "w2"]
+        ps1_mag, ps1_err = get_panstarrs_mags(tic_entry["GAIA"])
+        result = {
+            "mag": numpy.concatenate(
+                [
+                    ps1_mag,
+                    [tic_entry[f"{fil}mag"] for fil in tic_filters],
+                ]
+            ),
+            "mag_err": numpy.concatenate(
+                [
+                    ps1_err,
+                    [tic_entry[f"e_{fil}mag"] for fil in tic_filters],
+                ]
+            ),
+        }
+        print(f"Result: {result!r}")
+        return result
 
     def _get_tic_info(self, tic_entry):
         """Return stellar and extinction parameters for the given TIC entry."""
 
-        gal_coords = SkyCoord(
-            ra=tic_entry["ra"] * units.deg,
-            dec=tic_entry["dec"] * units.deg,
-            frame="icrs",
-        ).galactic
-        for healpix in healpix_and_neighbors(gal_coords):
-            file_index = numpy.searchsorted(self._last_healpix, healpix)
-            healpix_key = str(healpix)
-            with h5py.File(
-                path.join(
-                    broadband_data_dir,
-                    f"stellar_params_{file_index:02d}.h5",
-                ),
-                "r",
-            ) as extinction_f:
-                if healpix_key not in extinction_f["gaia"]:
-                    continue
-                index = numpy.where(
-                    extinction_f["gaia"][healpix_key]["gaia_id"]
-                    == int(tic_entry["GAIA"]),
-                )[0]
-                if index.size > 0:
-                    index = int(index)
-                    return {
-                        "mag": numpy.concatenate(
-                            (
-                                extinction_f["data"][healpix_key][index]["mag"],
-                                [tic_entry["w1mag"], tic_entry["w2mag"]],
-                            )
-                        ),
-                        "mag_err": numpy.concatenate(
-                            (
-                                extinction_f["data"][healpix_key][index][
-                                    "mag_err"
-                                ],
-                                [tic_entry["e_w1mag"], tic_entry["e_w2mag"]],
-                            )
-                        ),
-                        "percentiles": extinction_f["percentiles"][healpix_key][
-                            index
-                        ],
-                    }
+        result = self._get_magnitudes(tic_entry)
+        result["percentiles"] = self._evaluate_bayestar_map(tic_entry)
+        return result
 
-        raise RuntimeError(
-            f"TIC ID: {tic_entry['ID']} = Gaia ID: {tic_entry['GAIA']} "
-            "not found in Green et. al. (2019) data."
-        )
+        # pylint: disable=line-too-long
+        # gal_coords = SkyCoord(
+        #    ra=tic_entry["ra"] * units.deg,
+        #    dec=tic_entry["dec"] * units.deg,
+        #    frame="icrs",
+        # ).galactic
+        # for healpix in healpix_and_neighbors(gal_coords):
+        #    file_index = numpy.searchsorted(self._last_healpix, healpix)
+        #    healpix_key = str(healpix)
+        #    with h5py.File(
+        #        path.join(
+        #            broadband_data_dir,
+        #            f"stellar_params_{file_index:02d}.h5",
+        #        ),
+        #        "r",
+        #    ) as extinction_f:
+        #        if healpix_key not in extinction_f["gaia"]:
+        #            continue
+        #        index = numpy.where(
+        #            extinction_f["gaia"][healpix_key]["gaia_id"]
+        #            == int(tic_entry["GAIA"]),
+        #        )[0]
+        #        if index.size > 0:
+        #            index = int(index)
+        #            return {
+        #                "mag": numpy.concatenate(
+        #                    (
+        #                        extinction_f["data"][healpix_key][index]["mag"],
+        #                        [tic_entry["w1mag"], tic_entry["w2mag"]],
+        #                    )
+        #                ),
+        #                "mag_err": numpy.concatenate(
+        #                    (
+        #                        extinction_f["data"][healpix_key][index][
+        #                            "mag_err"
+        #                        ],
+        #                        [tic_entry["e_w1mag"], tic_entry["e_w2mag"]],
+        #                    )
+        #                ),
+        #                "percentiles": extinction_f["percentiles"][healpix_key][
+        #                    index
+        #                ],
+        #            }
 
-    def __init__(self):
+        # raise RuntimeError(
+        #    f"TIC ID: {tic_entry['ID']} = Gaia ID: {tic_entry['GAIA']} "
+        #    "not found in Green et. al. (2019) data."
+        # )
+        # pylint: enable=line-too-long
+
+    def __init__(self, ignore_flags=False):
         """Prepare to query the Green et. al. (2019) data."""
 
         self._last_healpix = numpy.array(
@@ -163,13 +272,15 @@ class Green19Correction:
             ]
         )
 
-        self._bayestar = BayestarQuery("bayestar2019")
+        self._1sigma_pct = 100.0 * norm.cdf([-1, 0, 1])
+        self._bayestar = BayestarQuery(version="bayestar2019")
+        self._ignore_flags = ignore_flags
 
     def get_map_data(self, tic_ids):
         """Return all info from Green et. al. (2019) for the given TIC."""
 
         return [
-            self._find_tic(tic_entry)
+            self._get_tic_info(tic_entry)
             # False positive
             # pylint: disable=no-member
             for tic_entry in Catalogs.query_criteria(catalog="Tic", ID=tic_ids)
@@ -208,4 +319,4 @@ class Green19Correction:
 
 
 if __name__ == "__main__":
-    print(repr(Green19Correction().get_absolute_magnitudes(18250189)))
+    print(repr(Green19Correction(True).get_absolute_magnitudes(189639080)))
