@@ -1,17 +1,21 @@
 """Methods for finding initial walker positions for MCMC."""
 
 from collections import namedtuple
-from multiprocessing import Process, Queue
+from multiprocessing import Process, Queue, Pool
 import logging
 from traceback import format_exc
+from os import path
 
+from matplotlib.backends.backend_pdf import PdfPages
 import numpy
 from scipy.stats import norm, uniform
 from scipy import optimize
 from astropy import units, constants
 from astroquery.mast import Catalogs
+from log_likelihood import LogLikelihoodUnitCubePriors
 
 from general_purpose_python_modules.multiprocessing_util import (
+    setup_process,
     setup_process_map,
 )
 from general_purpose_python_modules.emcee_util import (
@@ -19,6 +23,7 @@ from general_purpose_python_modules.emcee_util import (
     load_initial_positions,
 )
 
+from paths import results_dir
 from sample_params import SampleParams
 
 _logger = logging.getLogger(__name__)
@@ -67,7 +72,10 @@ class OptimizeStartingPosition:
     def _get_bounds(self, initial_params):
         """Return the bounds to use when optimizing."""
 
-        bounds = [(None, None) for _ in range(self._num_optimize)]
+        if isinstance(self._log_likelihood, LogLikelihoodUnitCubePriors):
+            bounds = [(0.0, 1.0) for _ in range(self._num_optimize)]
+        else:
+            bounds = [(None, None) for _ in range(self._num_optimize)]
 
         for param in ["per", "eclipse_time"]:
             value = getattr(initial_params, param)
@@ -101,18 +109,28 @@ class OptimizeStartingPosition:
         """Prepare the callable."""
 
         self._log_likelihood = log_likelihood
+        low_value = (
+            0.0
+            if isinstance(log_likelihood, LogLikelihoodUnitCubePriors)
+            else -10.0
+        )
+        high_value = (
+            1.0
+            if isinstance(log_likelihood, LogLikelihoodUnitCubePriors)
+            else 10.0
+        )
         self._do_not_optimize = sorted(
             [
                 (SampleParams._fields.index(param), value)
                 for param, value in [
-                    ("primary_prot", 10.0),
-                    ("secondary_prot", 10.0),
-                    ("primary_reflection_coef", -10.0),
-                    ("secondary_reflection_coef", -10.0),
-                    ("primary_beaming_coef", -10.0),
-                    ("secondary_beaming_coef", -10.0),
-                    ("primary_limb_dark_2", -10.0),
-                    ("secondary_limb_dark_2", -10.0),
+                    ("primary_prot", high_value),
+                    ("secondary_prot", high_value),
+                    ("primary_reflection_coef", low_value),
+                    ("secondary_reflection_coef", low_value),
+                    ("primary_beaming_coef", low_value),
+                    ("secondary_beaming_coef", low_value),
+                    ("primary_limb_dark_2", low_value),
+                    ("secondary_limb_dark_2", low_value),
                 ]
             ]
         )
@@ -176,6 +194,39 @@ class OptimizeStartingPosition:
         )
         return self._get_mcmc_sample(result.x)
 
+    def find_global_max_likelihood(self, initial_params, method):
+        """Use a global minimization algorithm to find max likelihood point."""
+
+        out_fname = path.join(
+            results_dir,
+            "logs",
+            "TESS{tic_id:d}_{task}_{method}_{period:.3f}_{now!s}_{pid:d}.",
+        )
+        setup_process(
+            std_out_err_fname=out_fname + "outerr",
+            logging_fname=out_fname + "log",
+            task="global_best_fit",
+            method=method,
+            period=initial_params.per[0],
+            tic_id=self._log_likelihood.tic_id,
+            logging_verbosity="debug",
+        )
+        assert isinstance(self._log_likelihood, LogLikelihoodUnitCubePriors)
+        result = getattr(optimize, method)(
+            self._to_optimize,
+            bounds=self._get_bounds(initial_params),
+        )
+        if not result.success:
+            _logger.warning(
+                "Global optimization did not converge: %s", repr(result)
+            )
+        _logger.info(
+            "Global max log-likelihood found for sample(%s) = %s",
+            repr(result.x),
+            repr(result.fun),
+        )
+        return self._get_mcmc_sample(result.x), method, initial_params
+
 
 # pylint: enable=too-few-public-methods
 
@@ -193,11 +244,13 @@ def _optimize_starting_positions(
         for initial_params in iter(initial_params_queue.get, "STOP"):
             result_queue.put(get_starting_position(initial_params))
         _logger.info("Starting position optimizanio process finished.")
-    finally:
+    # pylint: disable=bare-except
+    except:
         _logger.critical(
             "Optimizing initial positions failed:\n%s", format_exc()
         )
         result_queue.put(None)
+    # pylint: enable=bare-except
 
 
 def _estimate_mass(logg, teff):
@@ -236,10 +289,9 @@ def get_initial_mcmc_state(log_likelihood, config, samples_fname):
     )
 
     _logger.info(
-        "Found %d starting positions, looking for %d additional suitable "
-        "starting positions.",
+        "Found %d optimized starting positions, looking for %d additional.",
         positions_found,
-        config.num_walkers - positions_found,
+        config.num_optimized_initial_positions - positions_found,
     )
     initial_param_queue = Queue()
     result_queue = Queue()
@@ -295,7 +347,9 @@ def get_initial_mcmc_state(log_likelihood, config, samples_fname):
     for process in workers:
         process.start()
 
-    for position_ind in range(positions_found, config.num_walkers):
+    for position_ind in range(
+        positions_found, config.num_optimized_initial_positions
+    ):
         position = result_queue.get()
         _logger.debug(
             "Saving initial position %d: %s",
@@ -314,5 +368,75 @@ def get_initial_mcmc_state(log_likelihood, config, samples_fname):
             samples_fname,
             nwalkers=config.num_walkers,
         )
+    # TODO: What to do about parameters held fixed during optimization
+    # TODO: Do we need to worry about Pan-STARRS brightnesses not being simple
+    #      sum of two isolated star
+    starting_positions[position_ind:] = norm.rvs(
+        size=starting_positions[position_ind:].size
+    ).reshape(starting_positions[position_ind:].shape)
 
     return starting_positions
+
+
+def test_global_minimization(tic_id):
+    """Test the global minimization of -log-likelihood."""
+
+    log_likelihood = LogLikelihoodUnitCubePriors(tic_id)
+    # False positive
+    # pylint: disable=no-member
+    tic_entry = Catalogs.query_criteria(catalog="Tic", ID=tic_id)
+    # pylint: enable=no-member
+
+    mprimary = _estimate_mass(
+        *numpy.meshgrid(
+            float(tic_entry["logg"])
+            + numpy.array(
+                [float(-tic_entry["e_logg"]), 0.0, float(tic_entry["e_logg"])]
+            ),
+            float(tic_entry["Teff"])
+            + numpy.array(
+                [float(-tic_entry["e_Teff"]), 0.0, float(tic_entry["e_Teff"])]
+            ),
+        )
+    )
+
+    initial_params = [
+        InitialParamType(
+            per=(
+                log_likelihood.best_fit_bls["period"] * (1 + i),
+                log_likelihood.best_fit_bls["period_uncertainty"] * (1 + i),
+            ),
+            eclipse_time=(
+                log_likelihood.best_fit_bls["transit_time"],
+                0.1 * log_likelihood.best_fit_bls["period"] * (1 + i),
+            ),
+            mprimary=(mprimary[1, 1], (mprimary.max() - mprimary.min()) / 2),
+        )
+        for i in range(2)
+    ]
+
+    optimize_methods = ["dual_annealing", "differential_evolution", "direct"]
+    del optimize_methods[0]
+
+    optimize_start = OptimizeStartingPosition(log_likelihood)
+    with Pool(len(initial_params) * len(optimize_methods)) as pool:
+        result = pool.starmap(
+            optimize_start.find_global_max_likelihood,
+            [
+                (param, method)
+                for param in initial_params
+                for method in optimize_methods
+            ],
+        )
+
+    with PdfPages("tess{tic_id}_global_best.pdf") as output_pdf:
+        for pos, method, initial_params in enumerate(result):
+            log_likelihood.plot_lc_model_comparison(
+                pos,
+                output_pdf,
+                extra_title=f"{method}, P={initial_params.per[0]:.3f}",
+            )
+
+
+if __name__ == "__main__":
+    test_global_minimization(189639080)

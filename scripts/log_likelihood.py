@@ -3,7 +3,7 @@
 import logging
 
 import pandas
-from matplotlib import pyplot, use
+from matplotlib import pyplot
 from matplotlib.backends.backend_pdf import PdfPages
 import numpy
 from scipy.stats import norm, truncnorm
@@ -504,7 +504,7 @@ class LogLikelihood:
                 binned[bin_ind] = numpy.median(lightcurve[quantity][in_bin])
         return binned_lc
 
-    def plot_lc_model_comparison(self, mcmc_sample, pdf=None):
+    def plot_lc_model_comparison(self, mcmc_sample, pdf=None, extra_title=''):
         """Create multi-page PDF showing the model over LC data for each LC."""
 
         sample_params = self.get_sample_params(mcmc_sample)
@@ -543,7 +543,11 @@ class LogLikelihood:
             pyplot.xlabel(f"Phase (Porb={binary.per!r})")
             pyplot.ylabel("Flux [ppm]")
 
-            pyplot.suptitle(f"TIC {self.tic_id}, sector {header['sector']}")
+            pyplot.suptitle(
+                f"TIC {self.tic_id}, sector {header['sector']}"
+                +
+                f': {extra_title}' if extra_title else ''
+            )
             if pdf is None:
                 pyplot.show()
             else:
@@ -588,6 +592,14 @@ class LogLikelihood:
         self._logger.debug("SED log-likelihood: %s", result)
         return result
 
+    def calc_prior_loglikelihood(self, mcmc_sample):
+        """Return the sum of prior log-likelihoods."""
+
+        return norm.logpdf(mcmc_sample).sum()
+
+    def save_jktebob_lc(self, filename):
+        """Create a file with given name suitable to run through JKTEBOB."""
+
     def __call__(self, mcmc_sample, exclude_priors=False):
         """Return the log-likelihood of the given MCMC sample."""
 
@@ -603,7 +615,9 @@ class LogLikelihood:
         self._logger.debug("Binary: %s", binary)
 
         result = (
-            norm.logpdf(mcmc_sample[numpy.logical_not(exclude_priors)]).sum()
+            self.calc_prior_loglikelihood(
+                mcmc_sample[numpy.logical_not(exclude_priors)]
+            )
             + self.calc_lc_log_likelihood(binary, sample_params.lc_sys)
             + self.calc_sed_log_likelihood(binary, sample_params.sed_sys)
         )
@@ -617,16 +631,54 @@ class LogLikelihood:
 class LogLikelihoodPriorsOnly(LogLikelihood):
     """Allows MCMC sampling using just the priors for testing."""
 
-    def __call__(self, mcmc_sample):
+    def __call__(self, mcmc_sample, exclude_priors=False):
         """Return the log-likelihood of the given MCMC sample."""
 
-        return (norm.logpdf(mcmc_sample).sum(),) + self.get_sample_params(
-            mcmc_sample
-        )
+        return (
+            self.calc_prior_loglikelihood(
+                mcmc_sample[numpy.logical_not(exclude_priors)]
+            ),
+        ) + self.get_sample_params(mcmc_sample)
 
+
+class LogLikelihoodUnitCubePriors(LogLikelihood):
+    """Overwrite the prior transform to be from U(0,1) instead of normal."""
+
+    def prior_transform(self, param, sample_entry):
+        """
+        Return the value of the given parameter given a sample entry.
+
+        Apply a transformation to go from identical random variables with Normal
+        priors to the paramaters needed to evaluate the likelihood.
+        """
+
+        if param == "meh":
+            return truncnorm.ppf(sample_entry, *self._range.meh, scale=0.5)
+
+        low, high = self.get_range(param)
+        value = low + (high - low) * sample_entry
+        if param in self._log_uniform:
+            return 10.0**value
+        return value
+
+    def inverse_prior(self, param, value):
+        """Return index and value within sample to set param to given value."""
+
+        param_ind = SampleParams._fields.index(param)
+        if param == "meh":
+            return param_ind, truncnorm.cdf(value, *self._range.meh, scale=0.5)
+        if param in self._log_uniform:
+            value = numpy.log10(value)
+        low, high = self.get_range(param)
+        return param_ind, (value - low) / (high - low)
+
+    def calc_prior_loglikelihood(self, mcmc_sample):
+        """Return the sum of prior log-likelihoods."""
+
+        return 0.0
 
 if __name__ == "__main__":
-    # TODO: figure out why 323020176
+    # TODO: figure out why 323020176 crashes
     test_tic = 189639080
     eb_cat = pandas.read_csv(prsa_ebs, index_col="tess_id")
     print(f"Prsa EB params for TIC {test_tic}: {eb_cat.loc[test_tic]!r}")

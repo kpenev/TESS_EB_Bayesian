@@ -64,6 +64,14 @@ def parse_command_line():
         "the samples file already exsits.",
     )
     parser.add_argument(
+        '--num-optimized-initial-positions',
+        type=int,
+        default=64,
+        help='The number of walkers which start at optimized initial '
+        'parameters. The remaining walkers start with random initial '
+        'parameters.'
+    )
+    parser.add_argument(
         "--num-parallel",
         type=int,
         default=16,
