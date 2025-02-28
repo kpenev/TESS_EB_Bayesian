@@ -44,10 +44,13 @@ def parse_command_line():
         "filename.",
     )
     parser.add_argument(
-        "--initial-position-plot-fname",
+        "--model-to-data-plot",
         default=None,
+        nargs=2,
+        metavar=('STEP_IND', 'PLOT_FNAME'),
         help="If specified, create a plot comparing model to observed LCs for "
-        "the initial positions at which walkers are started.",
+        "the a particular MCMC sample (walker initial positions are sample "
+        "-1).",
     )
     parser.add_argument(
         "--plot-expressions",
@@ -253,16 +256,23 @@ def create_histogram_movie(plot_data, config, num_walkers):
             movie.add_frame()
 
 
-def create_initial_position_plot(config):
+def create_model_to_data_plot(config):
     """Compare model to observed LCs for the initial walker positions."""
 
-    starting_positions = load_initial_positions(config.samples_fname)
+    step = int(config.model_to_data_plot[0])
+    assert step >= -1
+    if step == -1:
+        positions = load_initial_positions(config.samples_fname)
+    else:
+        backend = HDFBackend(config.samples_fname, read_only=True)
+        positions = backend.get_chain(discard=step, thin=1000000)[0]
+
     with h5py.File(config.samples_fname, "r") as samples_file:
         tic = int(samples_file.attrs["TIC"])
     print(f'TIC: {tic!r} ({type(tic)})')
     log_likelihood = LogLikelihood(tic)
-    with PdfPages(config.initial_position_plot_fname) as pdf:
-        for pos in starting_positions:
+    with PdfPages(config.model_to_data_plot[1]) as pdf:
+        for pos in positions:
             log_likelihood.plot_lc_model_comparison(pos, pdf)
 
 
@@ -270,8 +280,8 @@ def main(config):
     """Avoid polluting global namespace."""
 
     logging.basicConfig(level=logging.DEBUG)
-    if config.initial_position_plot_fname:
-        create_initial_position_plot(config)
+    if config.model_to_data_plot:
+        create_model_to_data_plot(config)
 
     backend = HDFBackend(config.samples_fname, read_only=True)
     raw_data = backend.get_blobs()
