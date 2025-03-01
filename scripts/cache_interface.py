@@ -129,6 +129,95 @@ class CachedBLS(DataModelBase):
         Float, doc="The best fit BLS time of first transit."
     )
     duration = mapped_column(Float, doc="The best fit BLS transit duration.")
+    depth = mapped_column(Float, doc="The best fit BLS transit depth.")
+    depth_odd = mapped_column(Float, doc="The best fit BLS odd transit depth.")
+    depth_even = mapped_column(
+        Float, doc="The best fit BLS even transit depth."
+    )
+    depth_half = mapped_column(
+        Float, doc="The best fit BLS half period transit depth."
+    )
+    depth_phased = mapped_column(
+        Float, doc="The best fit BLS phase shifted transit depth."
+    )
+
+    depth_uncertainty = mapped_column(
+        Float, doc="The best fit BLS transit depth."
+    )
+    depth_odd_uncertainty = mapped_column(
+        Float, doc="The best fit BLS odd transit depth."
+    )
+    depth_even_uncertainty = mapped_column(
+        Float, doc="The best fit BLS even transit depth."
+    )
+    depth_half_uncertainty = mapped_column(
+        Float, doc="The best fit BLS half period transit depth."
+    )
+    depth_phased_uncertainty = mapped_column(
+        Float, doc="The best fit BLS phase shifted transit depth."
+    )
+
+    harmonic_amplitude = mapped_column(
+        Float, doc="The amplitude of the best fit sinusoidal model."
+    )
+
+    harmonic_delta_log_likelihood = mapped_column(
+        Float,
+        doc="The difference in log likelihood between a sinusoidal model"
+        " and the transit model. If harmonic_delta_log_likelihood is greater "
+        "than zero, the sinusoidal model is preferred.",
+    )
+
+    masked_period = mapped_column(Float, doc="The best fit BLS orbital period.")
+    masked_period_uncertainty = mapped_column(
+        Float, doc="The best fit BLS orbital period."
+    )
+    masked_transit_time = mapped_column(
+        Float, doc="The best fit BLS time of first transit."
+    )
+    masked_duration = mapped_column(
+        Float, doc="The best fit BLS transit duration."
+    )
+    masked_depth = mapped_column(Float, doc="The best fit BLS transit depth.")
+    masked_depth_odd = mapped_column(
+        Float, doc="The best fit BLS odd transit depth."
+    )
+    masked_depth_even = mapped_column(
+        Float, doc="The best fit BLS even transit depth."
+    )
+    masked_depth_half = mapped_column(
+        Float, doc="The best fit BLS half period transit depth."
+    )
+    masked_depth_phased = mapped_column(
+        Float, doc="The best fit BLS phase shifted transit depth."
+    )
+
+    masked_depth_uncertainty = mapped_column(
+        Float, doc="The best fit BLS transit depth."
+    )
+    masked_depth_odd_uncertainty = mapped_column(
+        Float, doc="The best fit BLS odd transit depth."
+    )
+    masked_depth_even_uncertainty = mapped_column(
+        Float, doc="The best fit BLS even transit depth."
+    )
+    masked_depth_half_uncertainty = mapped_column(
+        Float, doc="The best fit BLS half period transit depth."
+    )
+    masked_depth_phased_uncertainty = mapped_column(
+        Float, doc="The best fit BLS phase shifted transit depth."
+    )
+
+    masked_harmonic_amplitude = mapped_column(
+        Float, doc="The amplitude of the best fit sinusoidal model."
+    )
+
+    masked_harmonic_delta_log_likelihood = mapped_column(
+        Float,
+        doc="The difference in log likelihood between a sinusoidal model"
+        " and the transit model. If harmonic_delta_log_likelihood is greater "
+        "than zero, the sinusoidal model is preferred.",
+    )
 
 
 for table in DataModelBase.metadata.sorted_tables:
