@@ -2,9 +2,9 @@
 
 import logging
 
-import pandas
-from matplotlib import pyplot
+from matplotlib import pyplot, colormaps
 from matplotlib.backends.backend_pdf import PdfPages
+import pandas
 import numpy
 from scipy.stats import norm, truncnorm
 from astropy.timeseries import BoxLeastSquares
@@ -46,7 +46,16 @@ class LogLikelihood:
         )
 
         periodogram = model.power(
-            1.0 / numpy.arange(1 / 0.4, 0.01, -0.02 / 30.0**2),
+            1.0
+            / numpy.arange(
+                1 / 0.4,
+                0.01,
+                -0.02
+                / min(
+                    100.0, lightcurve["time"].max() - lightcurve["time"].min()
+                )
+                ** 2,
+            ),
             numpy.linspace(0.02, 0.2, 100),
         )
         best_index = numpy.argmax(periodogram.power)
@@ -114,9 +123,12 @@ class LogLikelihood:
         del result["transit_times"]
         del result["per_transit_count"]
         del result["per_transit_log_likelihood"]
-        result["period_uncertainty"] = max(
-            result["period"] - periodogram.period[index_range[0]],
-            periodogram.period[index_range[1]] - result["period"],
+        result["period"] = (
+            result["period"],
+            max(
+                result["period"] - periodogram.period[index_range[0]],
+                periodogram.period[index_range[1]] - result["period"],
+            ),
         )
 
         return result
@@ -126,9 +138,9 @@ class LogLikelihood:
 
         folded = (
             lightcurve["time"] - bls_results["transit_time"]
-        ) % bls_results["period"]
+        ) % bls_results["period"][0]
         mask = numpy.minimum(folded, 1 - folded) > (
-            bls_results["duration"] + 2.0 * bls_results["period_uncertainty"]
+            bls_results["duration"] + 2.0 * bls_results["period"][1]
         )
         self._logger.debug("After masking, %d points remain", mask.sum())
         masked_bls_result = self._get_best_fit_bls(lightcurve[mask])
@@ -137,66 +149,129 @@ class LogLikelihood:
             for param, value in masked_bls_result.items()
         }
 
-    def plot_best_fit_bls(self, pdf=None):
+    def _get_bls_plot_x(self, lightcurve, label):
+        """Return x and sortind indices of the lightcurve for subplot."""
+
+        if label in ["folded", "zoom_even", "zoom_odd"]:
+            plot_x = lightcurve["time"] - self._best_fit_bls["transit_time"]
+            if label == "zoom_even":
+                plot_x += self._best_fit_bls["period"][0]
+            elif label == "folded":
+                plot_x += self._best_fit_bls["period"][0] / 2
+            plot_x %= 2 * self._best_fit_bls["period"][0]
+        else:
+            plot_x = lightcurve["time"]
+
+        sorter = numpy.argsort(plot_x)
+        plot_x = plot_x[sorter]
+        return plot_x, sorter
+
+    def _get_bls_model(self, lightcurve, prefix, suffix):
+        """Return the given masked/unmasked and both/even/odd BLS model."""
+
+        folded = (
+            lightcurve["time"]
+            - self._best_fit_bls[prefix + "transit_time"]
+            - (
+                self._best_fit_bls[prefix + "period"][0]
+                if suffix == "_odd"
+                else 0
+            )
+        ) % (self._best_fit_bls[prefix + "period"][0] * (2 if suffix else 1))
+        in_transit = (
+            numpy.minimum(
+                folded,
+                (
+                    self._best_fit_bls[prefix + "period"][0]
+                    * (2 if suffix else 1)
+                )
+                - folded,
+            )
+            < self._best_fit_bls[prefix + "duration"] / 2
+        )
+
+        return (
+            1.0 - self._best_fit_bls[prefix + "depth" + suffix][0] * in_transit
+        ) * numpy.nanmedian(lightcurve["flux"])
+
+    def plot_best_fit_bls(self, combined_lc, pdf=None):
         """Create plots showing the best fit BLS paramaters on top of LCs."""
 
-        for header, lightcurve in self._lcs:
+        cmap = dict(
+            zip(
+                [
+                    f"{prefix}BLS{suffix}"
+                    for prefix in ["", "masked "]
+                    for suffix in ["", " odd", " even"]
+                ],
+                colormaps["Dark2"].colors,
+            )
+        )
+        for header, lightcurve in self._lcs + [
+            ({"sector": "all"}, combined_lc)
+        ]:
+            pyplot.figure(figsize=[4.8, 6.4])
             for label, axis in pyplot.subplot_mosaic(
-                [["full", "full"], ["first", "last"]]
+                [
+                    6 * ["full"],
+                    3 * ["first"] + 3 * ["last"],
+                    [
+                        "folded",
+                        "folded",
+                        "zoom_even",
+                        "zoom_even",
+                        "zoom_odd",
+                        "zoom_odd",
+                    ],
+                ]
             )[1].items():
                 pyplot.sca(axis)
+                plot_x, sorter = self._get_bls_plot_x(lightcurve, label)
                 pyplot.plot(
-                    lightcurve["time"],
-                    lightcurve["flux"],
+                    plot_x,
+                    lightcurve["flux"][sorter],
                     ".k",
                     markersize=1,
                 )
-                for prefix in ["", "masked_"]:
-                    folded = (
-                        lightcurve["time"]
-                        - self._best_fit_bls[prefix + "transit_time"]
-                    ) % self._best_fit_bls[prefix + "period"]
-                    in_transit = (
-                        numpy.minimum(folded, 1.0 - folded)
-                        < self._best_fit_bls[prefix + "duration"] / 2
-                    )
-                    model = (
-                        lightcurve["flux"]
-                        * (1.0 - self._best_fit_bls[prefix + "depth"])
-                        * in_transit
-                    )
-                    pyplot.plot(
-                        lightcurve["time"], model, "-", label=prefix + "BLS"
-                    )
-                #                transit_time = self._best_fit_bls["transit_time"]
-                #                while transit_time < lightcurve["time"][-1]:
-                #                    if transit_time > lightcurve["time"][0]:
-                #                        pyplot.axvline(
-                #                            x=transit_time - self._best_fit_bls["duration"] / 2,
-                #                            color="r",
-                #                            linewidth=1,
-                #                        )
-                #                        pyplot.axvline(x=transit_time, color="g", linewidth=1)
-                #                        pyplot.axvline(
-                #                            x=transit_time + self._best_fit_bls["duration"] / 2,
-                #                            color="b",
-                #                            linewidth=1,
-                #                        )
-                #                    transit_time += self._best_fit_bls["period"]
+                for prefix in (
+                    ["", "masked_"]
+                    if label in ["full", "first", "last"]
+                    else [""]
+                ):
+                    for suffix in ["", "_odd", "_even"]:
+                        curve = f"{prefix}BLS{suffix}".replace("_", " ")
+                        pyplot.plot(
+                            plot_x,
+                            self._get_bls_model(lightcurve, prefix, suffix)[
+                                sorter
+                            ],
+                            "-",
+                            label=curve if label == "full" else None,
+                            color=cmap[curve],
+                            linewidth=1,
+                        )
                 if label == "first":
                     pyplot.xlim(
                         lightcurve["time"][0],
                         lightcurve["time"][0]
-                        + 3 * self._best_fit_bls["period"],
+                        + 3 * self._best_fit_bls["period"][0],
                     )
                 elif label == "last":
                     pyplot.xlim(
                         lightcurve["time"][-1]
-                        - 3 * self._best_fit_bls["period"],
+                        - 3 * self._best_fit_bls["period"][0],
                         lightcurve["time"][-1],
                     )
+                elif label.startswith("zoom"):
+                    pyplot.xlim(
+                        self._best_fit_bls["period"][0]
+                        - self._best_fit_bls["duration"],
+                        self._best_fit_bls["period"][0]
+                        + self._best_fit_bls["duration"],
+                    )
+            pyplot.figlegend()
+
             pyplot.suptitle(f"TIC {self.tic_id}, sector {header['sector']}")
-            pyplot.legend()
             if pdf is None:
                 pyplot.show()
             else:
@@ -206,6 +281,9 @@ class LogLikelihood:
     def _average_best_fit_bls(best_fit_bls):
         """Average the best fit BLS results for each sector."""
 
+        raise NotImplementedError(
+            "Averaging BLS from separate sectors not implemneted."
+        )
         min_transit_time = numpy.inf
         total_points = 0
         averaged = {
@@ -228,7 +306,7 @@ class LogLikelihood:
                 )
             averaged["period_uncertainty"] = max(
                 averaged["period_uncertainty"],
-                bls_results["period_uncertainty"],
+                bls_results["period"][1],
             )
         for param in ["period", "duration"]:
             averaged[param] /= total_points
@@ -243,6 +321,10 @@ class LogLikelihood:
                 * averaged["period"]
             ) * bls_results["num_points"]
         averaged["transit_time"] /= total_points
+        averaged["period"] = (
+            averaged["period"],
+            averaged.pop("period_uncertainty"),
+        )
         return averaged
 
     def _get_cached(self, tic_id):
@@ -279,10 +361,23 @@ class LogLikelihood:
 
             if cached_bls:
                 self._logger.debug("Found cached BLS: %s", repr(cached_bls))
+                bls_columns = [
+                    column.key for column in CachedBLS.__table__.columns
+                ]
+                print(f"BLS columns: {bls_columns!r}")
                 bls = {
-                    column.key: getattr(cached_bls, column.key)
-                    for column in CachedBLS.__table__.columns
+                    column: (
+                        (
+                            getattr(cached_bls, column),
+                            getattr(cached_bls, column + "_uncertainty"),
+                        )
+                        if (column + "_uncertainty" in bls_columns)
+                        else getattr(cached_bls, column)
+                    )
+                    for column in bls_columns
+                    if not column.endswith("_uncertainty")
                 }
+                self._logger.debug("Loaded cached BLS: %s", repr(bls))
         return sed, bls
 
     def _cache(self, tic_id):
@@ -321,22 +416,14 @@ class LogLikelihood:
                     tic_id=tic_id,
                     **{
                         column: (
-                            value[0]
-                            if (
-                                column.startswith("depth")
-                                or column.startswith("masked_depth")
-                            )
-                            else value
+                            value[0] if isinstance(value, tuple) else value
                         )
                         for column, value in self._best_fit_bls.items()
                     },
                     **{
                         column + "_uncertainty": value[1]
                         for column, value in self._best_fit_bls.items()
-                        if (
-                            column.startswith("depth")
-                            or column.startswith("masked_depth")
-                        )
+                        if column.endswith("_uncertainty")
                     },
                 )
             )
@@ -434,7 +521,11 @@ class LogLikelihood:
         return getattr(self._range, param)
 
     def __init__(
-        self, tic_id, overwrite_cache=False, ignore_extinction_flags=True
+        self,
+        tic_id,
+        overwrite_cache=False,
+        ignore_extinction_flags=True,
+        plot_bls=False,
     ):
         """Prepare to evaluate the log-likelihood for the given TIC ID."""
 
@@ -544,9 +635,9 @@ class LogLikelihood:
             primary_impact_param=(-10, 10),
             eclipse_time=(
                 self._best_fit_bls["transit_time"]
-                - 5.0 * self._best_fit_bls["period"],
+                - 5.0 * self._best_fit_bls["period"][0],
                 self._best_fit_bls["transit_time"]
-                + 5.0 * self._best_fit_bls["period"],
+                + 5.0 * self._best_fit_bls["period"][0],
             ),
             primary_limb_dark_1=(0, 1),
             primary_limb_dark_2=(0, 1),
@@ -562,13 +653,14 @@ class LogLikelihood:
             sed_sys=(-10, 0),
         )
 
-        assert self._best_fit_bls["period"] > self._range.per[0]
+        assert self._best_fit_bls["period"][0] > self._range.per[0]
 
         self._logger.info(
-            "Averaged best fit BLS: "
-            "period = %s, transit time = %s, duration = %s",
-            self._best_fit_bls["period"],
+            "Averaged best fit BLS: period = %s +- %s, transit time = %s, "
+            "depth = %s +- %s, duration = %s",
+            *self._best_fit_bls["period"],
             self._best_fit_bls["transit_time"],
+            *self._best_fit_bls["depth"],
             self._best_fit_bls["duration"],
         )
 
@@ -583,6 +675,8 @@ class LogLikelihood:
 
         if overwrite_cache:
             self._cache(tic_id)
+        if plot_bls is not False:
+            self.plot_best_fit_bls(combined_lc, plot_bls)
 
     def prior_transform(self, param, sample_entry):
         """
@@ -739,15 +833,17 @@ class LogLikelihood:
         """Create a file with given name suitable to run through JKTEBOB."""
 
         with open(filename, "w", encoding="ascii") as outf:
-            for header, lc in self._lcs:
+            for header, lightcurve in self._lcs:
                 if provenance == "all" or header["provenance"] != provenance:
                     continue
-                normalized = lc[:]
-                normalized["flux"] -= numpy.nanmedian[lc["flux"]]
+                normalized = lightcurve[:]
+                normalized["flux"] /= numpy.nanmedian(lightcurve["flux"])
+                normalized["time"] -= self._best_fit_bls["transit_time"]
                 for row in normalized:
                     outf.write(
-                        f"{row['time']:-25.26g} {row['flux']:-25.26g} "
-                        f"{row['flux_err']:-25.26g}\n"
+                        f"{row['time']:-25.16g} "
+                        f"{-2.5*numpy.log10(row['flux']):-25.16g} "
+                        "noerr\n"
                     )
 
     def __call__(self, mcmc_sample, exclude_priors=False):
@@ -834,8 +930,10 @@ if __name__ == "__main__":
     eb_cat = pandas.read_csv(prsa_ebs, index_col="tess_id")
     print(f"Prsa EB params for TIC {test_tic}: {eb_cat.loc[test_tic]!r}")
     logging.basicConfig(level=logging.DEBUG)
-    log_likelihood = LogLikelihood(test_tic)
-    log_likelihood.plot_best_fit_bls()
+
+    with PdfPages("best_fit_bls.pdf") as output_pdf:
+        log_likelihood = LogLikelihood(test_tic, plot_bls=output_pdf)
+    log_likelihood.save_jktebob_lc(f'tess{test_tic}_jktebob.dat')
 
     # use("PDF")
     with PdfPages("test.pdf") as output_pdf:
@@ -865,6 +963,5 @@ if __name__ == "__main__":
                     2.40478964e00,
                 ]
             ),
-            None,
+            output_pdf,
         )
-    log_likelihood.plot_best_fit_bls("best_fit_bls.pdf")
