@@ -84,13 +84,19 @@ def get_panstarrs_mags(gaia_id, phot_mode="MeanPSFMag", filters="grizy"):
     https://outerspace.stsci.edu/display/PANSTARRS/PS1+FAQ+-+Frequently+asked+questions
     for choice of photometry mode."""
 
-    ps1_id = int(
-        Gaia.launch_job(
-            "SELECT original_ext_source_id FROM "
-            "gaiadr3.panstarrs1_best_neighbour WHERE source_id = "
-            + str(gaia_id)
-        ).get_results()["original_ext_source_id"]
+    ps1_id = Gaia.launch_job(
+        "SELECT original_ext_source_id FROM "
+        "gaiadr3.panstarrs1_best_neighbour WHERE source_id = " + str(gaia_id)
+    ).get_results()["original_ext_source_id"]
+    if ps1_id.size == 0:
+        return (
+            [numpy.nan] * len(filters),
+            [numpy.nan] * len(filters),
+        )
+    _logger.debug(
+        "Gaia ID %s corresponds to PS1 ID %s.", repr(gaia_id), repr(ps1_id)
     )
+    ps1_id = int(ps1_id)
     # False positive
     # pylint: disable=no-member
     ps1_result = Catalogs.query_criteria(
