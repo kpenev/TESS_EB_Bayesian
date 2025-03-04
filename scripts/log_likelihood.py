@@ -139,7 +139,7 @@ class LogLikelihood:
         folded = (
             lightcurve["time"] - bls_results["transit_time"]
         ) % bls_results["period"][0]
-        mask = numpy.minimum(folded, 1 - folded) > (
+        mask = numpy.minimum(folded, bls_results["period"][0] - folded) > (
             bls_results["duration"] + 2.0 * bls_results["period"][1]
         )
         self._logger.debug("After masking, %d points remain", mask.sum())
@@ -423,7 +423,7 @@ class LogLikelihood:
                     **{
                         column + "_uncertainty": value[1]
                         for column, value in self._best_fit_bls.items()
-                        if column.endswith("_uncertainty")
+                        if isinstance(value, tuple)
                     },
                 )
             )
@@ -538,6 +538,12 @@ class LogLikelihood:
         # https://outerspace.stsci.edu/display/TESS/2.0+-+Data+Product+Overview#id-2.0-DataProductOverview-Table:CadenceQualityFlags
 
         self._sed, self._best_fit_bls = self._get_cached(tic_id)
+
+        if self._sed is None or overwrite_cache:
+            self._sed = Green19Correction(
+                ignore_extinction_flags
+            ).get_absolute_magnitudes(tic_id)[0]
+            overwrite_cache = True
 
         best_fit_bls = []
         self._lcs = []
@@ -663,12 +669,6 @@ class LogLikelihood:
             *self._best_fit_bls["depth"],
             self._best_fit_bls["duration"],
         )
-
-        if self._sed is None or overwrite_cache:
-            self._sed = Green19Correction(
-                ignore_extinction_flags
-            ).get_absolute_magnitudes(tic_id)[0]
-            overwrite_cache = True
 
         self._logger.debug("LCs: %s", repr(self._lcs))
         self._logger.debug("SED: %s", repr(self._sed))

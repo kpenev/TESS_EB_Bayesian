@@ -23,8 +23,9 @@ from general_purpose_python_modules.emcee_util import (
     load_initial_positions,
 )
 
-from paths import results_dir
+from paths import results_dir, jktebob as jktebob_paths
 from sample_params import SampleParams
+from log_likelihood import LogLikelihood
 
 _logger = logging.getLogger(__name__)
 
@@ -378,6 +379,71 @@ def get_initial_mcmc_state(log_likelihood, config, samples_fname):
     return starting_positions
 
 
+def masked_is_significant(bls):
+    """
+    Return True iff the masked BLS fit appears to fit real eclipses.
+
+    To be marked as significant all of the following must be satisfied:
+
+      * maked period should be close to unmasked period (within 5 unmasked
+        uncertanties)
+
+      * depth should exceed its uncertanity by at least a factor of 5
+
+      * masked_harmonic_delta_log_likelihood < -5
+    """
+
+    return (
+        abs(bls["masked_period"][0] - bls["period"][0]) < 5.0 * bls["period"][1]
+        and bls["masked_depth"][0] > 5.0 * bls["masked_depth"][1]
+        and bls["masked_harmonic_delta_log_likelihood"] < -5.0
+    )
+
+
+def create_jktebob_inputs(log_likelihood):
+    """Create input files for running jktebob to optimize given lightcurve."""
+
+    fname_substitutions = {"mode": "simplefit", "tic_id": log_likelihood.tic_id}
+
+    bls = log_likelihood.best_fit_bls
+    values = {"esinw": 0.0, "rratio": 1.0, "porb": bls["period"][0]}
+    for fname_type, fname_template in jktebob_paths.items():
+        values[fname_type] = fname_template.format_map(fname_substitutions)
+    log_likelihood.save_jktebob_lc(values["inlcfname"])
+
+    with open(
+        values.pop("template"),
+        "r",
+        encoding="ascii",
+    ) as template, open(
+        values.pop("inputfname"),
+        "w",
+        encoding="ascii",
+    ) as outf:
+        if masked_is_significant(bls):
+            timing_anomaly = (
+                (bls["masked_transit_time"] - bls["transit_time"])
+                % bls["period"]
+            ) / bls["period"]
+            timing_anomaly = min(timing_anomaly, 1.0 - timing_anomaly)
+            values["ecosw"] = numpy.cos(numpy.pi * timing_anomaly)
+            values["iratio"] = bls["depth"][0] / bls["masked_depth"][0]
+        else:
+            values["porb"] *= 2
+            values["ecosw"] = 0.0
+            values["iratio"] = bls["depth_odd"][0] / bls["depth_even"][0]
+
+        values["rsum"] = numpy.sin(
+            numpy.pi
+            * bls["duration"]
+            / (
+                values["porb"]
+                * (1.0 - values["esinw"] ** 2 - values["ecosw"] ** 2)
+            )
+        )
+        outf.write(template.read().format_map(values))
+
+
 def test_global_minimization(tic_id):
     """Test the global minimization of -log-likelihood."""
 
@@ -439,4 +505,9 @@ def test_global_minimization(tic_id):
 
 
 if __name__ == "__main__":
-    test_global_minimization(189639080)
+    logging.basicConfig(level=logging.DEBUG)
+    test_tic = 4629065  # 189639080
+
+    log_likelihood = LogLikelihood(test_tic)
+    create_jktebob_inputs(log_likelihood)
+    # test_global_minimization(test_tic)

@@ -12,5 +12,14 @@ prsa_ebs = path.join(
 )
 
 cache_db = path.join(data_dir, "mcmc_cache.sqlite")
-results_dir = path.join(path.dirname(path.dirname(path.abspath(__file__))),
-                        "results")
+results_dir = path.join(
+    path.dirname(path.dirname(path.abspath(__file__))), "results"
+)
+jktebob = {
+    'template': path.join(data_dir, "jktebob_{mode}_template.in"),
+    'inputfname': path.join(results_dir, "tess{tic_id}_jktebob_{mode}.in"),
+    'inlcfname': path.join(results_dir, "tess{tic_id}_mag_v_time.dat"),
+    'paramfname': path.join(results_dir, "tess{tic_id}_jktebob_{mode}.par"),
+    'outlcfname': path.join(results_dir, "tess{tic_id}_jktebob_{mode}.out"),
+    'fitlcfname': path.join(results_dir, "tess{tic_id}_jktebob_{mode}.fit"),
+}
