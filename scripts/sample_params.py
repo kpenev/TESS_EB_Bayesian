@@ -27,4 +27,18 @@ SampleParams = namedtuple(
         "lc_sys",
         "sed_sys",
     ],
+    defaults=(
+        0.0,  # primary_limb_dark_1
+        0.0,  # primary_limb_dark_2
+        0.0,  # secondary_limb_dark_1
+        0.0,  # secondary_limb_dark_2
+        100.0,  # primary_prot
+        100.0,  # secondary_prot
+        0.01,  # primary_reflection_coef
+        0.01,  # secondary_reflection_coef
+        0.01,  # primary_beaming_coef
+        0.01,  # secondary_beaming_coef
+        1e-10,  # lc_sys
+        1e-10,  # sed_sys
+    ),
 )

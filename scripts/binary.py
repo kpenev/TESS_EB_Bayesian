@@ -1,5 +1,7 @@
 """Define class representing TESS EBs for analysis."""
 
+import logging
+
 import batman
 import numpy
 from scipy.optimize import minimize
@@ -13,6 +15,8 @@ from ebeer import EBEERBinary
 class Binary(EBEERBinary):
     """Represent TESS eclipsing binaries."""
 
+    _logger = logging.getLogger(__name__)
+
     def _get_primary_lightcurve(
         self, times, true_anomaly, exclude=(), **eclipse_config
     ):
@@ -21,12 +25,16 @@ class Binary(EBEERBinary):
         flux = numpy.ones(true_anomaly.shape)
         if "ellipticity" not in exclude:
             flux += self.ellipticity(true_anomaly)
+
         if "reflection" not in exclude:
             flux += self.reflection(true_anomaly)
+
         if "beaming" not in exclude:
             flux += self.beaming(true_anomaly)
+
         if "eclipse" not in exclude:
             flux *= self.eclipse(times, **eclipse_config)
+
         return flux
 
     def _setup_fit_beer_coef_problem(
@@ -290,9 +298,10 @@ class Binary(EBEERBinary):
         if secondary_flux_fraction == "split":
             return (primary_flux, secondary_flux)
 
-        return (primary_flux + secondary_flux_fraction * secondary_flux) / (
+        result = (primary_flux + secondary_flux_fraction * secondary_flux) / (
             1 + secondary_flux_fraction
         )
+        return result
 
 
 if __name__ == "__main__":

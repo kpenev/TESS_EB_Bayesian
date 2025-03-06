@@ -17,6 +17,62 @@ from gravity_darkening import GravDarkInterpolator
 from paths import cmd_data_fname
 
 
+def calc_eclipse_phase_diff(ecc, w, inc=None):
+    """
+    Calculate the phase difference between secondary and primary eclipse.
+
+    Uses equation 31 (and correction for non-central transits) from
+    Sterne 1940 (PNAS 26, 36):
+
+    `https://ui.adsabs.harvard.edu/abs/1940PNAS...26...36S/abstract`_
+
+
+    If ``inc`` is not None, applies inclination correction to return time of mid
+    transit. Note that for BATMAN purposes the inclination correction should not
+    be applied since the parameter used is the time of conjunction, not
+    mid-transit.
+    """
+
+    if ecc == 1:
+        return 0 if 90 < w % 360 < 270 else 1
+
+    e_square = ecc**2
+    esinw = ecc * numpy.sin(w * numpy.pi / 180.0)
+    ecosw = ecc * numpy.cos(w * numpy.pi / 180.0)
+
+    central_transits_rhs = ecosw * (1.0 - e_square) ** 0.5 / (
+        1.0 - esinw**2
+    ) + numpy.arctan(ecosw / (1.0 - e_square) ** 0.5)
+
+    if inc is not None:
+        coti2 = numpy.tan(inc * numpy.pi / 180.0) ** (-2)
+        inclination_correction = (
+            0.5
+            * ecosw
+            * coti2
+            * (
+                1.0
+                / (
+                    (1.0 + esinw) ** 3
+                    + (1.0 + esinw)
+                    * (esinw + esinw**2 + 3.0 * ecosw**2)
+                    * coti2
+                )
+                + 1.0
+                / (
+                    (1.0 - esinw) ** 3
+                    + (1.0 - esinw)
+                    * (-esinw + esinw**2 + 3.0 * ecosw**2)
+                    * coti2
+                )
+            )
+        )
+    else:
+        inclination_correction = 0.0
+
+    return (central_transits_rhs + inclination_correction) / numpy.pi + 0.5
+
+
 # This is set by BATMAN
 # pylint: disable=too-many-instance-attributes
 class BinaryParams(batman.TransitParams):
@@ -30,64 +86,12 @@ class BinaryParams(batman.TransitParams):
     meh_range = _cmd_interpolators[0][1].get_range("MH")
     log_age_range = _cmd_interpolators[0][1].get_range("logAge")
 
-    def _eclipse_phase_difference(self, mid_transit=False):
-        """
-        Calculate the phase difference between secondary and primary eclipse.
+    def _calc_eclipse_phase_diff(self, mid_transit=False):
+        """Convenience wrapper around `calc_eclipse_phase_diff()`."""
 
-        Uses equation 31 (and correction for non-central transits) from
-        Sterne 1940 (PNAS 26, 36):
-
-        `https://ui.adsabs.harvard.edu/abs/1940PNAS...26...36S/abstract`_
-
-        Note that for BATMAN purposes the inclination correction should not be
-        applied since the parameter used is the time of conjunction, not
-        mid-transit.
-
-        Args:
-            mid_transit(bool):    If True, the phase of mid-transit is used. If
-                false, the time of conjunction.
-
-        Returns:
-            float:
-                The fraction of the orbital period that elapses between primary
-                and secondary eclipses.
-        """
-
-        e_square = self.ecc**2
-        esinw = self.ecc * numpy.sin(self.w * numpy.pi / 180.0)
-        ecosw = self.ecc * numpy.cos(self.w * numpy.pi / 180.0)
-
-        central_transits_rhs = ecosw * (1.0 - e_square) ** 0.5 / (
-            1.0 - esinw**2
-        ) + numpy.arctan(ecosw / (1.0 - e_square) ** 0.5)
-
-        if mid_transit:
-            coti2 = numpy.tan(self.inc * numpy.pi / 180.0) ** (-2)
-            inclination_correction = (
-                0.5
-                * ecosw
-                * coti2
-                * (
-                    1.0
-                    / (
-                        (1.0 + esinw) ** 3
-                        + (1.0 + esinw)
-                        * (esinw + esinw**2 + 3.0 * ecosw**2)
-                        * coti2
-                    )
-                    + 1.0
-                    / (
-                        (1.0 - esinw) ** 3
-                        + (1.0 - esinw)
-                        * (-esinw + esinw**2 + 3.0 * ecosw**2)
-                        * coti2
-                    )
-                )
-            )
-        else:
-            inclination_correction = 0.0
-
-        return (central_transits_rhs + inclination_correction) / numpy.pi + 0.5
+        return calc_eclipse_phase_diff(
+            self.ecc, self.w, self.inc if mid_transit else None
+        )
 
     def _set_per_star(self):
         """Set the per-star attributes to match the primary."""
@@ -114,7 +118,7 @@ class BinaryParams(batman.TransitParams):
         #                   90.0)
 
         self._t0_both["secondary"] = self._t0_both["primary"] + (
-            self.per * self._eclipse_phase_difference()
+            self.per * self._calc_eclipse_phase_diff()
         )
 
         self._linear_limbdark_both = {}
@@ -206,21 +210,25 @@ class BinaryParams(batman.TransitParams):
                 / (2.0 * units.K**2)
                 * numpy.sqrt(units.L_sun / (numpy.pi * constants.sigma_sb))
             )
+            max_logg = self._gravdark_interp.get_range("logg")[1]
             try:
                 self._gravdark_both[component] = self._gravdark_interp(
-                    logg=numpy.log10(
-                        (
-                            constants.G
-                            * comp_interp[0]
-                            * units.M_sun
-                            / radii[component] ** 2
-                        ).to_value(units.cm / units.s**2)
+                    logg=min(
+                        max_logg,
+                        numpy.log10(
+                            (
+                                constants.G
+                                * comp_interp[0]
+                                * units.M_sun
+                                / radii[component] ** 2
+                            ).to_value(units.cm / units.s**2)
+                        ),
                     ),
                     Z=sample_params.meh,
                     logTeff=comp_interp[2],
                 )
             except ValueError:
-                self._out_of_range.append(f'{component}:logg')
+                self._out_of_range.append(f"{component}:logg")
                 self._gravdark_both[component] = numpy.nan
         self.a = (
             (
@@ -232,10 +240,10 @@ class BinaryParams(batman.TransitParams):
             / radii["primary"]
         ).to_value()
         self.rstar = radii["primary"].to_value(units.R_sun)
-        self.rp = radii["secondary"] / radii["primary"]
+        self.rp = (radii["secondary"] / radii["primary"]).to_value()
 
         if numpy.abs(sample_params.primary_impact_param) > self.a:
-            self._out_of_range.append('impact_param')
+            self._out_of_range.append("impact_param")
             self.inc = numpy.nan
         else:
             self.inc = (
@@ -257,7 +265,7 @@ class BinaryParams(batman.TransitParams):
 
         self._t0_both["primary"] = sample_params.eclipse_time
         self._t0_both["secondary"] = self._t0_both["primary"] + (
-            self.per * self._eclipse_phase_difference()
+            self.per * self._calc_eclipse_phase_diff()
         )
         self.t0_perpass = (
             self._t0_both["primary"]
@@ -282,7 +290,6 @@ class BinaryParams(batman.TransitParams):
                 self._u_both[component][0] = 1.0 - self._u_both[component][1]
                 self._u_both[component][1] = 1.0 - self._u_both[component][0]
 
-
             # From least squares diff between linear and quadratic profiles
             self._linear_limbdark_both[component] = (
                 self._u_both[component][0] + 0.3 * self._u_both[component][1]
@@ -296,6 +303,14 @@ class BinaryParams(batman.TransitParams):
             + 10.0 ** (-interpolated["secondary"][3:] / 2.5)
         )
         self._set_per_star()
+
+    def shift_time(self, shift):
+        """Shift the lightcurve in time i.e. new(t + shift) = old(t)."""
+
+        self.t0_perpass += shift
+        self.t0 += shift
+        for k in self._t0_both:
+            self._t0_both[k] += shift
 
     @property
     def out_of_range(self):
@@ -455,6 +470,12 @@ class BinaryParams(batman.TransitParams):
         )
 
         return true_anom
+
+    @property
+    def eclipse_time_difference(self):
+        """The time between primary and secondary eclipses."""
+
+        return self._t0_both["secondary"] - self._t0_both["primary"]
 
     def __str__(self):
         """Human readable representation of the currently stored values."""

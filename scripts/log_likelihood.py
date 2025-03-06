@@ -428,18 +428,50 @@ class LogLikelihood:
                 )
             )
 
-    def _iter_lc_and_model(self, binary, lc_sys_err):
+    def _get_lc_eclipses(self, lightcurve, which):
+        """
+        Filter the lightcure to leave only point per mask.
+
+        See `self.calc_lc_log_likelihood()` for what masks are supported.
+        """
+
+        if which == "masked":
+            period = self._best_fit_bls["masked_period"][0]
+            window = 2.0 * (
+                self._best_fit_bls["masked_duration"]
+                + 2.0 * self._best_fit_bls["masked_period"][1]
+            )
+            time = (
+                lightcurve["time"] - self._best_fit_bls["masked_transit_time"]
+            )
+        else:
+            period = self._best_fit_bls["period"][0] * (
+                1 if which == "both" else 2
+            )
+            window = 2.0 * (
+                self._best_fit_bls["duration"]
+                + 2.0 * self._best_fit_bls["period"][1]
+            )
+            time = lightcurve["time"] - self._best_fit_bls["transit_time"]
+            if which == "odd":
+                time -= self._best_fit_bls["period"][0]
+
+        folded = time % period
+        return lightcurve[numpy.minimum(folded, period - folded) < window]
+
+    def _iter_lc_and_model(self, binary, lc_sys_err, eclipse_only):
         """Iterate over LC data and model given binary parameters."""
 
         for header, lightcurve in self._lcs:
+            if eclipse_only:
+                lightcurve = self._get_lc_eclipses(lightcurve, eclipse_only)
             lc_sq_errors = lightcurve["flux_err"] ** 2 + lc_sys_err**2
+
             model_lc = binary.get_lightcurve(
                 lightcurve["time"],
                 supersample_factor=100,
                 exp_time=header["exptime"],
             )
-
-            self._logger.debug("Model LC:\n%s", repr(model_lc))
 
             model_lc *= (model_lc * lightcurve["flux"] / lc_sq_errors).sum() / (
                 model_lc**2 / lc_sq_errors
@@ -572,44 +604,6 @@ class LogLikelihood:
                     )
                 )
 
-                if self._best_fit_bls is None or overwrite_cache:
-                    bls_results = self._get_best_fit_bls(
-                        combined_lc[-formatted_lc.size :]
-                    )
-                    self._logger.debug(
-                        "%s LC for sector %d has %s usable points, BLS "
-                        "results:\n\t%s",
-                        provenance,
-                        sector,
-                        repr(formatted_lc.size),
-                        "\n\t".join(
-                            [
-                                f"{param}: {value}"
-                                for param, value in bls_results.items()
-                            ]
-                        ),
-                    )
-
-                    bls_results.update(
-                        self._get_masked_best_fit_bls(
-                            combined_lc[-formatted_lc.size :], bls_results
-                        )
-                    )
-                    bls_results["num_points"] = formatted_lc.size
-                    best_fit_bls.append(bls_results)
-                    self._logger.debug(
-                        "%s LC for sector %d has %s usable points, BLS "
-                        "results:\n\t%s",
-                        provenance,
-                        sector,
-                        repr(formatted_lc.size),
-                        "\n\t".join(
-                            [
-                                f"{param}: {value}"
-                                for param, value in bls_results.items()
-                            ]
-                        ),
-                    )
         if self._best_fit_bls is None or overwrite_cache:
             # self._best_fit_bls = self._average_best_fit_bls(best_fit_bls)
             self._best_fit_bls = self._get_best_fit_bls(combined_lc)
@@ -617,7 +611,7 @@ class LogLikelihood:
                 self._get_masked_best_fit_bls(combined_lc, self._best_fit_bls)
             )
 
-            self._logger.debug(
+            self._logger.info(
                 "Combined LC has %s usable points, BLS results:\n\t%s",
                 repr(combined_lc.size),
                 "\n\t".join(
@@ -629,6 +623,11 @@ class LogLikelihood:
             )
 
             overwrite_cache = True
+
+        if overwrite_cache:
+            self._cache(tic_id)
+        if plot_bls is not False:
+            self.plot_best_fit_bls(combined_lc, plot_bls)
 
         self._range = SampleParams(
             mtotal=(0.2, 4),
@@ -661,22 +660,8 @@ class LogLikelihood:
 
         assert self._best_fit_bls["period"][0] > self._range.per[0]
 
-        self._logger.info(
-            "Averaged best fit BLS: period = %s +- %s, transit time = %s, "
-            "depth = %s +- %s, duration = %s",
-            *self._best_fit_bls["period"],
-            self._best_fit_bls["transit_time"],
-            *self._best_fit_bls["depth"],
-            self._best_fit_bls["duration"],
-        )
-
         self._logger.debug("LCs: %s", repr(self._lcs))
         self._logger.debug("SED: %s", repr(self._sed))
-
-        if overwrite_cache:
-            self._cache(tic_id)
-        if plot_bls is not False:
-            self.plot_best_fit_bls(combined_lc, plot_bls)
 
     def prior_transform(self, param, sample_entry):
         """
@@ -740,79 +725,103 @@ class LogLikelihood:
 
         sample_params = self.get_sample_params(mcmc_sample)
         binary = Binary(from_mcmc=sample_params)
+        self._logger.debug(
+            "Plotting LC model comparison for binary: %s", binary
+        )
+
         num_bins = 100
-        for header, lightcurve, model_lc, _ in self._iter_lc_and_model(
-            binary, sample_params.lc_sys
-        ):
-            pyplot.figure(figsize=[4.8, 6.4])
-            pyplot.subplot(211)
-            pyplot.plot(lightcurve["time"], lightcurve["flux"], "-r")
-            pyplot.plot(lightcurve["time"], model_lc, "-b")
-            pyplot.xlabel("Time [days]")
-            pyplot.ylabel("Flux [ppm]")
-            pyplot.subplot(212)
-            pyplot.plot(
-                (lightcurve["time"] % binary.per) / binary.per,
-                lightcurve["flux"],
-                ",r",
-                zorder=10,
-            )
-            phase = (lightcurve["time"] % binary.per) / binary.per
-            binned_lc = self._bin_lightcurve(lightcurve, num_bins, phase)
-            pyplot.plot(
-                (binned_lc["time"] % binary.per) / binary.per,
-                binned_lc["flux"],
-                "og",
-                markersize=3,
-                zorder=20,
-            )
+        for mask_name in [None, 'deeper', 'shallower']:
+            for header, lightcurve, model_lc, _ in self._iter_lc_and_model(
+                binary, sample_params.lc_sys, mask_name
+            ):
+                pyplot.figure(figsize=[4.8, 6.4])
+                pyplot.subplot(211)
+                pyplot.plot(lightcurve["time"], lightcurve["flux"], "-r")
+                pyplot.plot(lightcurve["time"], model_lc, "-b")
+                pyplot.xlabel("Time [days]")
+                pyplot.ylabel("Flux [ppm]")
+                pyplot.subplot(212)
+                pyplot.plot(
+                    (lightcurve["time"] % binary.per) / binary.per,
+                    lightcurve["flux"],
+                    ",",
+                    zorder=10,
+                )
+                phase = (lightcurve["time"] % binary.per) / binary.per
+                #binned_lc = self._bin_lightcurve(lightcurve, num_bins, phase)
+                #pyplot.plot(
+                #    (binned_lc["time"] % binary.per) / binary.per,
+                #    binned_lc["flux"],
+                #    "o",
+                #    markersize=3,
+                #    zorder=20,
+                #)
 
-            phase_sort = numpy.argsort(phase)
-            pyplot.plot(
-                phase[phase_sort], model_lc[phase_sort], "-b", zorder=30
-            )
-            pyplot.xlabel(f"Phase (Porb={binary.per!r})")
-            pyplot.ylabel("Flux [ppm]")
+                phase_sort = numpy.argsort(phase)
+                pyplot.plot(
+                    phase[phase_sort], model_lc[phase_sort], "-", zorder=30
+                )
+                pyplot.xlabel(f"Phase (Porb={binary.per!r})")
+                pyplot.ylabel("Flux [ppm]")
 
-            pyplot.suptitle(
-                f"TIC {self.tic_id}, sector {header['sector']}"
-                + f": {extra_title}"
-                if extra_title
-                else ""
-            )
-            if pdf is None:
-                pyplot.show()
-            else:
-                pdf.savefig()
-            pyplot.cla()
-            pyplot.clf()
+                pyplot.suptitle(
+                    f"TIC {self.tic_id}, sector {header['sector']}"
+                    + f": {extra_title}"
+                    if extra_title
+                    else ""
+                )
+                if pdf is None:
+                    pyplot.show()
+                else:
+                    pdf.savefig()
+                pyplot.cla()
+                pyplot.clf()
 
-    def calc_lc_log_likelihood(self, binary, lc_sys_err):
-        """Return log-likelihood of observing the TESS LCs for given binary."""
+    def calc_lc_log_likelihood(self, binary, lc_sys_err, eclipse_only=False):
+        """
+        Return log-likelihood of observing the TESS LCs for given binary.
+
+        Args:
+            binary(Binary):    The binary for which to evaluate the model to
+                compare to the lightcurves.
+
+            lc_sys_err(float):    The systematic error to assume for
+                lightcurves. (added in quadrature to formal errors).
+
+            eclipse_only(str or False):    If not False, only lightcurve points
+            near eclipse are considered:
+
+                * even: Only the points in the vicinity of even eclipses (per
+                  best fit BLS) are included.
+
+                * odd: Only the points in the vicinity of even eclipses (per
+                  best fit BLS) are included.
+
+                * both: Points near both eclipses.
+
+                * masked: Points near the eclipses reported in the masked BLS
+                  are considered
+        """
 
         result = 0.0
         for _, lightcurve, model_lc, lc_sq_errors in self._iter_lc_and_model(
-            binary, lc_sys_err
+            binary, lc_sys_err, eclipse_only
         ):
-            self._logger.debug("Square LC errors: %s", repr(lc_sq_errors))
             result -= (
                 (lightcurve["flux"] - model_lc) ** 2 / lc_sq_errors
                 + numpy.log(lc_sq_errors)
             ).sum()
             self._logger.debug("Log likelihood now: %s", repr(result / 2))
 
+        if not numpy.isfinite(result):
+            self._logger.error("Non-finite log-likelihood for binary: %s",
+                               binary)
         return result / 2
 
     def calc_sed_log_likelihood(self, binary, sed_sys_err):
         """Return log-likelihood of observed SED for given binary."""
 
         sed_sq_errors = self._sed[1] ** 2 + sed_sys_err**2
-        self._logger.debug(
-            "Adding SED log-likelihood. Observed: %s, model: %s, unc^2: %s",
-            self._sed[0],
-            binary.absmag,
-            sed_sq_errors,
-        )
 
         result = (
             -(
@@ -925,6 +934,63 @@ class LogLikelihoodUnitCubePriors(LogLikelihood):
 
 
 if __name__ == "__main__":
+    params = SampleParams(
+        mtotal=1.5,
+        mratio=0.5,
+        age_gyr=1.0,
+        meh=0.0,
+        per=numpy.pi,
+        ecc=0.8,
+        w=63.0,
+        primary_impact_param=0.0,
+        eclipse_time=1.0,
+        primary_limb_dark_1=0.0,
+        primary_limb_dark_2=0.0,
+        secondary_limb_dark_1=0.0,
+        secondary_limb_dark_2=0.0,
+        primary_prot=100.0,
+        secondary_prot=100.0,
+        primary_reflection_coef=0.0,
+        secondary_reflection_coef=0.0,
+        primary_beaming_coef=0.0,
+        secondary_beaming_coef=0.0,
+        lc_sys=0.0,
+        sed_sys=0.0,
+    )
+    binary = Binary(from_mcmc=params)
+
+    plot_t = numpy.linspace(0.0, 3.0, 1000)
+    pyplot.plot(
+        plot_t, binary.get_lightcurve(plot_t), label="orig", linewidth=3
+    )
+    mod_params = params._replace(
+        w=180.0 + params.w,
+        eclipse_time=params.eclipse_time + binary.eclipse_time_difference,
+    )
+    pyplot.plot(
+        plot_t,
+        Binary(from_mcmc=mod_params).get_lightcurve(plot_t),
+        label="180+w",
+        linewidth=3,
+    )
+    mod_params = params._replace(
+        w=180.0 - params.w,
+        eclipse_time=params.eclipse_time + binary.eclipse_time_difference,
+    )
+    pyplot.plot(
+        plot_t,
+        Binary(from_mcmc=mod_params).get_lightcurve(plot_t),
+        ":",
+        label="180-w",
+        linewidth=3,
+    )
+
+    pyplot.legend()
+    pyplot.show()
+    pyplot.cla()
+    pyplot.clf()
+    exit(1)
+
     # TODO: figure out why 323020176 crashes
     test_tic = 189639080
     eb_cat = pandas.read_csv(prsa_ebs, index_col="tess_id")
@@ -933,7 +999,7 @@ if __name__ == "__main__":
 
     with PdfPages("best_fit_bls.pdf") as output_pdf:
         log_likelihood = LogLikelihood(test_tic, plot_bls=output_pdf)
-    log_likelihood.save_jktebob_lc(f'tess{test_tic}_jktebob.dat')
+    log_likelihood.save_jktebob_lc(f"tess{test_tic}_jktebob.dat")
 
     # use("PDF")
     with PdfPages("test.pdf") as output_pdf:
