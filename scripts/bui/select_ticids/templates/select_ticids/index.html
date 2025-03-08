@@ -5,14 +5,28 @@
 <html lang="en">
     <head>
         <meta charset="utf-8">
+        <link rel="stylesheet" 
+              href="{% static 'select_ticids/css/top_navbar.css' %}">
         <title>Select TIC IDs</title>
     </head>
     <body>
-        <ul>
-            {% for ticid in review_ticids %}
-            <li>{{ ticid }}</li>
-            {% endfor %}
+        <ul class="navbar">
+            <li><a>Select</a></li>
+            <li><a>Discard</a></li>
+            <li><a>Skip</a></li>
+            <li class="save"><a>Save</a></li>
         </ul>
+        <div class="main">
+            <div class="plots">
+                Something
+            </div>
+            <div class="ticid_lists">
+                <ul class="selected">
+                    {% for ticid in review_ticids %}
+                    <li><a> TIC ID: {{ ticid }} </a> </li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
     </body>
 </html>
-
