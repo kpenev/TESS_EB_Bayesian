@@ -26,6 +26,10 @@ class GravDarkInterpolator:
                 + raw_data["logTeff"].astype(float)
             )
         ]
+        self._logteff_range = (
+            raw_data["logTeff"].min(),
+            raw_data["logTeff"].max(),
+        )
         self._grid = tuple(
             (var, numpy.unique(raw_data[var])) for var in ["Z", "logg"]
         )
@@ -66,6 +70,8 @@ class GravDarkInterpolator:
     def get_range(self, quantity):
         """Return the available interpolation range of the given quantity."""
 
+        if quantity == "logTeff":
+            return self._logteff_range
         for name, values in self._grid:
             if name == quantity:
                 return values[0], values[-1]

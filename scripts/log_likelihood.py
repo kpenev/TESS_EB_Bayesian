@@ -330,6 +330,9 @@ class LogLikelihood:
     def _get_cached(self, tic_id):
         """Set-up using cached information for given TIC ID if available."""
 
+        def none_to_nan(value):
+            return numpy.nan if value is None else value
+
         sed = None
         bls = None
         # False positive
@@ -348,14 +351,32 @@ class LogLikelihood:
 
                 sed = (
                     numpy.array(
-                        [getattr(cached_sed, f + "p1") for f in "grizy"]
-                        + [getattr(cached_sed, f + "2m") for f in "jhk"]
-                        + [cached_sed.w1, cached_sed.w2]
+                        [
+                            none_to_nan(getattr(cached_sed, f + "p1"))
+                            for f in "grizy"
+                        ]
+                        + [
+                            none_to_nan(getattr(cached_sed, f + "2m"))
+                            for f in "jhk"
+                        ]
+                        + [
+                            none_to_nan(cached_sed.w1),
+                            none_to_nan(cached_sed.w2),
+                        ]
                     ),
                     numpy.array(
-                        [getattr(cached_sed, f + "p1_err") for f in "grizy"]
-                        + [getattr(cached_sed, f + "2m_err") for f in "jhk"]
-                        + [cached_sed.w1_err, cached_sed.w2_err]
+                        [
+                            none_to_nan(getattr(cached_sed, f + "p1_err"))
+                            for f in "grizy"
+                        ]
+                        + [
+                            none_to_nan(getattr(cached_sed, f + "2m_err"))
+                            for f in "jhk"
+                        ]
+                        + [
+                            none_to_nan(cached_sed.w1_err),
+                            none_to_nan(cached_sed.w2_err),
+                        ]
                     ),
                 )
 
@@ -720,19 +741,27 @@ class LogLikelihood:
                 binned[bin_ind] = numpy.median(lightcurve[quantity][in_bin])
         return binned_lc
 
-    def plot_lc_model_comparison(self, mcmc_sample, pdf=None, extra_title=""):
+    def plot_lc_model_comparison(
+        self, sample_or_binary, pdf=None, extra_title=""
+    ):
         """Create multi-page PDF showing the model over LC data for each LC."""
 
-        sample_params = self.get_sample_params(mcmc_sample)
-        binary = Binary(from_mcmc=sample_params)
+        if isinstance(sample_or_binary, Binary):
+            binary = sample_or_binary
+        elif isinstance(sample_or_binary, SampleParams):
+            binary = Binary(from_mcmc=sample_or_binary)
+        else:
+            sample_params = self.get_sample_params(sample_or_binary)
+            binary = Binary(from_mcmc=sample_params)
+
         self._logger.debug(
             "Plotting LC model comparison for binary: %s", binary
         )
 
         num_bins = 100
-        for mask_name in [None, 'deeper', 'shallower']:
+        for mask_name in [None, "deeper", "shallower"]:
             for header, lightcurve, model_lc, _ in self._iter_lc_and_model(
-                binary, sample_params.lc_sys, mask_name
+                binary, sample_or_binary.lc_sys, mask_name
             ):
                 pyplot.figure(figsize=[4.8, 6.4])
                 pyplot.subplot(211)
@@ -748,14 +777,14 @@ class LogLikelihood:
                     zorder=10,
                 )
                 phase = (lightcurve["time"] % binary.per) / binary.per
-                #binned_lc = self._bin_lightcurve(lightcurve, num_bins, phase)
-                #pyplot.plot(
+                # binned_lc = self._bin_lightcurve(lightcurve, num_bins, phase)
+                # pyplot.plot(
                 #    (binned_lc["time"] % binary.per) / binary.per,
                 #    binned_lc["flux"],
                 #    "o",
                 #    markersize=3,
                 #    zorder=20,
-                #)
+                # )
 
                 phase_sort = numpy.argsort(phase)
                 pyplot.plot(
@@ -803,6 +832,8 @@ class LogLikelihood:
                   are considered
         """
 
+        if binary.a < 1 + binary.rp:
+            return -numpy.inf
         result = 0.0
         for _, lightcurve, model_lc, lc_sq_errors in self._iter_lc_and_model(
             binary, lc_sys_err, eclipse_only
@@ -814,18 +845,21 @@ class LogLikelihood:
             self._logger.debug("Log likelihood now: %s", repr(result / 2))
 
         if not numpy.isfinite(result):
-            self._logger.error("Non-finite log-likelihood for binary: %s",
-                               binary)
+            self._logger.error(
+                "Non-finite log-likelihood for binary: %s", binary
+            )
         return result / 2
 
     def calc_sed_log_likelihood(self, binary, sed_sys_err):
         """Return log-likelihood of observed SED for given binary."""
 
-        sed_sq_errors = self._sed[1] ** 2 + sed_sys_err**2
+        finite = numpy.isfinite(self._sed[0])
+        sed_sq_errors = self._sed[1][finite] ** 2 + sed_sys_err**2
 
         result = (
             -(
-                (self._sed[0] - binary.absmag) ** 2 / sed_sq_errors
+                (self._sed[0][finite] - binary.absmag[finite]) ** 2
+                / sed_sq_errors
                 + numpy.log(sed_sq_errors)
             ).sum()
             / 2

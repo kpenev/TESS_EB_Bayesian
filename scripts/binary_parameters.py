@@ -1,5 +1,7 @@
 """Unified interface for binary parameters needed by the likelihood function."""
 
+import logging
+
 import numpy
 from astropy import units, constants
 import batman
@@ -15,6 +17,8 @@ from general_purpose_python_modules.cmd_utils import CMDInterpolator
 
 from gravity_darkening import GravDarkInterpolator
 from paths import cmd_data_fname
+
+_logger = logging.getLogger(__name__)
 
 
 def calc_eclipse_phase_diff(ecc, w, inc=None):
@@ -85,6 +89,7 @@ class BinaryParams(batman.TransitParams):
 
     meh_range = _cmd_interpolators[0][1].get_range("MH")
     log_age_range = _cmd_interpolators[0][1].get_range("logAge")
+    mini_range = _cmd_interpolators[0][1].get_range("Mini")
 
     def _calc_eclipse_phase_diff(self, mid_transit=False):
         """Convenience wrapper around `calc_eclipse_phase_diff()`."""
@@ -210,26 +215,42 @@ class BinaryParams(batman.TransitParams):
                 / (2.0 * units.K**2)
                 * numpy.sqrt(units.L_sun / (numpy.pi * constants.sigma_sb))
             )
-            max_logg = self._gravdark_interp.get_range("logg")[1]
-            try:
-                self._gravdark_both[component] = self._gravdark_interp(
-                    logg=min(
-                        max_logg,
-                        numpy.log10(
-                            (
-                                constants.G
-                                * comp_interp[0]
-                                * units.M_sun
-                                / radii[component] ** 2
-                            ).to_value(units.cm / units.s**2)
-                        ),
+            if radii[component] > 100 * units.R_sun:
+                _logger.warning(
+                    "For M*ini = %s, log10(age) = %s, [M/H] = %s, R* = %s",
+                    repr(
+                        mprimary
+                        * (
+                            1
+                            if component == "primary"
+                            else sample_params.mratio
+                        )
                     ),
-                    Z=sample_params.meh,
-                    logTeff=comp_interp[2],
+                    repr(interp_kwargs["logAge"]),
+                    repr(interp_kwargs["MH"]),
+                    repr(radii[component].to_value(units.R_sun)),
                 )
-            except ValueError:
-                self._out_of_range.append(f"{component}:logg")
-                self._gravdark_both[component] = numpy.nan
+
+            interp_args = {
+                "logg": numpy.log10(
+                    (
+                        constants.G
+                        * comp_interp[0]
+                        * units.M_sun
+                        / radii[component] ** 2
+                    ).to_value(units.cm / units.s**2)
+                ),
+                "Z": sample_params.meh,
+                "logTeff": comp_interp[2],
+            }
+            for var_name, var_value in interp_args.items():
+                interp_range = self._gravdark_interp.get_range(var_name)
+                interp_args[var_name] = max(
+                    interp_range[0], min(var_value, interp_range[1])
+                )
+            self._gravdark_both[component] = self._gravdark_interp(
+                **interp_args
+            )
         self.a = (
             (
                 (self.per * units.day) ** 2

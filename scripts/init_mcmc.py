@@ -36,6 +36,10 @@ InitialParamType = namedtuple(
 )
 
 
+class GoodEnough(Exception):
+    """Raised when a solver or optimized encounters a good enough value."""
+
+
 # Meant to serve as callable.
 # pylint: disable=too-few-public-methods
 class OptimizeStartingPosition:
@@ -133,12 +137,13 @@ class OptimizeStartingPosition:
 
         bls_info = self._log_likelihood.best_fit_bls
         target = (
-            (bls_info["transit_time"] - bls_info["masked_transit_time"])
+            (bls_info["masked_transit_time"] - bls_info["transit_time"])
             % bls_info["period"][0]
         ) / bls_info["period"][0]
-        target = (min if 90 < params.w % 360 < 270 else max)(
-            target, 1.0 - target
-        )
+        if (target < 0.5 and not (90 < params.w % 360 < 270)) or (
+            target > 0.5 and (90 < params.w % 360 < 270)
+        ):
+            params = params._replace(w=(180.0 + params.w) % 360)
 
         def to_solve(ecc):
             return calc_eclipse_phase_diff(ecc, params.w) - target
@@ -164,7 +169,13 @@ class OptimizeStartingPosition:
                 201,
             )
             if inverted:
-                if binary.get_lightcurve(time).min() < faintest:
+                if (
+                    binary.get_lightcurve(time).min() < faintest
+                    and self._bls_eclipses["deeper"] != "odd"
+                ) or (
+                    binary.get_lightcurve(time).min() > faintest
+                    and self._bls_eclipses["deeper"] == "odd"
+                ):
                     return params._replace(
                         w=180.0 + params.w,
                         eclipse_time=params.eclipse_time
@@ -178,51 +189,124 @@ class OptimizeStartingPosition:
     def _match_deeper_eclipse_depth(self, params):
         """Tune the primary impact parameter to best fit deeper eclipses."""
 
-        def to_minimize(impact):
-            mod_param = params._replace(primary_impact_param=impact)
-            binary = Binary(from_mcmc=mod_param)
+        def to_minimize(impact, phase_matched_params):
+            mod_params = phase_matched_params._replace(
+                primary_impact_param=impact
+            )
+            try:
+                binary = Binary(from_mcmc=mod_params)
+            except ValueError:
+                return numpy.inf
             return -self._log_likelihood.calc_lc_log_likelihood(
                 binary, 0.0, self._bls_eclipses["deeper"]
             )
 
-        result = optimize.minimize_scalar(to_minimize, bounds=(0.0, 10.0))
+        params = self._match_deeper_eclipse_phase(params)
+        temp_binary = Binary(from_mcmc=params)
+        _logger.debug(
+            "Optimizing impact parameter for params:\n%s\nbinary:\n%s",
+            params,
+            temp_binary,
+        )
+        result = optimize.minimize_scalar(
+            to_minimize,
+            bounds=(
+                0.0,
+                min(
+                    self._log_likelihood.get_range("primary_impact_param")[1],
+                    temp_binary.a,
+                ),
+            ),
+            args=(params,),
+            options={"disp": 3, "xatol": 1e-3},
+        )
         assert result.success
-        return params._replace(primary_impact_param=result.x), result.fun
+        return params._replace(primary_impact_param=result.x)
 
     def _match_both_depths(self, params):
         """Tune primary impact and mratio to best fit both eclipses."""
 
         def to_minimize(mratio):
-            return self._match_deeper_eclipse_depth(
-                params._replace(mratio=mratio)
-            )[1]
+            try:
+                binary = Binary(
+                    from_mcmc=self._match_deeper_eclipse_depth(
+                        params._replace(mratio=mratio)
+                    )
+                )
+            except ValueError:
+                return numpy.inf
+            result = -self._log_likelihood.calc_lc_log_likelihood(
+                binary, 0.0, self._bls_eclipses["shallower"]
+            )
+            _logger.debug(
+                "For m2/m1 = %s, shallower -LL: %s", repr(mratio), repr(result)
+            )
+            return result
 
-        result = optimize.minimize_scalar(to_minimize, bounds=(0.0, 1.0))
+        min_mass_to_mtot = Binary.mini_range[0] / params.mtotal
+        min_mratio = max(
+            self._log_likelihood.get_range("mratio")[0],
+            min_mass_to_mtot / (1.0 - min_mass_to_mtot),
+        )
+        result = optimize.minimize_scalar(
+            to_minimize, bounds=(min_mratio, 1.0), options={"xatol": 1e-3}
+        )
         assert result.success
-        params = self._match_deeper_eclipse_depth(
+        return self._match_deeper_eclipse_depth(
             params._replace(mratio=result.x)
-        )[0]
-        return params
+        )
 
     def _match_eclipses_and_sed(self, params):
         """Tune masses and impact parameter to best fit eclipses and SED."""
 
         def to_minimize(mtotal, lc_tuned_params):
-            binary = Binary(from_mcmc=lc_tuned_params._replace(mtotal=mtotal))
+            try:
+                binary = Binary(
+                    from_mcmc=lc_tuned_params._replace(mtotal=mtotal)
+                )
+            except ValueError:
+                return numpy.inf
             return -self._log_likelihood.calc_sed_log_likelihood(binary, 0.0)
 
-        orig_mratio = params.mratio + 1
-        while abs(orig_mratio - params.mratio) > 1e-3:
-            orig_mratio = params.mratio
-            params = self._match_both_depths(params)
+        def to_solve(mtotal, get_params=False):
+            lc_tuned_params = self._match_both_depths(
+                params._replace(mtotal=mtotal)
+            )
             result = optimize.minimize_scalar(
                 to_minimize,
                 bounds=self._log_likelihood.get_range("mtotal"),
-                args=(params,),
+                args=(lc_tuned_params,),
+                options={"xatol": 1e-3 * max(mtotal, 1)},
             )
             assert result.success
-            params = params._replace(mtotal=result.x)
-            _logger.info("Optimized parameters: %s", params)
+            _logger.debug(
+                "Starting from Mtotal = %s, found b = %s, m2/m1 = %s, "
+                "Motal = %s",
+                mtotal,
+                lc_tuned_params.primary_impact_param,
+                lc_tuned_params.mratio,
+                result.x,
+            )
+
+            if get_params:
+                return lc_tuned_params._replace(mtotal=result.x)
+            if abs(result.x - mtotal) < 1e-3 * mtotal:
+                raise GoodEnough("eclipses_and_sed", mtotal)
+            return result.x - mtotal
+
+        try:
+            result = optimize.root_scalar(
+                to_solve,
+                bracket=self._log_likelihood.get_range("mtotal"),
+                rtol=1e-3,
+            )
+            assert result.converged
+            result = result.root
+        except GoodEnough as stopped:
+            assert stopped.args[0] == "eclipses_and_sed"
+            result = stopped.args[1]
+        params = to_solve(result, True)
+        _logger.info("Optimized parameters: %s", params)
         return params
 
     def __init__(self, log_likelihood):
@@ -233,6 +317,7 @@ class OptimizeStartingPosition:
             zip(("deeper", "shallower", "allow_single"), self._classify_bls())
         )
         _logger.info("From BLS: %s", repr(self._bls_eclipses))
+
         params = SampleParams(
             mtotal=2.0,
             mratio=1.0,
@@ -240,7 +325,7 @@ class OptimizeStartingPosition:
             meh=0.0,
             per=(
                 self._log_likelihood.best_fit_bls["period"][0]
-                * (1 if self._bls_eclipses["shallower"] == "mask" else 2)
+                * (1 if self._bls_eclipses["shallower"] == "masked" else 2)
             ),
             ecc=0.0,
             w=0.0,
@@ -251,21 +336,11 @@ class OptimizeStartingPosition:
         _logger.debug("Starting params: %s", params)
         params = self._match_eclipse_times(params)
         _logger.debug("Eclipse timing matched params: %s", params)
-        params = self._match_deeper_eclipse_phase(params)
-        _logger.debug("Deeper eclipse matched params: %s", params)
         params = self._match_eclipses_and_sed(params)
         _logger.debug("Suggested starting params: %s", params)
 
-        with PdfPages("test_initial_param.pdf") as pdf:
-            log_likelihood.plot_lc_model_comparison(
-                numpy.array(
-                    [
-                        log_likelihood.inverse_prior(*name_value)[1]
-                        for name_value in zip(SampleParams._fields, params)
-                    ]
-                ),
-                pdf,
-            )
+        with PdfPages(f"tess{log_likelihood.tic_id}_initial_param.pdf") as pdf:
+            log_likelihood.plot_lc_model_comparison(params, pdf)
         return
         low_value = (
             0.0
@@ -661,11 +736,57 @@ def test_global_minimization(tic_id):
             )
 
 
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.DEBUG)
-    test_tic = 189639080  # 4629065
+def test():
+    """Place to implement various manual tests."""
+
+    test_tic = 16805617  # 189639080 # 4629065  #
 
     log_likelihood = LogLikelihood(test_tic)
     OptimizeStartingPosition(log_likelihood)
+    return
+    params = SampleParams(
+        mtotal=3.1180989692599335,
+        mratio=0.9797246475335591,
+        age_gyr=1.0,
+        meh=0.0,
+        per=11.793843600300352,
+        ecc=0.0,
+        w=180.0,
+        primary_impact_param=0.7279367331829606,
+        eclipse_time=1420.3748436711664,
+        primary_limb_dark_1=0.0,
+        primary_limb_dark_2=0.0,
+        secondary_limb_dark_1=0.0,
+        secondary_limb_dark_2=0.0,
+        primary_prot=100.0,
+        secondary_prot=100.0,
+        primary_reflection_coef=0.01,
+        secondary_reflection_coef=0.01,
+        primary_beaming_coef=0.01,
+        secondary_beaming_coef=0.01,
+        lc_sys=1e-10,
+        sed_sys=1e-10,
+    )
+    with PdfPages(f"tess{test_tic}_deeper_depth_match.pdf") as pdf:
+        for impact in numpy.linspace(0.5, 1.0, 10):
+            binary = Binary(
+                from_mcmc=params._replace(primary_impact_param=impact)
+            )
+            binary.lc_sys = 0.0
+            log_likelihood.plot_lc_model_comparison(
+                binary,
+                pdf,
+                f"b: {impact}, LL: "
+                + repr(
+                    log_likelihood.calc_lc_log_likelihood(binary, 0.0, "odd")
+                ),
+            )
+
+    OptimizeStartingPosition(log_likelihood)
     create_jktebob_inputs(log_likelihood)
     # test_global_minimization(test_tic)
+
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.DEBUG)
+    test()
