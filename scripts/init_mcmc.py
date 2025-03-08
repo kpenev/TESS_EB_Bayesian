@@ -5,16 +5,13 @@ from multiprocessing import Process, Queue
 import logging
 from traceback import format_exc
 
-from matplotlib.backends.backend_pdf import PdfPages
+#from matplotlib.backends.backend_pdf import PdfPages
 import numpy
 from scipy.stats import norm, uniform
 from scipy import optimize
 from astropy import units, constants
-from astroquery.mast import Catalogs
 
-from general_purpose_python_modules.multiprocessing_util import (
-    setup_process_map,
-)
+from general_purpose_python_modules.multiprocessing_util import setup_process
 from general_purpose_python_modules.emcee_util import (
     save_initial_position,
     load_initial_positions,
@@ -254,7 +251,7 @@ class FindStartingPositions:
         meh_values = numpy.linspace(-1.0, 0.5, config.initial_num_mehs)
 
         if self._secondary_eclipse_phase == 0.5:
-            w_values = numpy.linspace(0.0, 315.0, config.initial_num_ws)
+            w_values = numpy.linspace(-180.0, 135.0, config.initial_num_ws)
         else:
             wlimit = optimize.root_scalar(
                 wmax_eq,
@@ -265,9 +262,8 @@ class FindStartingPositions:
                 ),
             ).root
             if self._secondary_eclipse_phase > 0.5:
-                w_values = (
-                    numpy.linspace(-wlimit, wlimit, config.initial_num_ws)
-                    % 360.0
+                w_values = numpy.linspace(
+                    -wlimit, wlimit, config.initial_num_ws
                 )
             else:
                 w_values = numpy.linspace(
@@ -306,6 +302,50 @@ class FindStartingPositions:
             )
         ) % 360
         return result
+
+    def _find_initial_samples(self, scenario_queue, optimized_queue, config):
+        """Executed in worker threads to find optimal initial positions."""
+
+        try:
+            numpy.random.seed()
+            setup_process(task="find_starting_positions", **vars(config))
+            for scenario_ind, scenario in iter(scenario_queue.get, "STOP"):
+                try:
+                    params = self.optimize(
+                        scenario["age_gyr"], scenario["meh"], scenario["w"]
+                    )
+                except ValueError:
+                    _logger.warning(
+                        "Propesd initial position scenario (%s) appears "
+                        "unphysical, using random position:\n%s",
+                        repr(scenario),
+                        format_exc(),
+                    )
+                    optimized_queue.put(
+                        scenario_ind, norm.rvs(size=len(SampleParams._fields))
+                    )
+                    continue
+                optimized_queue.put(
+                    (
+                        scenario_ind,
+                        numpy.array(
+                            [
+                                self._log_likelihood.inverse_prior(
+                                    param, value
+                                )[0]
+                                for param, value in zip(params._fields, params)
+                            ]
+                        ),
+                    )
+                )
+            _logger.info("Starting position optimizanio process finished.")
+        # pylint: disable=bare-except
+        except:
+            _logger.critical(
+                "Initial position worker failed:\n%s", format_exc()
+            )
+            optimized_queue.put(None)
+        # pylint: enable=bare-except
 
     @property
     def secondary_eclipse_phase(self):
@@ -357,41 +397,66 @@ class FindStartingPositions:
 
         return params
 
+    #Trying to address makes function less readable
+    #pylint: disable=too-many-locals
     def __call__(self, config):
         """Generate the specified scenario per command line."""
 
         assert config.tic_id == self._log_likelihood.tic_id
+        initial_scenarios = self._get_init_scenarios(config)
+        num_params = len(SampleParams._fields)
+        num_walkers = initial_scenarios.size + config.num_random_walkers
         samples_fname = config.samples_fname_pattern.format(
             tic_id=config.tic_id
         )
-        initial_scenarios = self._get_init_scenarios(config)
-
-        initial_param_queue = Queue()
-        result_queue = Queue()
-        #TODO: continue moving `get_initial_mcmc_state()` here
-
-
-def _optimize_starting_positions(
-    initial_params_queue, result_queue, log_likelihood, config
-):
-    """Find a position that maximizes log(prob) starting with given Porb."""
-
-    try:
-        numpy.random.seed()
-        setup_process_map(vars(config))
-        get_starting_position = OptimizeStartingPosition(log_likelihood)
-
-        for initial_params in iter(initial_params_queue.get, "STOP"):
-            result_queue.put(get_starting_position(initial_params))
-        _logger.info("Starting position optimizanio process finished.")
-    # pylint: disable=bare-except
-    except:
-        _logger.critical(
-            "Optimizing initial positions failed:\n%s", format_exc()
+        starting_positions, positions_found = load_initial_positions(
+            samples_fname,
+            num_walkers=num_walkers,
+            num_params=num_params,
         )
-        result_queue.put(None)
-    # pylint: enable=bare-except
 
+        positions_needed = numpy.flatnonzero(numpy.logical_and(positions_found))
+        initial_scenarios = initial_scenarios[positions_needed]
+
+        scenario_queue = Queue()
+        for task in zip(positions_needed, initial_scenarios):
+            scenario_queue.put(task)
+
+        for _ in range(config.num_parallel):
+            scenario_queue.put("STOP")
+
+        optimized_queue = Queue()
+
+        workers = [
+            Process(
+                target=self._find_initial_samples,
+                args=(scenario_queue, optimized_queue, config),
+            )
+            for _ in range(config.num_parallel)
+        ]
+        for process in workers:
+            process.start()
+        for _ in initial_scenarios:
+            position = optimized_queue.get()
+            if position is None:
+                # pylint: disable=invalid-name
+                for w in workers:
+                    w.terminate()
+                # pylint: enable=invalid-name
+                raise RuntimeError("Failed to find initial walker positions.")
+            _logger.debug("Saving initial position %d: %s", *position)
+            save_initial_position(
+                position[1],
+                samples_fname,
+                nwalkers=num_walkers,
+                index=position[0],
+            )
+            starting_positions[position[0]] = position[1]
+        starting_positions[-config.num_random_walkers :, :] = norm.rvs(
+            size=config.num_random_walkers * num_params
+        ).reshape(config.num_random_walkers, num_params)
+        return starting_positions
+    #pylint: enable=too-many-locals
 
 def _estimate_mass(logg, teff):
     """Return an estimate of the stellar mass assuming main sequence star."""
@@ -417,89 +482,6 @@ def _estimate_mass(logg, teff):
     in_range = light_to_mass > 8
     result[in_range] = 0.85 * light_to_mass[in_range] ** 0.4
     return result
-
-
-def get_initial_mcmc_state(log_likelihood, config, samples_fname):
-    """Get suitable initial state to start MCMC from."""
-
-    starting_positions, positions_found = load_initial_positions(
-        samples_fname,
-        num_walkers=config.num_walkers,
-        num_params=len(SampleParams._fields),
-    )
-
-    _logger.info(
-        "Found %d optimized starting positions, looking for %d additional.",
-        positions_found,
-        config.num_optimized_initial_positions - positions_found,
-    )
-    initial_param_queue = Queue()
-    result_queue = Queue()
-
-    # False positive
-    # pylint: disable=no-member
-    tic_entry = Catalogs.query_criteria(catalog="Tic", ID=config.tic_id)
-    # pylint: enable=no-member
-
-    for walker_ind in range(positions_found, config.num_walkers):
-        initial_param_queue.put(
-            InitialParamType(
-                per=(
-                    log_likelihood.best_fit_bls["period"]
-                    * (1 + walker_ind % 2),
-                    log_likelihood.best_fit_bls["period_uncertainty"]
-                    * (1 + walker_ind % 2),
-                ),
-                eclipse_time=(
-                    log_likelihood.best_fit_bls["transit_time"],
-                    0.1
-                    * log_likelihood.best_fit_bls["period"]
-                    * (1 + walker_ind % 2),
-                ),
-                mprimary=(mprimary, mprimary_uncertainty),
-            )
-        )
-    for _ in range(config.num_parallel):
-        initial_param_queue.put("STOP")
-
-    workers = [
-        Process(
-            target=_optimize_starting_positions,
-            args=(initial_param_queue, result_queue, log_likelihood, config),
-        )
-        for _ in range(config.num_parallel)
-    ]
-    for process in workers:
-        process.start()
-
-    for position_ind in range(
-        positions_found, config.num_optimized_initial_positions
-    ):
-        position = result_queue.get()
-        _logger.debug(
-            "Saving initial position %d: %s",
-            position_ind,
-            repr(position),
-        )
-        if position is None:
-            # pylint: disable=invalid-name
-            for w in workers:
-                w.terminate()
-            # pylint: enable=invalid-name
-            raise RuntimeError("Failed to find initial walker positions.")
-        starting_positions[position_ind] = position
-        save_initial_position(
-            position,
-            samples_fname,
-            nwalkers=config.num_walkers,
-        )
-    # TODO: Do we need to worry about Pan-STARRS brightnesses not being simple
-    #      sum of two isolated star
-    starting_positions[position_ind:] = norm.rvs(
-        size=starting_positions[position_ind:].size
-    ).reshape(starting_positions[position_ind:].shape)
-
-    return starting_positions
 
 
 def masked_is_significant(bls):
@@ -573,50 +555,44 @@ def test():
     test_tic = 16805617  # 189639080 # 4629065  #
 
     log_likelihood = LogLikelihood(test_tic)
-    OptimizeStartingPosition(log_likelihood)
-    return
-    params = SampleParams(
-        mtotal=3.1180989692599335,
-        mratio=0.9797246475335591,
-        age_gyr=1.0,
-        meh=0.0,
-        per=11.793843600300352,
-        ecc=0.0,
-        w=180.0,
-        primary_impact_param=0.7279367331829606,
-        eclipse_time=1420.3748436711664,
-        primary_limb_dark_1=0.0,
-        primary_limb_dark_2=0.0,
-        secondary_limb_dark_1=0.0,
-        secondary_limb_dark_2=0.0,
-        primary_prot=100.0,
-        secondary_prot=100.0,
-        primary_reflection_coef=0.01,
-        secondary_reflection_coef=0.01,
-        primary_beaming_coef=0.01,
-        secondary_beaming_coef=0.01,
-        lc_sys=1e-10,
-        sed_sys=1e-10,
-    )
-    with PdfPages(f"tess{test_tic}_deeper_depth_match.pdf") as pdf:
-        for impact in numpy.linspace(0.5, 1.0, 10):
-            binary = Binary(
-                from_mcmc=params._replace(primary_impact_param=impact)
-            )
-            binary.lc_sys = 0.0
-            log_likelihood.plot_lc_model_comparison(
-                binary,
-                pdf,
-                f"b: {impact}, LL: "
-                + repr(
-                    log_likelihood.calc_lc_log_likelihood(binary, 0.0, "odd")
-                ),
-            )
-
-    OptimizeStartingPosition(log_likelihood)
-    create_jktebob_inputs(log_likelihood)
-    # test_global_minimization(test_tic)
-
+    FindStartingPositions(log_likelihood)
+    #params = SampleParams(
+    #    mtotal=3.1180989692599335,
+    #    mratio=0.9797246475335591,
+    #    age_gyr=1.0,
+    #    meh=0.0,
+    #    per=11.793843600300352,
+    #    ecc=0.0,
+    #    w=180.0,
+    #    primary_impact_param=0.7279367331829606,
+    #    eclipse_time=1420.3748436711664,
+    #    primary_limb_dark_1=0.0,
+    #    primary_limb_dark_2=0.0,
+    #    secondary_limb_dark_1=0.0,
+    #    secondary_limb_dark_2=0.0,
+    #    primary_prot=100.0,
+    #    secondary_prot=100.0,
+    #    primary_reflection_coef=0.01,
+    #    secondary_reflection_coef=0.01,
+    #    primary_beaming_coef=0.01,
+    #    secondary_beaming_coef=0.01,
+    #    lc_sys=1e-10,
+    #    sed_sys=1e-10,
+    #)
+    #with PdfPages(f"tess{test_tic}_deeper_depth_match.pdf") as pdf:
+    #    for impact in numpy.linspace(0.5, 1.0, 10):
+    #        binary = Binary(
+    #            from_mcmc=params._replace(primary_impact_param=impact)
+    #        )
+    #        binary.lc_sys = 0.0
+    #        log_likelihood.plot_lc_model_comparison(
+    #            binary,
+    #            pdf,
+    #            f"b: {impact}, LL: "
+    #            + repr(
+    #                log_likelihood.calc_lc_log_likelihood(binary, 0.0, "odd")
+    #            ),
+    #        )
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG)

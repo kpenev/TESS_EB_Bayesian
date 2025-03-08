@@ -659,7 +659,7 @@ class LogLikelihood:
             meh=Binary.meh_range,
             per=(0.5, 300),
             ecc=(0, self.max_ecc),
-            w=(0, 360),
+            w=(-360, 360),
             primary_impact_param=(-10, 10),
             eclipse_time=(
                 self._best_fit_bls["transit_time"]
