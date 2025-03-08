@@ -9,7 +9,7 @@ from scipy.linalg import lstsq
 
 from ebeer import EBEERBinary
 
-# from binary_parameters import InputParams
+from sample_params import SampleParams
 
 
 class Binary(EBEERBinary):
@@ -307,7 +307,7 @@ class Binary(EBEERBinary):
 if __name__ == "__main__":
     print(
         Binary(
-            from_mcmc=InputParams(
+            from_mcmc=SampleParams(
                 mtotal=numpy.pi / 2,
                 mratio=0.5,
                 age_gyr=4.6,

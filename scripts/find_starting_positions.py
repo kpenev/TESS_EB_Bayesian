@@ -5,7 +5,7 @@ from multiprocessing import Process, Queue
 import logging
 from traceback import format_exc
 
-#from matplotlib.backends.backend_pdf import PdfPages
+# from matplotlib.backends.backend_pdf import PdfPages
 import numpy
 from scipy.stats import norm, uniform
 from scipy import optimize
@@ -55,24 +55,29 @@ class FindStartingPositions:
             return "even", "odd", single
         return "odd", "even", single
 
-    def _match_eclipse_times(self, params):
+    def _match_eclipse_times(self, params, randomize_e):
         """Set the eccentricity to match the eclipse phases."""
 
-        if self._bls_eclipses["shallower"] != "masked":
+        if self._bls_eclipses["shallower"] != "masked" and not randomize_e:
             return params._replace(ecc=0.0)
 
+        secondary_eclipse_phase = self._secondary_eclipse_phase
+        if randomize_e:
+            secondary_eclipse_phase += norm.rvs(
+                scale=0.25
+                * (
+                    self._log_likelihood.best_fit_bls["duration"]
+                    + self._log_likelihood.best_fit_bls["period"][1]
+                )
+            )
         if (
-            self._secondary_eclipse_phase < 0.5
-            and not 90 < params.w % 360 < 270
-        ) or (
-            self._secondary_eclipse_phase > 0.5 and (90 < params.w % 360 < 270)
-        ):
+            secondary_eclipse_phase < 0.5 and not 90 < params.w % 360 < 270
+        ) or (secondary_eclipse_phase > 0.5 and (90 < params.w % 360 < 270)):
             params = params._replace(w=(180.0 + params.w) % 360)
 
         def to_solve(ecc):
             return (
-                calc_eclipse_phase_diff(ecc, params.w)
-                - self._secondary_eclipse_phase
+                calc_eclipse_phase_diff(ecc, params.w) - secondary_eclipse_phase
             )
 
         result = optimize.root_scalar(to_solve, bracket=(0.0, 1.0))
@@ -312,7 +317,11 @@ class FindStartingPositions:
             for scenario_ind, scenario in iter(scenario_queue.get, "STOP"):
                 try:
                     params = self.optimize(
-                        scenario["age_gyr"], scenario["meh"], scenario["w"]
+                        scenario["age_gyr"],
+                        scenario["meh"],
+                        scenario["w"],
+                        scenario_ind > 0
+                        and self._bls_eclipses["shallower"] != "masked",
                     )
                 except ValueError:
                     _logger.warning(
@@ -371,7 +380,7 @@ class FindStartingPositions:
 
         _logger.info("From BLS: %s", repr(self._bls_eclipses))
 
-    def optimize(self, age_gyr, meh, w):
+    def optimize(self, age_gyr, meh, w, randomize_e):
         """Find a local maximum in log-likelihood for given parameters."""
 
         params = SampleParams(
@@ -390,15 +399,15 @@ class FindStartingPositions:
         )
 
         _logger.debug("Starting params: %s", params)
-        params = self._match_eclipse_times(params)
+        params = self._match_eclipse_times(params, randomize_e)
         _logger.debug("Eclipse timing matched params: %s", params)
         params = self._match_eclipses_and_sed(params)
         _logger.debug("Suggested starting params: %s", params)
 
         return params
 
-    #Trying to address makes function less readable
-    #pylint: disable=too-many-locals
+    # Trying to address makes function less readable
+    # pylint: disable=too-many-locals
     def __call__(self, config):
         """Generate the specified scenario per command line."""
 
@@ -456,7 +465,9 @@ class FindStartingPositions:
             size=config.num_random_walkers * num_params
         ).reshape(config.num_random_walkers, num_params)
         return starting_positions
-    #pylint: enable=too-many-locals
+
+    # pylint: enable=too-many-locals
+
 
 def _estimate_mass(logg, teff):
     """Return an estimate of the stellar mass assuming main sequence star."""
@@ -556,7 +567,7 @@ def test():
 
     log_likelihood = LogLikelihood(test_tic)
     FindStartingPositions(log_likelihood)
-    #params = SampleParams(
+    # params = SampleParams(
     #    mtotal=3.1180989692599335,
     #    mratio=0.9797246475335591,
     #    age_gyr=1.0,
@@ -578,8 +589,8 @@ def test():
     #    secondary_beaming_coef=0.01,
     #    lc_sys=1e-10,
     #    sed_sys=1e-10,
-    #)
-    #with PdfPages(f"tess{test_tic}_deeper_depth_match.pdf") as pdf:
+    # )
+    # with PdfPages(f"tess{test_tic}_deeper_depth_match.pdf") as pdf:
     #    for impact in numpy.linspace(0.5, 1.0, 10):
     #        binary = Binary(
     #            from_mcmc=params._replace(primary_impact_param=impact)
@@ -593,6 +604,7 @@ def test():
     #                log_likelihood.calc_lc_log_likelihood(binary, 0.0, "odd")
     #            ),
     #        )
+
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG)

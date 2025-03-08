@@ -18,7 +18,7 @@ from general_purpose_python_modules.multiprocessing_util import (
 from hacked_emcee_hdf5_backend import HDFBackend
 from log_likelihood import SampleParams, LogLikelihood, LogLikelihoodPriorsOnly
 from paths import results_dir
-from init_mcmc import get_initial_mcmc_state
+from find_starting_positions import FindStartingPositions
 
 _logger = logging.getLogger(__name__)
 
@@ -205,9 +205,7 @@ def main(config):
 
     initial_state = None
     if backend.iteration == 0:
-        initial_state = get_initial_mcmc_state(
-            log_likelihood, config, samples_fname
-        )
+        initial_state = FindStartingPositions(log_likelihood)(config)
         _logger.info("Full set of initial positions found. Starting sampling.")
 
     with Pool(

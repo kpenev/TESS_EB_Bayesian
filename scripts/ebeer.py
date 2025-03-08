@@ -28,7 +28,10 @@ class EBEERBinary(BinaryParams):
 
         # Full Calculation (Eq.2 from Engel et al. 2020)
         return (
+            #False positive
+            #pylint: disable=no-member
             self.beaming_coef
+            #pylint: enable=no-member
             * (
                 -2830
                 * self.mratio
@@ -179,7 +182,10 @@ class EBEERBinary(BinaryParams):
 
         # Full Calculation (Eq.6 from Engel et al. 2020)
         return (
+            #False positive
+            #pylint: disable=no-member
             self.reflection_coef
+            #pylint: enable=no-member
             * (
                 56514
                 * self.mtotal ** (-2 / 3)

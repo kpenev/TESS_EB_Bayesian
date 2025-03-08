@@ -162,21 +162,8 @@ class BinaryParams(batman.TransitParams):
             self._gravdark_both[component] = star["gravb_bol"].get_value("")
         self._set_per_star()
 
-    def set_from_mcmc(self, sample_params):
-        """
-        Set the binary parameters from an MCMC sample.
-
-        Args:
-            sample_params:    Object with attributes specifying the phyisical
-                parameters of the system being sampled. See `SampleParams` in
-                `log_likelihood.py` for the attribute names.
-
-        Returns:
-            None
-        """
-
-        for param in ["per", "ecc", "w"]:
-            setattr(self, param, getattr(sample_params, param))
+    def _set_interpolated_mcmc(self, sample_params):
+        """Set the paramaters from stellar evolution interoplation."""
 
         mprimary = sample_params.mtotal / (1.0 + sample_params.mratio)
         interp_kwargs = {
@@ -262,7 +249,31 @@ class BinaryParams(batman.TransitParams):
         ).to_value()
         self.rstar = radii["primary"].to_value(units.R_sun)
         self.rp = (radii["secondary"] / radii["primary"]).to_value()
+        self.teff_ratio = 10.0 ** (
+            interpolated["secondary"][2] - interpolated["primary"][2]
+        )
+        self.absmag = -2.5 * numpy.log10(
+            10.0 ** (-interpolated["primary"][3:] / 2.5)
+            + 10.0 ** (-interpolated["secondary"][3:] / 2.5)
+        )
 
+    def set_from_mcmc(self, sample_params):
+        """
+        Set the binary parameters from an MCMC sample.
+
+        Args:
+            sample_params:    Object with attributes specifying the phyisical
+                parameters of the system being sampled. See `SampleParams` in
+                `log_likelihood.py` for the attribute names.
+
+        Returns:
+            None
+        """
+
+        for param in ["per", "ecc", "w"]:
+            setattr(self, param, getattr(sample_params, param))
+
+        self._set_interpolated_mcmc(sample_params)
         if numpy.abs(sample_params.primary_impact_param) > self.a:
             self._out_of_range.append("impact_param")
             self.inc = numpy.nan
@@ -298,9 +309,6 @@ class BinaryParams(batman.TransitParams):
             * self.per
         )
 
-        self.teff_ratio = 10.0 ** (
-            interpolated["secondary"][2] - interpolated["primary"][2]
-        )
         for component in ["primary", "secondary"]:
             self._limb_dark_both[component] = "quadratic"
             self._u_both[component] = [
@@ -319,10 +327,6 @@ class BinaryParams(batman.TransitParams):
                 getattr(self, f"_{param}_both")[component] = getattr(
                     sample_params, f"{component}_{param}"
                 )
-        self.absmag = -2.5 * numpy.log10(
-            10.0 ** (-interpolated["primary"][3:] / 2.5)
-            + 10.0 ** (-interpolated["secondary"][3:] / 2.5)
-        )
         self._set_per_star()
 
     def shift_time(self, shift):

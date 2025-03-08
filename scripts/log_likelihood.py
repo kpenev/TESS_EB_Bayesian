@@ -279,56 +279,6 @@ class LogLikelihood:
             else:
                 pdf.savefig()
 
-    @staticmethod
-    def _average_best_fit_bls(best_fit_bls):
-        """Average the best fit BLS results for each sector."""
-
-        raise NotImplementedError(
-            "Averaging BLS from separate sectors not implemneted."
-        )
-        min_transit_time = numpy.inf
-        total_points = 0
-        averaged = {
-            param: 0
-            for param in [
-                "period",
-                "duration",
-                "transit_time",
-                "period_uncertainty",
-            ]
-        }
-        for bls_results in best_fit_bls:
-            min_transit_time = min(
-                min_transit_time, bls_results["transit_time"]
-            )
-            total_points += bls_results["num_points"]
-            for param in ["period", "duration"]:
-                averaged[param] += (
-                    bls_results[param] * bls_results["num_points"]
-                )
-            averaged["period_uncertainty"] = max(
-                averaged["period_uncertainty"],
-                bls_results["period"][1],
-            )
-        for param in ["period", "duration"]:
-            averaged[param] /= total_points
-
-        for bls_results in best_fit_bls:
-            averaged["transit_time"] += (
-                bls_results["transit_time"]
-                - numpy.round(
-                    (bls_results["transit_time"] - min_transit_time)
-                    / averaged["period"]
-                )
-                * averaged["period"]
-            ) * bls_results["num_points"]
-        averaged["transit_time"] /= total_points
-        averaged["period"] = (
-            averaged["period"],
-            averaged.pop("period_uncertainty"),
-        )
-        return averaged
-
     def _get_cached(self, tic_id):
         """Set-up using cached information for given TIC ID if available."""
 
@@ -600,7 +550,6 @@ class LogLikelihood:
             ).get_absolute_magnitudes(tic_id)[0]
             overwrite_cache = True
 
-        best_fit_bls = []
         self._lcs = []
         combined_lc = None
         for provenance, lc_collection in lcs.items():
@@ -618,8 +567,11 @@ class LogLikelihood:
                     combined_lc["flux_err"] /= med_flux
                 else:
                     combined_lc = numpy.concatenate([combined_lc, formatted_lc])
+                    #False positive
+                    #pylint: disable=invalid-unary-operand-type
                     combined_lc[-formatted_lc.size :]["flux"] /= med_flux
                     combined_lc[-formatted_lc.size :]["flux_err"] /= med_flux
+                    #pylint: enable=invalid-unary-operand-type
                 self._lcs.append(
                     (
                         formatted_header,
@@ -760,7 +712,7 @@ class LogLikelihood:
             "Plotting LC model comparison for binary: %s", binary
         )
 
-        num_bins = 100
+        #num_bins = 100
         for mask_name in [None, "deeper", "shallower"]:
             for header, lightcurve, model_lc, _ in self._iter_lc_and_model(
                 binary, sample_or_binary.lc_sys, mask_name
@@ -969,7 +921,9 @@ class LogLikelihoodUnitCubePriors(LogLikelihood):
         return 0.0
 
 
-if __name__ == "__main__":
+def manual_plot():
+    """Plot the lightcurve for a given set of parameters."""
+
     params = SampleParams(
         mtotal=1.5,
         mratio=0.5,
@@ -1025,7 +979,9 @@ if __name__ == "__main__":
     pyplot.show()
     pyplot.cla()
     pyplot.clf()
-    exit(1)
+
+def experiment():
+    """Manually experiment with things."""
 
     # TODO: figure out why 323020176 crashes
     test_tic = 189639080
@@ -1067,3 +1023,7 @@ if __name__ == "__main__":
             ),
             output_pdf,
         )
+
+
+if __name__ == "__main__":
+    manual_plot()
