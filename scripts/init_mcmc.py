@@ -1,10 +1,9 @@
 """Methods for finding initial walker positions for MCMC."""
 
 from collections import namedtuple
-from multiprocessing import Process, Queue, Pool
+from multiprocessing import Process, Queue
 import logging
 from traceback import format_exc
-from os import path
 
 from matplotlib.backends.backend_pdf import PdfPages
 import numpy
@@ -12,10 +11,8 @@ from scipy.stats import norm, uniform
 from scipy import optimize
 from astropy import units, constants
 from astroquery.mast import Catalogs
-from log_likelihood import LogLikelihoodUnitCubePriors
 
 from general_purpose_python_modules.multiprocessing_util import (
-    setup_process,
     setup_process_map,
 )
 from general_purpose_python_modules.emcee_util import (
@@ -23,8 +20,9 @@ from general_purpose_python_modules.emcee_util import (
     load_initial_positions,
 )
 
-from paths import results_dir, jktebob as jktebob_paths
+from paths import jktebob as jktebob_paths
 from sample_params import SampleParams
+
 from log_likelihood import LogLikelihood
 from binary import Binary
 from binary_parameters import calc_eclipse_phase_diff
@@ -40,77 +38,8 @@ class GoodEnough(Exception):
     """Raised when a solver or optimized encounters a good enough value."""
 
 
-# Meant to serve as callable.
-# pylint: disable=too-few-public-methods
-class OptimizeStartingPosition:
+class FindStartingPositions:
     """Callable to find initial position close local likelihood maxima."""
-
-    def _get_optimize_start(self, overwrite):
-        """Return an initial starting point for optimization."""
-
-        initial_state = norm.rvs(size=self._num_optimize)
-        mratio_range = self._log_likelihood.get_range("mratio")
-        mratio = float(
-            uniform.rvs(
-                mratio_range[0], mratio_range[1] - mratio_range[0], size=1
-            )
-        )
-        _logger.debug("Setting mratio to: %s", repr(mratio))
-        for param in [
-            "mtotal",
-            "mratio",
-            "per",
-            "eclipse_time",
-            "primary_impact_param",
-        ]:
-            if param == "primary_impact_param":
-                ind, value = self._log_likelihood.inverse_prior(param, 0.0)
-            elif param == "mtotal":
-                ind, value = self._log_likelihood.inverse_prior(
-                    param, overwrite.mprimary * (1.0 + mratio)
-                )
-            elif param == "mratio":
-                ind, value = self._log_likelihood.inverse_prior(param, mratio)
-            else:
-                ind, value = getattr(overwrite, param)
-            initial_state[self._mcmc_to_optimize[ind]] = value
-        return initial_state
-
-    def _get_bounds(self, initial_params):
-        """Return the bounds to use when optimizing."""
-
-        if isinstance(self._log_likelihood, LogLikelihoodUnitCubePriors):
-            bounds = [(0.0, 1.0) for _ in range(self._num_optimize)]
-        else:
-            bounds = [(None, None) for _ in range(self._num_optimize)]
-
-        for param in ["per", "eclipse_time"]:
-            value = getattr(initial_params, param)
-            ind, low = self._log_likelihood.inverse_prior(
-                param, value[0] - value[1]
-            )
-            high = self._log_likelihood.inverse_prior(
-                param, value[0] + value[1]
-            )[1]
-            bounds[self._mcmc_to_optimize[ind]] = (low, high)
-
-        return bounds
-
-    def _get_mcmc_sample(self, x):
-        """Return MCMC sample given optimize position."""
-
-        mcmc_sample = numpy.empty(len(SampleParams._fields))
-        for ind, value in self._do_not_optimize:
-            mcmc_sample[ind] = value
-
-        for i, value in enumerate(x):
-            mcmc_sample[self._optimize_to_mcmc[i]] = value
-        return mcmc_sample
-
-    def _to_optimize(self, x):
-        """Return the negative log-likelihood for given optimize position."""
-
-        return -self._log_likelihood(self._get_mcmc_sample(x))[0]
 
     def _classify_bls(self):
         """Detect deeper & shallower BLS eclipses & is single eclipse viable."""
@@ -135,18 +64,19 @@ class OptimizeStartingPosition:
         if self._bls_eclipses["shallower"] != "masked":
             return params._replace(ecc=0.0)
 
-        bls_info = self._log_likelihood.best_fit_bls
-        target = (
-            (bls_info["masked_transit_time"] - bls_info["transit_time"])
-            % bls_info["period"][0]
-        ) / bls_info["period"][0]
-        if (target < 0.5 and not (90 < params.w % 360 < 270)) or (
-            target > 0.5 and (90 < params.w % 360 < 270)
+        if (
+            self._secondary_eclipse_phase < 0.5
+            and not 90 < params.w % 360 < 270
+        ) or (
+            self._secondary_eclipse_phase > 0.5 and (90 < params.w % 360 < 270)
         ):
             params = params._replace(w=(180.0 + params.w) % 360)
 
         def to_solve(ecc):
-            return calc_eclipse_phase_diff(ecc, params.w) - target
+            return (
+                calc_eclipse_phase_diff(ecc, params.w)
+                - self._secondary_eclipse_phase
+            )
 
         result = optimize.root_scalar(to_solve, bracket=(0.0, 1.0))
         assert result.converged
@@ -309,6 +239,80 @@ class OptimizeStartingPosition:
         _logger.info("Optimized parameters: %s", params)
         return params
 
+    def _get_init_scenarios(self, config):
+        """Return log10(age), [M/H] and w values to base initial positions on"""
+
+        def wmax_eq(wmax):
+            """The equation defining maximum w given eclipse phases."""
+
+            return (
+                calc_eclipse_phase_diff(LogLikelihood.max_ecc, wmax)
+                - self._secondary_eclipse_phase
+            )
+
+        log_age_values = numpy.linspace(-2.5, 1, config.initial_num_ages)
+        meh_values = numpy.linspace(-1.0, 0.5, config.initial_num_mehs)
+
+        if self._secondary_eclipse_phase == 0.5:
+            w_values = numpy.linspace(0.0, 315.0, config.initial_num_ws)
+        else:
+            wlimit = optimize.root_scalar(
+                wmax_eq,
+                bracket=(
+                    (0.0, 90.0)
+                    if self._secondary_eclipse_phase > 0.5
+                    else (90.0, 270.0)
+                ),
+            ).root
+            if self._secondary_eclipse_phase > 0.5:
+                w_values = (
+                    numpy.linspace(-wlimit, wlimit, config.initial_num_ws)
+                    % 360.0
+                )
+            else:
+                w_values = numpy.linspace(
+                    wlimit, 360 - wlimit, config.initial_num_ws
+                )
+        grid = [
+            arr.flatten()
+            for arr in numpy.meshgrid(log_age_values, meh_values, w_values)
+        ]
+
+        result = numpy.empty(
+            shape=config.initial_num_ages
+            * config.initial_num_mehs
+            * config.initial_num_ws,
+            dtype=[("age_gyr", float), ("meh", float), ("w", float)],
+        )
+        result["age_gyr"] = 10.0 ** (
+            grid[0]
+            + uniform(
+                loc=-config.initial_logage_smear / 2,
+                scale=config.initial_logage_smear,
+                size=config.initial_num_ages,
+            )
+        )
+        result["meh"] = grid[1] + uniform(
+            loc=-config.initial_meh_smear / 2,
+            scale=config.initial_meh_smear,
+            size=config.initial_num_mehs,
+        )
+        result["w"] = (
+            grid[2]
+            + uniform(
+                loc=-config.initial_w_smear / 2,
+                scale=config.initial_w_smear,
+                size=config.initial_num_ws,
+            )
+        ) % 360
+        return result
+
+    @property
+    def secondary_eclipse_phase(self):
+        """The allowed range for the argument of periapsis per eclipse times."""
+
+        return self._secondary_eclipse_phase
+
     def __init__(self, log_likelihood):
         """Prepare the callable."""
 
@@ -316,21 +320,33 @@ class OptimizeStartingPosition:
         self._bls_eclipses = dict(
             zip(("deeper", "shallower", "allow_single"), self._classify_bls())
         )
+        bls_info = self._log_likelihood.best_fit_bls
+        if self._bls_eclipses["shallower"] == "masked":
+            self._secondary_eclipse_phase = (
+                (bls_info["masked_transit_time"] - bls_info["transit_time"])
+                % bls_info["period"][0]
+            ) / bls_info["period"][0]
+        else:
+            self._secondary_eclipse_phase = 0.5
+
         _logger.info("From BLS: %s", repr(self._bls_eclipses))
+
+    def optimize(self, age_gyr, meh, w):
+        """Find a local maximum in log-likelihood for given parameters."""
 
         params = SampleParams(
             mtotal=2.0,
             mratio=1.0,
-            age_gyr=1.0,
-            meh=0.0,
+            age_gyr=age_gyr,
+            meh=meh,
             per=(
                 self._log_likelihood.best_fit_bls["period"][0]
                 * (1 if self._bls_eclipses["shallower"] == "masked" else 2)
             ),
             ecc=0.0,
-            w=0.0,
+            w=w,
             primary_impact_param=0.0,
-            eclipse_time=log_likelihood.best_fit_bls["transit_time"],
+            eclipse_time=self._log_likelihood.best_fit_bls["transit_time"],
         )
 
         _logger.debug("Starting params: %s", params)
@@ -339,129 +355,20 @@ class OptimizeStartingPosition:
         params = self._match_eclipses_and_sed(params)
         _logger.debug("Suggested starting params: %s", params)
 
-        with PdfPages(f"tess{log_likelihood.tic_id}_initial_param.pdf") as pdf:
-            log_likelihood.plot_lc_model_comparison(params, pdf)
-        return
-        low_value = (
-            0.0
-            if isinstance(log_likelihood, LogLikelihoodUnitCubePriors)
-            else -10.0
-        )
-        high_value = (
-            1.0
-            if isinstance(log_likelihood, LogLikelihoodUnitCubePriors)
-            else 10.0
-        )
-        self._do_not_optimize = sorted(
-            [
-                (SampleParams._fields.index(param), value)
-                for param, value in [
-                    ("primary_prot", high_value),
-                    ("secondary_prot", high_value),
-                    ("primary_reflection_coef", low_value),
-                    ("secondary_reflection_coef", low_value),
-                    ("primary_beaming_coef", low_value),
-                    ("secondary_beaming_coef", low_value),
-                    ("primary_limb_dark_2", low_value),
-                    ("secondary_limb_dark_2", low_value),
-                ]
-            ]
-        )
-        self._exclude_priors = numpy.full(len(SampleParams._fields), False)
-        self._exclude_priors[[i for i, _ in self._do_not_optimize]] = True
-        self._num_optimize = len(SampleParams._fields) - len(
-            self._do_not_optimize
-        )
-        self._optimize_to_mcmc = {}
-        skip = 0
-        for i in range(self._num_optimize):
-            while (
-                skip < len(self._do_not_optimize)
-                and i + skip == self._do_not_optimize[skip][0]
-            ):
-                skip += 1
-            self._optimize_to_mcmc[i] = i + skip
-        self._mcmc_to_optimize = dict(
-            (v, k) for k, v in self._optimize_to_mcmc.items()
-        )
+        return params
 
-    def __call__(self, initial_params):
-        """Find a local maximum in log-likelihood for given parameters."""
+    def __call__(self, config):
+        """Generate the specified scenario per command line."""
 
-        _logger.info(
-            "Looking for starting position with: %s", repr(initial_params)
+        assert config.tic_id == self._log_likelihood.tic_id
+        samples_fname = config.samples_fname_pattern.format(
+            tic_id=config.tic_id
         )
+        initial_scenarios = self._get_init_scenarios(config)
 
-        overwrite = InitialParamType(
-            per=self._log_likelihood.inverse_prior(
-                "per", initial_params.per[0]
-            ),
-            eclipse_time=(
-                self._log_likelihood.inverse_prior(
-                    "eclipse_time", initial_params.eclipse_time[0]
-                )
-            ),
-            mprimary=initial_params.mprimary[0],
-        )
-
-        log_likelihood = numpy.nan
-        while not numpy.isfinite(log_likelihood):
-            initial_state = self._get_optimize_start(overwrite)
-            log_likelihood = -self._to_optimize(initial_state)
-            _logger.debug(
-                "Found log-likelihood(%s) = %s",
-                repr(initial_state),
-                repr(log_likelihood),
-            )
-        result = optimize.minimize(
-            self._to_optimize,
-            x0=initial_state,
-            method="Nelder-Mead",
-            bounds=self._get_bounds(initial_params),
-            options={"adaptive": True, "fatol": 100.0},
-        )
-        if not result.success:
-            _logger.warning("Optimization did not converge: %s", repr(result))
-        _logger.info(
-            "log-likelihood(%s) = %s", repr(result.x), repr(result.fun)
-        )
-        return self._get_mcmc_sample(result.x)
-
-    def find_global_max_likelihood(self, initial_params, method):
-        """Use a global minimization algorithm to find max likelihood point."""
-
-        out_fname = path.join(
-            results_dir,
-            "logs",
-            "TESS{tic_id:d}_{task}_{method}_{period:.3f}_{now!s}_{pid:d}.",
-        )
-        setup_process(
-            std_out_err_fname=out_fname + "outerr",
-            logging_fname=out_fname + "log",
-            task="global_best_fit",
-            method=method,
-            period=initial_params.per[0],
-            tic_id=self._log_likelihood.tic_id,
-            logging_verbosity="debug",
-        )
-        assert isinstance(self._log_likelihood, LogLikelihoodUnitCubePriors)
-        result = getattr(optimize, method)(
-            self._to_optimize,
-            bounds=self._get_bounds(initial_params),
-        )
-        if not result.success:
-            _logger.warning(
-                "Global optimization did not converge: %s", repr(result)
-            )
-        _logger.info(
-            "Global max log-likelihood found for sample(%s) = %s",
-            repr(result.x),
-            repr(result.fun),
-        )
-        return self._get_mcmc_sample(result.x), method, initial_params
-
-
-# pylint: enable=too-few-public-methods
+        initial_param_queue = Queue()
+        result_queue = Queue()
+        #TODO: continue moving `get_initial_mcmc_state()` here
 
 
 def _optimize_starting_positions(
@@ -534,21 +441,6 @@ def get_initial_mcmc_state(log_likelihood, config, samples_fname):
     tic_entry = Catalogs.query_criteria(catalog="Tic", ID=config.tic_id)
     # pylint: enable=no-member
 
-    mprimary = _estimate_mass(
-        *numpy.meshgrid(
-            float(tic_entry["logg"])
-            + numpy.array(
-                [float(-tic_entry["e_logg"]), 0.0, float(tic_entry["e_logg"])]
-            ),
-            float(tic_entry["Teff"])
-            + numpy.array(
-                [float(-tic_entry["e_Teff"]), 0.0, float(tic_entry["e_Teff"])]
-            ),
-        )
-    )
-    mprimary_uncertainty = (mprimary.max() - mprimary.min()) / 2
-    mprimary = mprimary[1, 1]
-
     for walker_ind in range(positions_found, config.num_walkers):
         initial_param_queue.put(
             InitialParamType(
@@ -601,7 +493,6 @@ def get_initial_mcmc_state(log_likelihood, config, samples_fname):
             samples_fname,
             nwalkers=config.num_walkers,
         )
-    # TODO: What to do about parameters held fixed during optimization
     # TODO: Do we need to worry about Pan-STARRS brightnesses not being simple
     #      sum of two isolated star
     starting_positions[position_ind:] = norm.rvs(
@@ -674,66 +565,6 @@ def create_jktebob_inputs(log_likelihood):
             )
         )
         outf.write(template.read().format_map(values))
-
-
-def test_global_minimization(tic_id):
-    """Test the global minimization of -log-likelihood."""
-
-    log_likelihood = LogLikelihoodUnitCubePriors(tic_id)
-    # False positive
-    # pylint: disable=no-member
-    tic_entry = Catalogs.query_criteria(catalog="Tic", ID=tic_id)
-    # pylint: enable=no-member
-
-    mprimary = _estimate_mass(
-        *numpy.meshgrid(
-            float(tic_entry["logg"])
-            + numpy.array(
-                [float(-tic_entry["e_logg"]), 0.0, float(tic_entry["e_logg"])]
-            ),
-            float(tic_entry["Teff"])
-            + numpy.array(
-                [float(-tic_entry["e_Teff"]), 0.0, float(tic_entry["e_Teff"])]
-            ),
-        )
-    )
-
-    initial_params = [
-        InitialParamType(
-            per=(
-                log_likelihood.best_fit_bls["period"] * (1 + i),
-                log_likelihood.best_fit_bls["period_uncertainty"] * (1 + i),
-            ),
-            eclipse_time=(
-                log_likelihood.best_fit_bls["transit_time"],
-                0.1 * log_likelihood.best_fit_bls["period"] * (1 + i),
-            ),
-            mprimary=(mprimary[1, 1], (mprimary.max() - mprimary.min()) / 2),
-        )
-        for i in range(2)
-    ]
-
-    optimize_methods = ["dual_annealing", "differential_evolution", "direct"]
-    del optimize_methods[0]
-
-    optimize_start = OptimizeStartingPosition(log_likelihood)
-    with Pool(len(initial_params) * len(optimize_methods)) as pool:
-        result = pool.starmap(
-            optimize_start.find_global_max_likelihood,
-            [
-                (param, method)
-                for param in initial_params
-                for method in optimize_methods
-            ],
-        )
-
-    with PdfPages("tess{tic_id}_global_best.pdf") as output_pdf:
-        for pos, method, initial_params in enumerate(result):
-            log_likelihood.plot_lc_model_comparison(
-                pos,
-                output_pdf,
-                extra_title=f"{method}, P={initial_params.per[0]:.3f}",
-            )
 
 
 def test():

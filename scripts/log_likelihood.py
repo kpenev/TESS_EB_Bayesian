@@ -35,6 +35,8 @@ class LogLikelihood:
     for bad_ind in [1, 2, 3, 4, 5, 6, 8, 10, 13, 15]:
         _bad_mask |= 1 << (bad_ind - 1)
 
+    max_ecc = 0.96
+
     @staticmethod
     def _get_best_fit_bls(lightcurve):
         """Return the best fit orbital period and time of primary transit."""
@@ -656,7 +658,7 @@ class LogLikelihood:
             age_gyr=(-3, 1.1),
             meh=Binary.meh_range,
             per=(0.5, 300),
-            ecc=(0, 0.96),
+            ecc=(0, self.max_ecc),
             w=(0, 360),
             primary_impact_param=(-10, 10),
             eclipse_time=(

@@ -57,20 +57,57 @@ def parse_command_line():
         "sampling continues, adding more points to the existing chain.",
     )
     parser.add_argument(
-        "--num-walkers",
+        "--num-random-walkers",
         type=int,
-        default=256,
-        help="The number of walkers to use if starting a new chain. Ignored if "
-        "the samples file already exsits.",
+        default=0,
+        help="Number of additional walkers to start at random positions in "
+        "addition to those for which optimizing the starting point is "
+        "attempted. The total number of walkers used is "
+        "``--num-random-walkers`` + ``--initial-num-ages`` * "
+        "``--initial-num-mehs`` * ``--initial-num-ws``.",
     )
     parser.add_argument(
-        '--num-optimized-initial-positions',
+        "--initial-num-ages",
         type=int,
-        default=64,
-        help='The number of walkers which start at optimized initial '
-        'parameters. The remaining walkers start with random initial '
-        'parameters.'
+        default=8,
+        help="The number of different initial ages to optimize starting "
+        "positions for.",
     )
+    parser.add_argument(
+        "--initial-logage-smear",
+        type=float,
+        default=0.1,
+        help="The initial age are approximately on a log-uniform grid with this"
+        "much smear added (i.e. each log10(age) gets an independent uniform "
+        "random variable with range +- half of this value added to it.",
+    )
+    parser.add_argument(
+        "--initial-num-mehs",
+        type=int,
+        default=4,
+        help="The number of different initial [M/H] to optimize starting "
+        "positions for.",
+    )
+    parser.add_argument(
+        "--initial-meh-smear",
+        type=float,
+        default=0.1,
+        help="See ``--initial-logage-smear``",
+    )
+    parser.add_argument(
+        "--initial-num-ws",
+        type=int,
+        default=8,
+        help="The number of different initial arguments of periapses to "
+        "optimize starting positions for.",
+    )
+    parser.add_argument(
+        "--initial-w-smear",
+        type=float,
+        default=10.0,
+        help="See ``--initial-logage-smear``",
+    )
+
     parser.add_argument(
         "--num-parallel",
         type=int,
@@ -145,8 +182,8 @@ def get_backend(samples_fname, config):
         )
     else:
         backend.reset(config.num_walkers, len(SampleParams._fields))
-        with h5py.File(samples_fname, 'a') as samples_file:
-            samples_file.attrs['TIC'] = config.tic_id
+        with h5py.File(samples_fname, "a") as samples_file:
+            samples_file.attrs["TIC"] = config.tic_id
         _logger.info(
             "Starting new chain for TIC ID: %d.",
             config.tic_id,
@@ -171,7 +208,7 @@ def main(config):
         initial_state = get_initial_mcmc_state(
             log_likelihood, config, samples_fname
         )
-        _logger.info('Full set of initial positions found. Starting sampling.')
+        _logger.info("Full set of initial positions found. Starting sampling.")
 
     with Pool(
         config.num_parallel,
