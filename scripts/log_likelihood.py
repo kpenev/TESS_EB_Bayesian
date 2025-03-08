@@ -702,11 +702,14 @@ class LogLikelihood:
 
         if isinstance(sample_or_binary, Binary):
             binary = sample_or_binary
+            lc_sys = 0.0
         elif isinstance(sample_or_binary, SampleParams):
             binary = Binary(from_mcmc=sample_or_binary)
+            lc_sys = sample_or_binary.lc_sys
         else:
             sample_params = self.get_sample_params(sample_or_binary)
             binary = Binary(from_mcmc=sample_params)
+            lc_sys = sample_params.lc_sys
 
         self._logger.debug(
             "Plotting LC model comparison for binary: %s", binary
@@ -715,7 +718,7 @@ class LogLikelihood:
         #num_bins = 100
         for mask_name in [None, "deeper", "shallower"]:
             for header, lightcurve, model_lc, _ in self._iter_lc_and_model(
-                binary, sample_or_binary.lc_sys, mask_name
+                binary, lc_sys, mask_name
             ):
                 pyplot.figure(figsize=[4.8, 6.4])
                 pyplot.subplot(211)

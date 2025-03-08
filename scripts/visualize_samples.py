@@ -268,11 +268,13 @@ def create_model_to_data_plot(config):
         positions = backend.get_chain(discard=step, thin=1000000)[0]
 
     with h5py.File(config.samples_fname, "r") as samples_file:
-        tic = int(samples_file.attrs["TIC"])
+        tic = int(samples_file.attrs["TICID"])
     print(f'TIC: {tic!r} ({type(tic)})')
     log_likelihood = LogLikelihood(tic)
     with PdfPages(config.model_to_data_plot[1]) as pdf:
         for pos in positions:
+            print(f'Parameters: {log_likelihood.get_sample_params(pos)}')
+            print(5*'\n')
             log_likelihood.plot_lc_model_comparison(pos, pdf)
 
 

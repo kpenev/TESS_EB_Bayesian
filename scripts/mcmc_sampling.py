@@ -123,7 +123,7 @@ def parse_command_line():
     parser.add_argument(
         "--std-out-err-fname",
         default=path.join(
-            results_dir, "logs", "TESS{tic_id:d}_{now!s}_{pid:d}.outerr"
+            results_dir, "logs", "tess{tic_id:d}_{task}_{now!s}_{pid:d}.outerr"
         ),
         help="Filename to redirect worker process stdout and stderr to during "
         "multiprocessing. Should include at least `{pid:d}` (worker process "
@@ -133,7 +133,7 @@ def parse_command_line():
     parser.add_argument(
         "--logging-fname",
         default=path.join(
-            results_dir, "logs", "TESS{tic_id:d}_{now!s}_{pid:d}.log"
+            results_dir, "logs", "tess{tic_id:d}_{task}_{now!s}_{pid:d}.log"
         ),
         help="Filename for log mesasges from sampling. See "
         "``--std-out-err-fname`` for possible substitutions.",
@@ -181,9 +181,15 @@ def get_backend(samples_fname, config):
             config.tic_id,
         )
     else:
-        backend.reset(config.num_walkers, len(SampleParams._fields))
+        backend.reset(
+            config.num_random_walkers
+            + config.initial_num_ages
+            * config.initial_num_mehs
+            * config.initial_num_ws,
+            len(SampleParams._fields),
+        )
         with h5py.File(samples_fname, "a") as samples_file:
-            samples_file.attrs["TIC"] = config.tic_id
+            samples_file.attrs["TICID"] = config.tic_id
         _logger.info(
             "Starting new chain for TIC ID: %d.",
             config.tic_id,
@@ -195,7 +201,7 @@ def get_backend(samples_fname, config):
 def main(config):
     """Avoid polluting global namespace."""
 
-    setup_process(**vars(config))
+    setup_process(task="mcmc_sampling", **vars(config))
 
     samples_fname = config.samples_fname_pattern.format(tic_id=config.tic_id)
     backend = get_backend(samples_fname, config)

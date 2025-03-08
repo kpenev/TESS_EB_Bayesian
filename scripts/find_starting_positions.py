@@ -287,23 +287,23 @@ class FindStartingPositions:
         )
         result["age_gyr"] = 10.0 ** (
             grid[0]
-            + uniform(
+            + uniform.rvs(
                 loc=-config.initial_logage_smear / 2,
                 scale=config.initial_logage_smear,
-                size=config.initial_num_ages,
+                size=grid[0].size,
             )
         )
-        result["meh"] = grid[1] + uniform(
+        result["meh"] = grid[1] + uniform.rvs(
             loc=-config.initial_meh_smear / 2,
             scale=config.initial_meh_smear,
-            size=config.initial_num_mehs,
+            size=grid[0].size,
         )
         result["w"] = (
             grid[2]
-            + uniform(
+            + uniform.rvs(
                 loc=-config.initial_w_smear / 2,
                 scale=config.initial_w_smear,
-                size=config.initial_num_ws,
+                size=grid[0].size,
             )
         ) % 360
         return result
@@ -311,10 +311,12 @@ class FindStartingPositions:
     def _find_initial_samples(self, scenario_queue, optimized_queue, config):
         """Executed in worker threads to find optimal initial positions."""
 
+        _logger.info("Starting position optimization process.")
         try:
             numpy.random.seed()
             setup_process(task="find_starting_positions", **vars(config))
             for scenario_ind, scenario in iter(scenario_queue.get, "STOP"):
+                _logger.debug("Looking for position %d", scenario_ind)
                 try:
                     params = self.optimize(
                         scenario["age_gyr"],
@@ -334,20 +336,16 @@ class FindStartingPositions:
                         scenario_ind, norm.rvs(size=len(SampleParams._fields))
                     )
                     continue
-                optimized_queue.put(
-                    (
-                        scenario_ind,
-                        numpy.array(
-                            [
-                                self._log_likelihood.inverse_prior(
-                                    param, value
-                                )[0]
-                                for param, value in zip(params._fields, params)
-                            ]
-                        ),
-                    )
+                mcmc_sample = numpy.array(
+                    [
+                        self._log_likelihood.inverse_prior(param, value)[1]
+                        for param, value in zip(params._fields, params)
+                    ]
                 )
-            _logger.info("Starting position optimizanio process finished.")
+                non_finite = numpy.logical_not(numpy.isfinite(mcmc_sample))
+                mcmc_sample[non_finite] = norm.rvs(non_finite.sum())
+                optimized_queue.put((scenario_ind, mcmc_sample))
+            _logger.info("Position optimization process finished.")
         # pylint: disable=bare-except
         except:
             _logger.critical(
@@ -424,8 +422,15 @@ class FindStartingPositions:
             num_params=num_params,
         )
 
-        positions_needed = numpy.flatnonzero(numpy.logical_and(positions_found))
+        positions_needed = numpy.flatnonzero(numpy.logical_not(positions_found))
         initial_scenarios = initial_scenarios[positions_needed]
+
+        _logger.info(
+            "Need to find %d additional starting positions: %s",
+            positions_needed.size,
+            positions_needed,
+        )
+        _logger.info("Optimizing scenarios: %s", repr(initial_scenarios))
 
         scenario_queue = Queue()
         for task in zip(positions_needed, initial_scenarios):
