@@ -31,6 +31,7 @@ ul.navbar  {
 .main {
     display: flex;
     flex-direction: row;
+    height: 50%;
 }
 
 .plots {
@@ -41,5 +42,48 @@ ul.navbar  {
     display: flex;
     flex-direction: column;
     width: 20em;
+    height: 90vh;
     flex-grow: 0;
+    position: relative;
+    oveflow: hidden
 }
+
+.selected:before {
+    content: "Selected";
+    position: absolute;
+    left: 30%;
+    font-weight: bold;
+    background-color: white;
+}
+
+.selected {
+    flex: 1 1 100px;
+    overflow: scroll;
+}
+
+.pending:before {
+    content: "Pending";
+    position: absolute;
+    left: 30%;
+    font-weight: bold;
+    background-color: white;
+}
+
+.pending {
+    flex: 3 3 100px;
+    overflow: scroll;
+}
+
+.discarded:before {
+    content: "Discarded";
+    position: absolute;
+    left: 30%;
+    font-weight: bold;
+    background-color: white;
+}
+
+.discarded {
+    flex: 1 1 100px;
+    overflow: scroll;
+}
+

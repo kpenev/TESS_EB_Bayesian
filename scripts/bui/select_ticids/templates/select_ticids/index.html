@@ -18,14 +18,30 @@
         </ul>
         <div class="main">
             <div class="plots">
-                Something
+                Plots
             </div>
             <div class="ticid_lists">
-                <ul class="selected">
-                    {% for ticid in review_ticids %}
-                    <li><a> TIC ID: {{ ticid }} </a> </li>
-                    {% endfor %}
-                </ul>
+                <div class="selected"> 
+                    <ul>
+                        {% for ticid in review_ticids %}
+                        <li><a> TIC ID: {{ ticid }} </a> </li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                <div class="pending">
+                    <ul>
+                        {% for ticid in review_ticids %}
+                        <li><a> TIC ID: {{ ticid }} </a> </li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                <div class="discarded">
+                    <ul>
+                        {% for ticid in review_ticids %}
+                        <li><a> TIC ID: {{ ticid }} </a> </li>
+                        {% endfor %}
+                    </ul>
+                </div>
             </div>
         </div>
     </body>

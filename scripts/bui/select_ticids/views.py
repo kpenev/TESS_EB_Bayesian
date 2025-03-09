@@ -7,5 +7,5 @@ def index(request):
     """Allow user to review LCs from Villanova catalog and select some."""
 
     return render(
-        request, "select_ticids/index.html", {"review_ticids": range(10)}
+        request, "select_ticids/index.html", {"review_ticids": range(100)}
     )
