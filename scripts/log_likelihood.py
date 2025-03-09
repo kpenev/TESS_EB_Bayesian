@@ -851,7 +851,16 @@ class LogLikelihood:
 
         sample_params = self.get_sample_params(mcmc_sample)
         self._logger.debug("Sample params: %s", sample_params)
-        binary = Binary(from_mcmc=sample_params)
+        try:
+            binary = Binary(from_mcmc=sample_params)
+        except ValueError as error:
+            self._logger.warning(
+                "Attempted log-likelihood evaluation for out of range "
+                "parameters (returning -inf):\n%s\n%s",
+                sample_params,
+                error.args[0]
+            )
+            return (-numpy.inf,) + sample_params
         if binary.out_of_range:
             self._logger.warning(
                 "Out of range parameters:\n\t%s",

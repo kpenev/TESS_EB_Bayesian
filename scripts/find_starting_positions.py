@@ -128,6 +128,8 @@ class FindStartingPositions:
             try:
                 binary = Binary(from_mcmc=mod_params)
             except ValueError:
+                _logger.warning('Failed to create binary from %s!',
+                                params)
                 return numpy.inf
             return -self._log_likelihood.calc_lc_log_likelihood(
                 binary, 0.0, self._bls_eclipses["deeper"]
@@ -466,9 +468,10 @@ class FindStartingPositions:
                 index=position[0],
             )
             starting_positions[position[0]] = position[1]
-        starting_positions[-config.num_random_walkers :, :] = norm.rvs(
-            size=config.num_random_walkers * num_params
-        ).reshape(config.num_random_walkers, num_params)
+        if config.num_random_walkers > 0:
+            starting_positions[-config.num_random_walkers :, :] = norm.rvs(
+                size=config.num_random_walkers * num_params
+            ).reshape(config.num_random_walkers, num_params)
         return starting_positions
 
     # pylint: enable=too-many-locals

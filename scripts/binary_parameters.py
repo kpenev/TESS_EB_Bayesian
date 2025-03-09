@@ -86,6 +86,7 @@ class BinaryParams(batman.TransitParams):
         (photsys, CMDInterpolator(cmd_data_fname.format(photsys=photsys)))
         for photsys in ["panstarss1", "2mass_spitzer_wise"]
     )
+    _gravdark_interp = GravDarkInterpolator()
 
     meh_range = _cmd_interpolators[0][1].get_range("MH")
     log_age_range = _cmd_interpolators[0][1].get_range("logAge")
@@ -380,8 +381,6 @@ class BinaryParams(batman.TransitParams):
                 b + "mag" for b in ["J", "H", "Ks", "W1", "W2"]
             ),
         }
-
-        self._gravdark_interp = GravDarkInterpolator()
 
         if from_phoebe:
             self.set_from_phoebe(from_phoebe)
