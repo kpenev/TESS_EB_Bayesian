@@ -63,17 +63,25 @@ class FindStartingPositions:
 
         secondary_eclipse_phase = self._secondary_eclipse_phase
         if randomize_e:
-            secondary_eclipse_phase += norm.rvs(
-                scale=0.25
+            secondary_eclipse_phase += uniform.rvs(
+                loc=-0.15
                 * (
                     self._log_likelihood.best_fit_bls["duration"]
                     + self._log_likelihood.best_fit_bls["period"][1]
-                )
+                ),
+                scale=0.3
+                * (
+                    self._log_likelihood.best_fit_bls["duration"]
+                    + self._log_likelihood.best_fit_bls["period"][1]
+                ),
             )
         if (
             secondary_eclipse_phase < 0.5 and not 90 < params.w % 360 < 270
         ) or (secondary_eclipse_phase > 0.5 and (90 < params.w % 360 < 270)):
-            params = params._replace(w=(180.0 + params.w) % 360)
+            params = params._replace(
+                w=(180.0 + params.w) % 360
+                - (360.0 if secondary_eclipse_phase > 0.5 else 0)
+            )
 
         def to_solve(ecc):
             return (
@@ -109,7 +117,7 @@ class FindStartingPositions:
                     and self._bls_eclipses["deeper"] == "odd"
                 ):
                     return params._replace(
-                        w=180.0 + params.w,
+                        w=(-180.0 if params.w > 90.0 else 180.0) + params.w,
                         eclipse_time=params.eclipse_time
                         + binary.eclipse_time_difference,
                     )
@@ -128,8 +136,7 @@ class FindStartingPositions:
             try:
                 binary = Binary(from_mcmc=mod_params)
             except ValueError:
-                _logger.warning('Failed to create binary from %s!',
-                                params)
+                _logger.warning("Failed to create binary from %s!", params)
                 return numpy.inf
             return -self._log_likelihood.calc_lc_log_likelihood(
                 binary, 0.0, self._bls_eclipses["deeper"]
@@ -329,7 +336,7 @@ class FindStartingPositions:
                     )
                 except ValueError:
                     _logger.warning(
-                        "Propesd initial position scenario (%s) appears "
+                        "Proposed initial position scenario (%s) appears "
                         "unphysical, using random position:\n%s",
                         repr(scenario),
                         format_exc(),
@@ -338,6 +345,15 @@ class FindStartingPositions:
                         (scenario_ind, norm.rvs(size=len(SampleParams._fields)))
                     )
                     continue
+                params = params._replace(
+                    eclipse_time=uniform.rvs(
+                        loc=params.eclipse_time
+                        - 0.15 * self._log_likelihood.best_fit_bls["duration"],
+                        scale=0.3
+                        * self._log_likelihood.best_fit_bls["duration"],
+                    )
+                )
+
                 mcmc_sample = numpy.array(
                     [
                         self._log_likelihood.inverse_prior(param, value)[1]
@@ -345,7 +361,25 @@ class FindStartingPositions:
                     ]
                 )
                 non_finite = numpy.logical_not(numpy.isfinite(mcmc_sample))
-                mcmc_sample[non_finite] = norm.rvs(non_finite.sum())
+                tiny = numpy.logical_and(non_finite, mcmc_sample < 0)
+                mcmc_sample[tiny] = norm.ppf(
+                    uniform.rvs(size=tiny.sum(), scale=0.2)
+                )
+                huge = numpy.logical_and(non_finite, mcmc_sample > 0)
+                mcmc_sample[huge] = norm.ppf(
+                    uniform.rvs(size=huge.sum(), loc=0.8, scale=0.2)
+                )
+                _logger.info(
+                    "Generated optimized sample:\n%s\nCorresponding to "
+                    "binary:\n%s",
+                    mcmc_sample,
+                    Binary(
+                        from_mcmc=self._log_likelihood.get_sample_params(
+                            mcmc_sample
+                        )
+                    ),
+                )
+                assert numpy.isfinite(mcmc_sample).all()
                 optimized_queue.put((scenario_ind, mcmc_sample))
             _logger.info("Position optimization process finished.")
         # pylint: disable=bare-except

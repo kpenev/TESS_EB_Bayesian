@@ -275,7 +275,10 @@ def create_model_to_data_plot(config):
         for pos in positions:
             print(f'Parameters: {log_likelihood.get_sample_params(pos)}')
             print(5*'\n')
-            log_likelihood.plot_lc_model_comparison(pos, pdf)
+            try:
+                log_likelihood.plot_lc_model_comparison(pos, pdf)
+            except ValueError:
+                continue
 
 
 def main(config):
