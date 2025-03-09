@@ -333,7 +333,7 @@ class FindStartingPositions:
                         format_exc(),
                     )
                     optimized_queue.put(
-                        scenario_ind, norm.rvs(size=len(SampleParams._fields))
+                        (scenario_ind, norm.rvs(size=len(SampleParams._fields)))
                     )
                     continue
                 mcmc_sample = numpy.array(
