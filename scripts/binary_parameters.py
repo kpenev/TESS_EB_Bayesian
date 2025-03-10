@@ -82,15 +82,19 @@ def calc_eclipse_phase_diff(ecc, w, inc=None):
 class BinaryParams(batman.TransitParams):
     """Extend the batman parameters with everything needed by model."""
 
-    _cmd_interpolators = tuple(
-        (photsys, CMDInterpolator(cmd_data_fname.format(photsys=photsys)))
-        for photsys in ["panstarss1", "2mass_spitzer_wise"]
-    )
-    _gravdark_interp = GravDarkInterpolator()
+    @classmethod
+    def prepare_class(cls):
+        """Prepare the class for use."""
 
-    meh_range = _cmd_interpolators[0][1].get_range("MH")
-    log_age_range = _cmd_interpolators[0][1].get_range("logAge")
-    mini_range = _cmd_interpolators[0][1].get_range("Mini")
+        cls._cmd_interpolators = tuple(
+            (photsys, CMDInterpolator(cmd_data_fname.format(photsys=photsys)))
+            for photsys in ["panstarss1", "2mass_spitzer_wise"]
+        )
+        cls._gravdark_interp = GravDarkInterpolator()
+
+        cls.meh_range = cls._cmd_interpolators[0][1].get_range("MH")
+        cls.log_age_range = cls._cmd_interpolators[0][1].get_range("logAge")
+        cls.mini_range = cls._cmd_interpolators[0][1].get_range("Mini")
 
     def _calc_eclipse_phase_diff(self, mid_transit=False):
         """Convenience wrapper around `calc_eclipse_phase_diff()`."""
@@ -346,6 +350,9 @@ class BinaryParams(batman.TransitParams):
 
     def __init__(self, *, from_phoebe=None, from_mcmc=None):
         """Set the model parameters either from PHOEBE binary or MCMC sample."""
+
+        if not hasattr(BinaryParams, '_cmd_interpolators'):
+            BinaryParams.prepare_class()
 
         super().__init__()
         self._per_star_attr = [
