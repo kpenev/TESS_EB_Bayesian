@@ -18,19 +18,18 @@ Session = sessionmaker(db_engine, expire_on_commit=False)
 # pylint: enable=invalid-name
 
 if __name__ == "__main__":
+    from os import path
     from bui.select_ticids.data_model import (
         SelectTICIDBase,
         get_ticid_select_table,
     )
+    from paths import prsa_ebs
+    from astropy.io import fits
 
-    SelectTICIDs = create_ticid_select_table("test_batch")
+    SelectTICIDs = get_ticid_select_table("prsa_ebs")
     SelectTICIDBase.metadata.create_all(db_engine)
     with Session.begin() as db_session:
-        for i in range(100):
-            if i % 7 == 0:
-                flag = -1
-            elif i % 7 < 3:
-                flag = 1
-            else:
-                flag = 0
-            db_session.add(SelectTICIDs(id=i, flag=flag))
+        with fits.open(prsa_ebs, 'readonly') as prsa:
+            data = prsa[1].data
+            for ticid in data['TIC'][data['m_TIC'] == 1]:
+                db_session.add(SelectTICIDs(id=int(ticid), flag=0))

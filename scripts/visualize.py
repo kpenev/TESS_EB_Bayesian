@@ -429,7 +429,12 @@ def create_lightcurve_plot(config):
             + f"Sector {header['sector']} {header['provenance']} lightcurve"
         )
         title_pre = ""
-    pyplot.savefig(config.plot_lightcurve[0])
+    if isinstance(config.plot_lightcurve[0], tuple):
+        pyplot.savefig(
+            config.plot_lightcurve[0][0], format=config.plot_lightcurve[0][1]
+        )
+    else:
+        pyplot.savefig(config.plot_lightcurve[0])
 
 
 def main(config):

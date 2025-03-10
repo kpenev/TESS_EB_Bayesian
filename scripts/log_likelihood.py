@@ -12,7 +12,6 @@ from sqlalchemy import select, delete
 from tess_target import TESSTarget
 from extinction_correction import Green19Correction
 from binary import Binary
-from paths import prsa_ebs
 from cache_interface import CacheSession, CachedSED, CachedBLS
 from sample_params import SampleParams
 
@@ -645,8 +644,6 @@ def experiment():
 
     # TODO: figure out why 323020176 crashes
     test_tic = 189639080
-    eb_cat = pandas.read_csv(prsa_ebs, index_col="tess_id")
-    print(f"Prsa EB params for TIC {test_tic}: {eb_cat.loc[test_tic]!r}")
     logging.basicConfig(level=logging.DEBUG)
 
     with PdfPages("best_fit_bls.pdf") as output_pdf:

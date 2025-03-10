@@ -23,6 +23,7 @@ class TICIdSelectorView(View):
     """Base for views that displays plots per TIC and allows selecting some."""
 
     tablename = None
+    plot = None
 
     def get(self, request, displayed_ticid=None, decision=None):
         """Allow user to review LCs from Villanova catalog and select some."""
@@ -73,5 +74,6 @@ class TICIdSelectorView(View):
         if displayed_ticid is None:
             displayed_ticid = context["pending"][0]
         context["displayed_ticid"] = displayed_ticid
+        context['image'] = self.plot(displayed_ticid)
 
         return render(request, "select_ticids/index.html", context)

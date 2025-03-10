@@ -1,0 +1,14 @@
+<div class="{{ list_name }}"> 
+    <ul>
+        {% for ticid in list %}
+        <li
+                {% if ticid == displayed_ticid %}
+                class="displayed"
+                {% endif %}
+            >
+            <a href="{% url 'jump' displayed_ticid=ticid %}"> TIC ID: {{ ticid }} </a> 
+        </li>
+        {% endfor %}
+    </ul>
+</div>
+
