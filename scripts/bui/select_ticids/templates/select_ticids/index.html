@@ -11,10 +11,9 @@
     </head>
     <body>
         <ul class="navbar">
-            <li><a>Select</a></li>
-            <li><a>Discard</a></li>
-            <li><a>Skip</a></li>
-            <li class="save"><a>Save</a></li>
+            <li><a href="{% url 'decision' decision="select" displayed_ticid=displayed_ticid %}">Select</a></li>
+            <li><a href="{% url 'decision' decision="discard" displayed_ticid=displayed_ticid %}">Discard</a></li>
+            <li><a href="{% url 'decision' decision="skip" displayed_ticid=displayed_ticid %}">Skip</a></li>
         </ul>
         <div class="main">
             <div class="plots">

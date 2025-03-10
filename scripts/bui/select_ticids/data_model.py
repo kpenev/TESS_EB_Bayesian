@@ -17,8 +17,17 @@ class SelectTICIDBase(DeclarativeBase):
         doc="When record was last changed",
     )
 
+
 def get_ticid_select_table(tablename):
     """Create a table for tracking TIC ID selection with given name."""
+
+    for mapper in SelectTICIDBase.registry.mappers:
+        candidate = mapper.class_
+        if (
+            not candidate.__name__.startswith("_")
+            and getattr(candidate, "__tablename__", "") == tablename
+        ):
+            return candidate
 
     class SelectTICIDs(SelectTICIDBase):
         __tablename__ = tablename
