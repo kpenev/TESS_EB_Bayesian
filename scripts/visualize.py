@@ -1,26 +1,29 @@
 #!/usr/bin/env python3
 
-"""Create plots of emcee sampling results."""
+"""Create plots of emcee sampling results or lightcurves."""
 
 from os import path, remove, makedirs
 from subprocess import run
 from glob import glob
 import logging
 
-from matplotlib import pyplot
+from matplotlib import pyplot, rcParams
 from matplotlib.backends.backend_pdf import PdfPages
 import numpy
 from configargparse import ArgumentParser, DefaultsFormatter
 import pandas
 import h5py
+from asteval import Interpreter
 
 from general_purpose_python_modules.visuals import make_corner_plot
 from general_purpose_python_modules.emcee_util import load_initial_positions
+from autowisp import Evaluator
 
 from hacked_emcee_hdf5_backend import HDFBackend
 from sample_params import SampleParams
-from autowisp import Evaluator
 from log_likelihood import LogLikelihood
+from tess_target import TESSTarget
+from paths import samples as samples_fname
 
 
 def parse_command_line():
@@ -34,23 +37,29 @@ def parse_command_line():
         formatter_class=DefaultsFormatter,
         ignore_unknown_config_file_keys=False,
     )
-    parser.add_argument("samples_fname", help="The saved samples to plot.")
+    parser.add_argument("tic_id", type=int, help="TIC ID to create plots for.")
+    parser.add_argument(
+        "--samples-fname-pattern",
+        default=samples_fname,
+        help="The filename where to save samples. If the file already exists, "
+        "sampling continues, adding more points to the existing chain.",
+    )
     parser.add_argument(
         "--corner-plot-fname",
         "--corner-plot",
         "--corner",
         default=None,
         help="If specified, a corner plot is created and saved with the given "
-        "filename.",
+        "filename. Can use ``{tic_id}`` substitution.",
     )
     parser.add_argument(
         "--model-to-data-plot",
         default=None,
         nargs=2,
-        metavar=('STEP_IND', 'PLOT_FNAME'),
+        metavar=("STEP_IND", "PLOT_FNAME"),
         help="If specified, create a plot comparing model to observed LCs for "
         "the a particular MCMC sample (walker initial positions are sample "
-        "-1).",
+        "-1). Can use ``{tic_id}`` substitution in filename.",
     )
     parser.add_argument(
         "--plot-expressions",
@@ -58,13 +67,43 @@ def parse_command_line():
         default=[],
         help="If specified, the first argument should be a filaneme, followed "
         "by expression for the x value followed by any number of y expressions "
-        "that are all shown on the same plot.",
+        "that are all shown on the same plot. Can use ``{tic_id}`` substitution"
+        " in filename.",
     )
     parser.add_argument(
         "--expression-movie",
         action="store_true",
         help="If passed, a movie frame is generated per ``--plot-expressions`` "
         "for each iteration and a movie is created.",
+    )
+    parser.add_argument(
+        "--histogram-movie",
+        nargs=2,
+        metavar=("FILENAME", "EXPRESSION"),
+        help="Create a movie where each frame shows a histogram of some "
+        "expression of the sample variables at fixed iteration. Thinning and "
+        "burn-in control which iterations are included as frames. Can use "
+        "``{tic_id}`` substitution in filename.",
+    )
+    parser.add_argument(
+        "--plot-lightcurve",
+        nargs=2,
+        metavar=("FILENAME", "MOSAIC"),
+        help="If specified a plot is created showing the TESS lightcurve of the"
+        " selected object. The first argument is a filename (possibly including"
+        " ``{tic-id}`` substitution) and the second specifies a layout (see "
+        "``pyplot.subplot_mosaic()`` documentation for the syntax. Separate "
+        "figure is created for each TESS sector and saved as a page in a PDF "
+        "if file extension is PDF, otherwise a long figure is created with all "
+        "plots arranged vertically. Plot labels in the mosaic should be one "
+        "of the following:\n"
+        "\t* full: plot the lightcurve for a sector without any folding.\n"
+        "\t* folded: phot the lightcurve folded at the best fit BLS period.\n"
+        "\t* zoom_default: plot only vicinity of BLS transit (folded).\n"
+        "\t* zoom_even: plot only vicinity of even BLS transits (folded).\n"
+        "\t* zoom_odd: plot only vicinity of odd BLS transits (folded).\n"
+        "\t* zoom_masked: plot only vicinity of masked BLS transits (folded on "
+        "masked period).",
     )
     parser.add_argument(
         "--x-range",
@@ -100,13 +139,6 @@ def parse_command_line():
         help="The thinning factor to apply to the chains (1 for no thinning).",
     )
     parser.add_argument(
-        "--histogram-movie",
-        nargs=2,
-        help="Create a movie where each frame shows a histogram of some "
-        "expression of the sample variables at fixed iteration. Thinning and "
-        "burn-in control which iterations are included as frames.",
-    )
-    parser.add_argument(
         "--histogram-resolution",
         type=int,
         default=20,
@@ -122,7 +154,11 @@ def parse_command_line():
         "``--histogram-movie`` option.",
     )
 
-    return parser.parse_args()
+    result = parser.parse_args()
+    result.samples_fname = result.samples_fname_pattern.format(
+        tic_id=result.tic_id
+    )
+    return result
 
 
 class MovieMaker:
@@ -269,16 +305,131 @@ def create_model_to_data_plot(config):
 
     with h5py.File(config.samples_fname, "r") as samples_file:
         tic = int(samples_file.attrs["TICID"])
-    print(f'TIC: {tic!r} ({type(tic)})')
+    print(f"TIC: {tic!r} ({type(tic)})")
     log_likelihood = LogLikelihood(tic)
     with PdfPages(config.model_to_data_plot[1]) as pdf:
         for pos in positions:
-            print(f'Parameters: {log_likelihood.get_sample_params(pos)}')
-            print(5*'\n')
+            print(f"Parameters: {log_likelihood.get_sample_params(pos)}")
+            print(5 * "\n")
             try:
                 log_likelihood.plot_lc_model_comparison(pos, pdf)
             except ValueError:
                 continue
+
+
+def create_lightcurve_plot(config):
+    """Create the plot(s) described in the ``--plot-lightcurve`` cmdline arg."""
+
+    def plot_full(lightcurve):
+        """Show the full unfolded lightcurve for a sector."""
+
+        pyplot.plot(lightcurve["time"], lightcurve["flux"], ".")
+        pyplot.xlabel("Time [d]")
+        pyplot.ylabel("Flux [ppm]")
+
+    def plot_vs_phase(lightcurve, phase):
+        """Create a plot of the lightcurve vs the given phase."""
+
+        phase_order = numpy.argsort(phase)
+        pyplot.plot(phase[phase_order], lightcurve["flux"][phase_order], ".")
+        pyplot.xlabel(f"Phase")
+        pyplot.ylabel("Flux [ppm]")
+
+    def plot_folded(lightcurve, bls):
+        """Show sector lightcurve folded by the best fit BLS period."""
+
+        period = bls["period"][0]
+        if abs(bls["depth_even"][0] - bls["depth_odd"][0]) > 5.0 * (
+            bls["depth_even"][1] + bls["depth_odd"][1]
+        ):
+            period *= 2
+        phase = (lightcurve["time"] % period) / period
+        plot_vs_phase(lightcurve, phase)
+        pyplot.xlim(0, 1)
+        return period
+
+    def plot_zoomed(lightcurve, bls, zoom):
+        """
+        Show folded lightcurve near some BLS transit.
+
+        Possible values for zoom are "default", "even", "odd", "masked".
+        """
+
+        if zoom == "default":
+            period = bls["period"][0]
+            time_reference = bls["transit_time"]
+        elif zoom == "masked":
+            period = bls["masked_period"][0]
+            time_reference = bls["masked_transit_time"]
+        else:
+            period = 2 * bls["period"][0]
+            if zoom == "even":
+                time_reference = bls["transit_time"]
+            else:
+                assert zoom == "odd"
+                time_reference = bls["transit_time"] + bls["period"][0]
+
+        phase = (
+            (lightcurve["time"] - time_reference + period / 2) % period
+        ) / period - 0.5
+        plot_vs_phase(lightcurve, phase)
+        half_xrange = (
+            bls[("masked_" if zoom == "masked" else "") + "duration"] / period
+        )
+        pyplot.xlim(-half_xrange, half_xrange)
+
+    tess_target = TESSTarget(config.tic_id)
+    bls = None
+
+    full_figure = pyplot.figure(
+        figsize=(
+            rcParams["figure.figsize"][0],
+            rcParams["figure.figsize"][1] * 1.5 * len(tess_target.lcs),
+        ),
+        layout="constrained",
+    )
+    mosaic_spec = Interpreter(
+        user_symbols={
+            plot_type: plot_type
+            for plot_type in [
+                "full",
+                "folded",
+                "zoom_default",
+                "zoom_even",
+                "zoom_odd",
+                "zoom_masked",
+            ]
+        }
+    )(config.plot_lightcurve[1])
+    subfigures = full_figure.subfigures(len(tess_target.lcs), 1, hspace=0.03)
+    title_pre = f"TIC {config.tic_id}\n"
+    for (header, lightcurve), subfig in zip(tess_target.lcs, subfigures):
+        for plot_type, axis in subfig.subplot_mosaic(
+            mosaic_spec, gridspec_kw={"wspace": 0.3, "hspace": 0.3}, sharey=True
+        ).items():
+            pyplot.sca(axis)
+            if plot_type == "full":
+                plot_full(lightcurve)
+            else:
+                if bls is None:
+                    bls = LogLikelihood.get_cached_sed_and_bls(config.tic_id)[1]
+                    if bls is None:
+                        bls = tess_target.fit_bls()
+                if plot_type == "folded":
+                    period = plot_folded(lightcurve, bls)
+                    if title_pre:
+                        title_pre = (
+                            title_pre.strip() + f" BLS Porb = {period!r}\n"
+                        )
+                else:
+                    assert plot_type.startswith("zoom_")
+                    plot_zoomed(lightcurve, bls, plot_type[len("zoom_") :])
+        subfig.suptitle(
+            title_pre
+            + f"Sector {header['sector']} {header['provenance']} lightcurve"
+        )
+        title_pre = ""
+    pyplot.savefig(config.plot_lightcurve[0])
 
 
 def main(config):
@@ -287,6 +438,9 @@ def main(config):
     logging.basicConfig(level=logging.DEBUG)
     if config.model_to_data_plot:
         create_model_to_data_plot(config)
+
+    if config.plot_lightcurve:
+        create_lightcurve_plot(config)
 
     backend = HDFBackend(config.samples_fname, read_only=True)
     raw_data = backend.get_blobs()
