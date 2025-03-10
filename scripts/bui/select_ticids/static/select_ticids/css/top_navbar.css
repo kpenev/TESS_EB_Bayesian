@@ -87,3 +87,7 @@ ul.navbar  {
     overflow: scroll;
 }
 
+.displayed {
+    font-weight: bold;
+    background-color: red;
+}

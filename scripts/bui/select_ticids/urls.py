@@ -1,7 +1,7 @@
 from django.urls import path
 
-from . import views
+from .views import TICIdSelectorView
 
 urlpatterns = [
-    path("", views.index, name="index"),
+    path("", TICIdSelectorView.as_view(tablename='test_batch'), name="index"),
 ]

@@ -21,27 +21,9 @@
                 Plots
             </div>
             <div class="ticid_lists">
-                <div class="selected"> 
-                    <ul>
-                        {% for ticid in review_ticids %}
-                        <li><a> TIC ID: {{ ticid }} </a> </li>
-                        {% endfor %}
-                    </ul>
-                </div>
-                <div class="pending">
-                    <ul>
-                        {% for ticid in review_ticids %}
-                        <li><a> TIC ID: {{ ticid }} </a> </li>
-                        {% endfor %}
-                    </ul>
-                </div>
-                <div class="discarded">
-                    <ul>
-                        {% for ticid in review_ticids %}
-                        <li><a> TIC ID: {{ ticid }} </a> </li>
-                        {% endfor %}
-                    </ul>
-                </div>
+                {% include "select_ticids/tic_list.html" with list_name="selected" list=selected %}
+                {% include "select_ticids/tic_list.html" with list_name="pending" list=pending %}
+                {% include "select_ticids/tic_list.html" with list_name="discarded" list=discarded %}
             </div>
         </div>
     </body>
