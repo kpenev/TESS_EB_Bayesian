@@ -18,6 +18,7 @@ from general_purpose_python_modules.multiprocessing_util import (
 from hacked_emcee_hdf5_backend import HDFBackend
 from log_likelihood import SampleParams, LogLikelihood, LogLikelihoodPriorsOnly
 from paths import results_dir
+from paths import samples as samples_fname_pattern
 from find_starting_positions import FindStartingPositions
 
 _logger = logging.getLogger(__name__)
@@ -49,10 +50,7 @@ def parse_command_line():
     )
     parser.add_argument(
         "--samples-fname-pattern",
-        default=path.join(
-            results_dir,
-            "tess{tic_id:d}_samples.h5",
-        ),
+        default=samples_fname_pattern,
         help="The filename where to save samples. If the file already exists, "
         "sampling continues, adding more points to the existing chain.",
     )
