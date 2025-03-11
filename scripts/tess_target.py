@@ -102,12 +102,13 @@ class TESSTarget:
         periodogram = model.power(
             1.0
             / numpy.arange(
-                1 / 0.4,
-                0.01,
+                1.0 / 0.4,
+                1.0 / 30.0,
                 -0.02
                 / (
-                    100.0
-                    * (lightcurve["time"].max() - lightcurve["time"].min())
+                    30.0
+                    * min((lightcurve["time"].max() - lightcurve["time"].min()),
+                          300)
                 ),
             ),
             numpy.linspace(0.02, 0.2, 100),
@@ -329,7 +330,7 @@ class TESSTarget:
 
         lcs = {
             provenance: download_lcs(tic_id, "all", provenance=provenance)
-            for provenance in ["SPOC", "QLP"]
+            for provenance in ["SPOC"]#, "QLP"]
         }
 
         self._lcs = []
