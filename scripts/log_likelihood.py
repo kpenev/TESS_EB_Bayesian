@@ -186,25 +186,6 @@ class LogLikelihood(TESSTarget):
         folded = time % period
         return lightcurve[numpy.minimum(folded, period - folded) < window]
 
-    def _iter_lc_and_model(self, binary, lc_sys_err, eclipse_only):
-        """Iterate over LC data and model given binary parameters."""
-
-        for header, lightcurve in self._lcs:
-            if eclipse_only:
-                lightcurve = self._get_lc_eclipses(lightcurve, eclipse_only)
-            lc_sq_errors = lightcurve["flux_err"] ** 2 + lc_sys_err**2
-
-            model_lc = binary.get_lightcurve(
-                lightcurve["time"],
-                supersample_factor=100,
-                exp_time=header["exptime"],
-            )
-
-            model_lc *= (model_lc * lightcurve["flux"] / lc_sq_errors).sum() / (
-                model_lc**2 / lc_sq_errors
-            ).sum()
-            yield header, lightcurve, model_lc, lc_sq_errors
-
     @property
     def tic_id(self):
         """The TIC identifier of the EB being modeled."""
@@ -284,6 +265,23 @@ class LogLikelihood(TESSTarget):
 
         self._logger.debug("LCs: %s", repr(self._lcs))
         self._logger.debug("SED: %s", repr(self._sed))
+
+    @staticmethod
+    def get_model(binary, header, lightcurve, lc_sys_err):
+        """Fit the model scaling to match that of the lightcurve."""
+
+        lc_sq_errors = lightcurve["flux_err"] ** 2 + lc_sys_err**2
+
+        model_lc = binary.get_lightcurve(
+            lightcurve["time"],
+            supersample_factor=100,
+            exp_time=header["exptime"],
+        )
+
+        model_lc *= (model_lc * lightcurve["flux"] / lc_sq_errors).sum() / (
+            model_lc**2 / lc_sq_errors
+        ).sum()
+        return model_lc, lc_sq_errors
 
     def prior_transform(self, param, sample_entry):
         """
@@ -439,9 +437,12 @@ class LogLikelihood(TESSTarget):
         if binary.a < 1 + binary.rp:
             return -numpy.inf
         result = 0.0
-        for _, lightcurve, model_lc, lc_sq_errors in self._iter_lc_and_model(
-            binary, lc_sys_err, eclipse_only
-        ):
+        for header, lightcurve in self._lcs:
+            if eclipse_only:
+                lightcurve = self._get_lc_eclipses(lightcurve, eclipse_only)
+            model_lc, lc_sq_errors = self.get_model(
+                binary, lc_sys_err, eclipse_only
+            )
             result -= (
                 (lightcurve["flux"] - model_lc) ** 2 / lc_sq_errors
                 + numpy.log(lc_sq_errors)

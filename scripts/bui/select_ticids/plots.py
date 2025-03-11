@@ -16,9 +16,10 @@ def lightcurve(tic_id):
         tic_id,
         (
             (png_stream, "png"),
-            "[[full, full, full],"
-            " [folded, folded, folded],"
-            " [zoom_default, zoom_even, zoom_odd]]",
+            "[[full]]",
+            # "[[full, full, full],"
+            # " [folded, folded, folded],"
+            # " [zoom_default, zoom_even, zoom_odd]]",
         ),
     )
     create_lightcurve_plot(config)

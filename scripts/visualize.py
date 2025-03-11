@@ -24,6 +24,7 @@ from sample_params import SampleParams
 from log_likelihood import LogLikelihood
 from tess_target import TESSTarget
 from paths import samples as samples_fname
+from binary import Binary
 
 
 def parse_command_line():
@@ -104,6 +105,13 @@ def parse_command_line():
         "\t* zoom_odd: plot only vicinity of odd BLS transits (folded).\n"
         "\t* zoom_masked: plot only vicinity of masked BLS transits (folded on "
         "masked period).",
+    )
+    parser.add_argument(
+        "--show-best-model-with-lc",
+        action="store_true",
+        help="If specified, also finds the highest log-likelihood point among "
+        "the samples and plots its model along with the lightcurve for "
+        "``--plot-lightcurve``.",
     )
     parser.add_argument(
         "--x-range",
@@ -317,65 +325,93 @@ def create_model_to_data_plot(config):
                 continue
 
 
-def create_lightcurve_plot(config):
+# pylint: disable=too-many-statements
+# pylint: disable=too-many-locals
+def create_lightcurve_plot(config, binary=None):
     """Create the plot(s) described in the ``--plot-lightcurve`` cmdline arg."""
 
-    def plot_full(lightcurve):
+    def plot_full(lightcurve, model_lc):
         """Show the full unfolded lightcurve for a sector."""
 
         pyplot.plot(lightcurve["time"], lightcurve["flux"], ".")
+        if model_lc is not None:
+            pyplot.plot(lightcurve["time"], model_lc, "-k")
         pyplot.xlabel("Time [d]")
         pyplot.ylabel("Flux [ppm]")
 
-    def plot_vs_phase(lightcurve, phase):
+    def plot_vs_phase(lightcurve, phase, model_lc):
         """Create a plot of the lightcurve vs the given phase."""
 
         phase_order = numpy.argsort(phase)
-        pyplot.plot(phase[phase_order], lightcurve["flux"][phase_order], ".")
-        pyplot.xlabel(f"Phase")
+        ordered_phase = phase[phase_order]
+        pyplot.plot(ordered_phase, lightcurve["flux"][phase_order], ".")
+        if model_lc is not None:
+            pyplot.plot(ordered_phase, model_lc[phase_order], "-k")
+        pyplot.xlabel("Phase")
         pyplot.ylabel("Flux [ppm]")
 
-    def plot_folded(lightcurve, bls):
+    def plot_folded(lightcurve, bls, model_lc):
         """Show sector lightcurve folded by the best fit BLS period."""
 
-        period = bls["period"][0]
-        if abs(bls["depth_even"][0] - bls["depth_odd"][0]) > 5.0 * (
-            bls["depth_even"][1] + bls["depth_odd"][1]
-        ):
-            period *= 2
+        if binary is None:
+            period = bls["period"][0]
+            if abs(bls["depth_even"][0] - bls["depth_odd"][0]) > 5.0 * (
+                bls["depth_even"][1] + bls["depth_odd"][1]
+            ):
+                period *= 2
+        else:
+            period = binary.per
         phase = (lightcurve["time"] % period) / period
-        plot_vs_phase(lightcurve, phase)
+        plot_vs_phase(lightcurve, phase, model_lc)
         pyplot.xlim(0, 1)
         return period
 
-    def plot_zoomed(lightcurve, bls, zoom):
+    def plot_zoomed(lightcurve, bls, zoom, model_lc):
         """
         Show folded lightcurve near some BLS transit.
 
         Possible values for zoom are "default", "even", "odd", "masked".
         """
 
-        if zoom == "default":
-            period = bls["period"][0]
-            time_reference = bls["transit_time"]
-        elif zoom == "masked":
-            period = bls["masked_period"][0]
-            time_reference = bls["masked_transit_time"]
+        if zoom in ["primary", "secondary"]:
+            assert binary is not None
+            if zoom == "secondary":
+                binary.swap_components()
+            period = binary.per
+            time_reference = binary.t0
+            eval_t = numpy.linspace(
+                time_reference - period / 2,
+                time_reference + period / 2,
+                100,
+            )
+            eclipse_lc = binary.eclipse(eval_t)
+            eclipsed = eval_t[eclipse_lc < 1] - time_reference
+            half_xrange = max(abs(eclipsed.min()), eclipsed.max())
+            if zoom == "secondary":
+                binary.swap_components()
         else:
-            period = 2 * bls["period"][0]
-            if zoom == "even":
+            if zoom == "default":
+                period = bls["period"][0]
                 time_reference = bls["transit_time"]
+            elif zoom == "masked":
+                period = bls["masked_period"][0]
+                time_reference = bls["masked_transit_time"]
             else:
-                assert zoom == "odd"
-                time_reference = bls["transit_time"] + bls["period"][0]
+                period = 2 * bls["period"][0]
+                if zoom == "even":
+                    time_reference = bls["transit_time"]
+                else:
+                    assert zoom == "odd"
+                    time_reference = bls["transit_time"] + bls["period"][0]
+            half_xrange = (
+                bls[("masked_" if zoom == "masked" else "") + "duration"]
+                / period
+            )
 
         phase = (
             (lightcurve["time"] - time_reference + period / 2) % period
         ) / period - 0.5
-        plot_vs_phase(lightcurve, phase)
-        half_xrange = (
-            bls[("masked_" if zoom == "masked" else "") + "duration"] / period
-        )
+        plot_vs_phase(lightcurve, phase, model_lc)
         pyplot.xlim(-half_xrange, half_xrange)
 
     tess_target = TESSTarget(config.tic_id)
@@ -398,32 +434,46 @@ def create_lightcurve_plot(config):
                 "zoom_even",
                 "zoom_odd",
                 "zoom_masked",
+                "zoom_primary",
+                "zoom_secondary",
             ]
         }
     )(config.plot_lightcurve[1])
-    subfigures = full_figure.subfigures(len(tess_target.lcs), 1, hspace=0.03)
+    subfigures = [
+        subfig[0]
+        for subfig in full_figure.subfigures(
+            len(tess_target.lcs), 1, hspace=0.03, squeeze=False
+        )
+    ]
     title_pre = f"TIC {config.tic_id}\n"
+    model_lc = None
     for (header, lightcurve), subfig in zip(tess_target.lcs, subfigures):
+        if binary is not None:
+            model_lc = LogLikelihood.get_model(
+                binary, header, lightcurve, binary.lc_sys_err
+            )[0]
         for plot_type, axis in subfig.subplot_mosaic(
             mosaic_spec, gridspec_kw={"wspace": 0.3, "hspace": 0.3}, sharey=True
         ).items():
             pyplot.sca(axis)
             if plot_type == "full":
-                plot_full(lightcurve)
+                plot_full(lightcurve, model_lc)
             else:
                 if bls is None:
                     bls = LogLikelihood.get_cached_sed_and_bls(config.tic_id)[1]
                     if bls is None:
                         bls = tess_target.fit_bls()
                 if plot_type == "folded":
-                    period = plot_folded(lightcurve, bls)
+                    period = plot_folded(lightcurve, bls, model_lc)
                     if title_pre:
                         title_pre = (
                             title_pre.strip() + f" BLS Porb = {period!r}\n"
                         )
                 else:
                     assert plot_type.startswith("zoom_")
-                    plot_zoomed(lightcurve, bls, plot_type[len("zoom_") :])
+                    plot_zoomed(
+                        lightcurve, bls, plot_type[len("zoom_") :], model_lc
+                    )
         subfig.suptitle(
             title_pre
             + f"Sector {header['sector']} {header['provenance']} lightcurve"
@@ -437,6 +487,10 @@ def create_lightcurve_plot(config):
         pyplot.savefig(config.plot_lightcurve[0])
 
 
+# pylint: enable=too-many-statements
+# pylint: enable=too-many-locals
+
+
 def main(config):
     """Avoid polluting global namespace."""
 
@@ -444,17 +498,29 @@ def main(config):
     if config.model_to_data_plot:
         create_model_to_data_plot(config)
 
-    if config.plot_lightcurve:
-        create_lightcurve_plot(config)
-
     backend = HDFBackend(config.samples_fname, read_only=True)
     raw_data = backend.get_blobs()
+    log_prob = backend.get_log_prob()
+    iteration = backend.iteration
+
+    if config.plot_lightcurve:
+        if config.show_best_model_with_lc:
+            best_index = numpy.unravel_index(
+                numpy.argmax(log_prob), log_prob.shape
+            )
+            best_params = SampleParams(*raw_data[best_index])
+            binary = Binary(from_mcmc=best_params)
+            binary.lc_sys_err = best_params.lc_sys
+        else:
+            binary = None
+        create_lightcurve_plot(config, binary)
+
     plot_data = pandas.DataFrame(
         raw_data[config.burn_in :: config.thin, :, :]
         .flatten()
         .reshape(
             (
-                (backend.iteration - config.burn_in + config.thin - 1)
+                (iteration - config.burn_in + config.thin - 1)
                 // config.thin
             )
             * backend.shape[0],
@@ -465,7 +531,7 @@ def main(config):
     plot_data.insert(
         0,
         "logprob",
-        backend.get_log_prob()[config.burn_in :: config.thin, :].flatten(),
+        log_prob[config.burn_in :: config.thin, :].flatten(),
     )
     if config.corner_plot_fname:
         create_corner_plot(plot_data, config)

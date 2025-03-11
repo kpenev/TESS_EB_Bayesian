@@ -144,6 +144,7 @@ class FindStartingPositions:
 
         params = self._match_deeper_eclipse_phase(params)
         temp_binary = Binary(from_mcmc=params)
+        max_impact = temp_binary.a
         _logger.debug(
             "Optimizing impact parameter for params:\n%s\nbinary:\n%s",
             params,
@@ -162,7 +163,7 @@ class FindStartingPositions:
             options={"disp": 3, "xatol": 1e-3},
         )
         assert result.success
-        return params._replace(primary_impact_param=result.x)
+        return params._replace(primary_impact_param=min(result.x, max_impact))
 
     def _match_both_depths(self, params):
         """Tune primary impact and mratio to best fit both eclipses."""
@@ -194,7 +195,7 @@ class FindStartingPositions:
         )
         assert result.success
         return self._match_deeper_eclipse_depth(
-            params._replace(mratio=result.x)
+            params._replace(mratio=min(max(result.x, min_mratio), 1.0))
         )
 
     def _match_eclipses_and_sed(self, params):
@@ -235,10 +236,11 @@ class FindStartingPositions:
                 raise GoodEnough("eclipses_and_sed", mtotal)
             return result.x - mtotal
 
+        mtotal_range = self._log_likelihood.get_range("mtotal")
         try:
             result = optimize.root_scalar(
                 to_solve,
-                bracket=self._log_likelihood.get_range("mtotal"),
+                bracket=mtotal_range,
                 rtol=1e-3,
             )
             assert result.converged
@@ -246,6 +248,7 @@ class FindStartingPositions:
         except GoodEnough as stopped:
             assert stopped.args[0] == "eclipses_and_sed"
             result = stopped.args[1]
+        result = min(max(result, mtotal_range[0]), mtotal_range[1])
         params = to_solve(result, True)
         _logger.info("Optimized parameters: %s", params)
         return params
@@ -370,14 +373,15 @@ class FindStartingPositions:
                     uniform.rvs(size=huge.sum(), loc=0.8, scale=0.2)
                 )
                 _logger.info(
-                    "Generated optimized sample:\n%s\nCorresponding to "
-                    "binary:\n%s",
+                    "Generated optimized sample:\n%s",
                     mcmc_sample,
-                    Binary(
-                        from_mcmc=self._log_likelihood.get_sample_params(
-                            mcmc_sample
-                        )
-                    ),
+                )
+                params = self._log_likelihood.get_sample_params(mcmc_sample)
+                _logger.info(
+                    "Above sample corresponds to parameters:\n%s", params
+                )
+                _logger.info(
+                    "Above corresponds to binary:\n%s", Binary(from_mcmc=params)
                 )
                 assert numpy.isfinite(mcmc_sample).all()
                 optimized_queue.put((scenario_ind, mcmc_sample))
