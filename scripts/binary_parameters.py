@@ -76,6 +76,12 @@ def calc_eclipse_phase_diff(ecc, w, inc=None):
 
     return (central_transits_rhs + inclination_correction) / numpy.pi + 0.5
 
+class classproperty(object):
+    def __init__(self, getter):
+        self.getter= getter
+    def __get__(self, instance, owner):
+        return self.getter(owner)
+
 
 # This is set by BATMAN
 # pylint: disable=too-many-instance-attributes
@@ -86,15 +92,32 @@ class BinaryParams(batman.TransitParams):
     def prepare_class(cls):
         """Prepare the class for use."""
 
+        if hasattr(BinaryParams, '_cmd_interpolators'):
+            return
         cls._cmd_interpolators = tuple(
             (photsys, CMDInterpolator(cmd_data_fname.format(photsys=photsys)))
             for photsys in ["panstarss1", "2mass_spitzer_wise"]
         )
         cls._gravdark_interp = GravDarkInterpolator()
 
-        cls.meh_range = cls._cmd_interpolators[0][1].get_range("MH")
-        cls.log_age_range = cls._cmd_interpolators[0][1].get_range("logAge")
-        cls.mini_range = cls._cmd_interpolators[0][1].get_range("Mini")
+        cls._meh_range = cls._cmd_interpolators[0][1].get_range("MH")
+        cls._log_age_range = cls._cmd_interpolators[0][1].get_range("logAge")
+        cls._mini_range = cls._cmd_interpolators[0][1].get_range("Mini")
+
+    @classproperty
+    def meh_range(cls):
+        BinaryParams.prepare_class()
+        return cls._meh_range
+
+    @classproperty
+    def log_age_range(cls):
+        BinaryParams.prepare_class()
+        return cls._log_age_range
+
+    @classproperty
+    def mini_range(cls):
+        BinaryParams.prepare_class()
+        return cls._mini_range
 
     def _calc_eclipse_phase_diff(self, mid_transit=False):
         """Convenience wrapper around `calc_eclipse_phase_diff()`."""
@@ -351,8 +374,7 @@ class BinaryParams(batman.TransitParams):
     def __init__(self, *, from_phoebe=None, from_mcmc=None):
         """Set the model parameters either from PHOEBE binary or MCMC sample."""
 
-        if not hasattr(BinaryParams, '_cmd_interpolators'):
-            BinaryParams.prepare_class()
+        BinaryParams.prepare_class()
 
         super().__init__()
         self._per_star_attr = [
