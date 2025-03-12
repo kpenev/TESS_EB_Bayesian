@@ -105,6 +105,25 @@ def parse_command_line():
         default=10.0,
         help="See ``--initial-logage-smear``",
     )
+    parser.add_argument(
+        "--restart-steps",
+        type=int,
+        default=300,
+        help="To avoid samples being stuck in local minima which under the "
+        "emcee algorithm may never be drained, every this many steps the "
+        "sampling stars from scratch, initialized with the top distinct samples"
+        " from all currently accumulated steps until all walkers end up within "
+        "``--restart-log-likelihood-range`` of each other on the last of these "
+        "steps. After this, normal sampling to converge proceeds.",
+    )
+    parser.add_argument(
+        "--restart-log-likelihood-range",
+        type=float,
+        default=15,
+        help="If the log-likelihood spread between most and least likely "
+        "walker at the end of ``--restart-steps`` is less than this, the true "
+        "sampling begins.",
+    )
 
     parser.add_argument(
         "--num-parallel",
@@ -193,7 +212,8 @@ def get_backend(samples_fname, config):
             config.tic_id,
         )
 
-    return backend
+    with h5py.File(samples_fname, "r") as samples_file:
+        return backend, samples_file["mcmc"].attrs["final_run"]
 
 
 def main(config):
@@ -202,7 +222,7 @@ def main(config):
     setup_process(task="mcmc_sampling", **vars(config))
 
     samples_fname = config.samples_fname_pattern.format(tic_id=config.tic_id)
-    backend = get_backend(samples_fname, config)
+    backend, final_run = get_backend(samples_fname, config)
     log_likelihood = (
         LogLikelihoodPriorsOnly if config.priors_only else LogLikelihood
     )(config.tic_id)
@@ -212,14 +232,37 @@ def main(config):
         initial_state = FindStartingPositions(log_likelihood)(config)
         _logger.info("Full set of initial positions found. Starting sampling.")
 
-    with Pool(
-        config.num_parallel,
-        initializer=setup_process_map,
-        initargs=[vars(config)],
-    ) as pool:
-        EnsembleSampler(
-            *backend.shape, log_likelihood, backend=backend, pool=pool
-        ).run_mcmc(initial_state, nsteps=1024**2)
+    while True:
+        with Pool(
+            config.num_parallel,
+            initializer=setup_process_map,
+            initargs=[vars(config)],
+        ) as pool:
+            EnsembleSampler(
+                *backend.shape, log_likelihood, backend=backend, pool=pool
+            ).run_mcmc(
+                initial_state,
+                nsteps=1024**2 if final_run else config.restart_steps,
+            )
+            if not final_run:
+                log_prob = backend.get_log_prob()[-1]
+                if (
+                    log_prob.max() - log_prob.min()
+                    < config.restart_log_likelihood_range
+                ):
+                    final_run = True
+                    _logger.info(
+                        "Log-likelihood spread within %f. Starting final "
+                        "sampling.",
+                        config.restart_log_likelihood_range,
+                    )
+                    with h5py.File(samples_fname, "a") as samples_file:
+                        samples_file["mcmc"].attrs["final_run"] = True
+                else:
+                    _logger.info(
+                        "Log-likelihood spread %f. Restarting sampling.",
+                        log_prob.max() - log_prob.min(),
+                    )
 
 
 if __name__ == "__main__":
