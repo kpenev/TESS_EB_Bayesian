@@ -184,6 +184,8 @@ class HDFBackend(Backend):
                 maxshape=(None, nwalkers),
                 dtype=self.dtype,
             )
+        if os.path.exists(self.unsaved_steps_fname):
+            os.remove(self.unsaved_steps_fname)
 
     def has_blobs(self):
         if self._has_blobs is None:

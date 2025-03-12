@@ -441,7 +441,7 @@ class LogLikelihood(TESSTarget):
             if eclipse_only:
                 lightcurve = self._get_lc_eclipses(lightcurve, eclipse_only)
             model_lc, lc_sq_errors = self.get_model(
-                binary, lc_sys_err, eclipse_only
+                binary, header, lightcurve, lc_sys_err
             )
             result -= (
                 (lightcurve["flux"] - model_lc) ** 2 / lc_sq_errors
