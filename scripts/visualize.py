@@ -462,7 +462,7 @@ def create_lightcurve_plot(config, binary=None):
                 if bls is None:
                     bls = LogLikelihood.get_cached_sed_and_bls(config.tic_id)[1]
                     if bls is None:
-                        bls = tess_target.fit_bls()
+                        bls = LogLikelihood(config.tic_id).best_fit_bls
                 if plot_type == "folded":
                     period = plot_folded(lightcurve, bls, model_lc)
                     if title_pre:
@@ -498,13 +498,33 @@ def main(config):
     if config.model_to_data_plot:
         create_model_to_data_plot(config)
 
-    backend = HDFBackend(config.samples_fname, read_only=True)
-    raw_data = backend.get_blobs()
-    log_prob = backend.get_log_prob()
-    iteration = backend.iteration
+    if path.exists(config.samples_fname):
+        backend = HDFBackend(config.samples_fname, read_only=True)
+        iteration = backend.iteration
+        raw_data = backend.get_blobs()
+        log_prob = backend.get_log_prob()
+        plot_data = pandas.DataFrame(
+            raw_data[config.burn_in : iteration : config.thin, :, :]
+            .flatten()
+            .reshape(
+                (
+                    (iteration - config.burn_in + config.thin - 1)
+                    // config.thin
+                )
+                * backend.shape[0],
+                backend.shape[1],
+            ),
+            columns=SampleParams._fields,
+        )
+        plot_data.insert(
+            0,
+            "logprob",
+            log_prob[config.burn_in : iteration : config.thin, :].flatten(),
+        )
 
     if config.plot_lightcurve:
         if config.show_best_model_with_lc:
+            assert iteration
             best_index = numpy.unravel_index(
                 numpy.argmax(log_prob), log_prob.shape
             )
@@ -515,24 +535,6 @@ def main(config):
             binary = None
         create_lightcurve_plot(config, binary)
 
-    plot_data = pandas.DataFrame(
-        raw_data[config.burn_in :: config.thin, :, :]
-        .flatten()
-        .reshape(
-            (
-                (iteration - config.burn_in + config.thin - 1)
-                // config.thin
-            )
-            * backend.shape[0],
-            backend.shape[1],
-        ),
-        columns=SampleParams._fields,
-    )
-    plot_data.insert(
-        0,
-        "logprob",
-        log_prob[config.burn_in :: config.thin, :].flatten(),
-    )
     if config.corner_plot_fname:
         create_corner_plot(plot_data, config)
 
