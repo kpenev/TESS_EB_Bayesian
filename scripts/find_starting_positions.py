@@ -77,9 +77,9 @@ class FindStartingPositions:
                 ),
             )
         final_w = params.w % 360
-        if (
-            secondary_eclipse_phase < 0.5 and not 90 < final_w < 270
-        ) or (secondary_eclipse_phase > 0.5 and (90 < final_w < 270)):
+        if (secondary_eclipse_phase < 0.5 and not 90 < final_w < 270) or (
+            secondary_eclipse_phase > 0.5 and (90 < final_w < 270)
+        ):
             final_w += 180.0
         final_w %= 360
         if final_w > 270:
@@ -283,7 +283,7 @@ class FindStartingPositions:
                 bracket=(
                     (0.0, 90.0)
                     if self._secondary_eclipse_phase > 0.5
-                    else (90.0, 270.0)
+                    else (90.0, 180.0)
                 ),
             ).root
             if self._secondary_eclipse_phase > 0.5:
@@ -294,6 +294,12 @@ class FindStartingPositions:
                 w_values = numpy.linspace(
                     wlimit, 360 - wlimit, config.initial_num_ws
                 )
+        self._logger.debug(
+            "Initial grid from:\nlog(t)=%s\n[M/H]=%s\nw=%s",
+            repr(log_age_values),
+            repr(meh_values),
+            repr(w_values),
+        )
         grid = [
             arr.flatten()
             for arr in numpy.meshgrid(log_age_values, meh_values, w_values)
@@ -319,13 +325,15 @@ class FindStartingPositions:
             size=grid[0].size,
         )
         result["w"] = grid[2]
-        result["w"][1:-1] += (
-            uniform.rvs(
-                loc=-config.initial_w_smear / 2,
-                scale=config.initial_w_smear,
-                size=grid[0].size - 2,
-            )
-        ) % 360
+        result["w"][1:-1] += uniform.rvs(
+            loc=-config.initial_w_smear / 2,
+            scale=config.initial_w_smear,
+            size=grid[0].size - 2,
+        )
+        result["w"] %= 360
+        self._logger.debug(
+            "Initial scenarios:\n\t%s", "\n\t".join([str(e) for e in result])
+        )
         return result
 
     def _find_initial_samples(self, scenario_queue, optimized_queue, config):
