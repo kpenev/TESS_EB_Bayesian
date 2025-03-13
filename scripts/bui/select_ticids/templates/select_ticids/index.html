@@ -11,37 +11,18 @@
     </head>
     <body>
         <ul class="navbar">
-            <li><a>Select</a></li>
-            <li><a>Discard</a></li>
-            <li><a>Skip</a></li>
-            <li class="save"><a>Save</a></li>
+            <li><a href="{% url 'decision' decision="select" displayed_ticid=displayed_ticid %}">Select</a></li>
+            <li><a href="{% url 'decision' decision="discard" displayed_ticid=displayed_ticid %}">Discard</a></li>
+            <li><a href="{% url 'decision' decision="skip" displayed_ticid=displayed_ticid %}">Skip</a></li>
         </ul>
         <div class="main">
-            <div class="plots">
-                Plots
+            <div class="img-parent"> 
+                <img id="main-image" src="data:image/png;base64,{{image}}"></img>
             </div>
             <div class="ticid_lists">
-                <div class="selected"> 
-                    <ul>
-                        {% for ticid in review_ticids %}
-                        <li><a> TIC ID: {{ ticid }} </a> </li>
-                        {% endfor %}
-                    </ul>
-                </div>
-                <div class="pending">
-                    <ul>
-                        {% for ticid in review_ticids %}
-                        <li><a> TIC ID: {{ ticid }} </a> </li>
-                        {% endfor %}
-                    </ul>
-                </div>
-                <div class="discarded">
-                    <ul>
-                        {% for ticid in review_ticids %}
-                        <li><a> TIC ID: {{ ticid }} </a> </li>
-                        {% endfor %}
-                    </ul>
-                </div>
+                {% include "select_ticids/tic_list.html" with list_name="selected" list=selected %}
+                {% include "select_ticids/tic_list.html" with list_name="pending" list=pending %}
+                {% include "select_ticids/tic_list.html" with list_name="discarded" list=discarded %}
             </div>
         </div>
     </body>

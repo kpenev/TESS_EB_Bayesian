@@ -34,7 +34,7 @@ ul.navbar  {
     height: 50%;
 }
 
-.plots {
+.img-parent {
     flex-grow: 1;
 }
 
@@ -87,3 +87,7 @@ ul.navbar  {
     overflow: scroll;
 }
 
+.displayed {
+    font-weight: bold;
+    background-color: red;
+}
