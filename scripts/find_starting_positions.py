@@ -58,6 +58,8 @@ class FindStartingPositions:
         """Set the eccentricity to match the eclipse phases."""
 
         if self._bls_eclipses["shallower"] != "masked" and not randomize_e:
+            if params.w % 360 > 270:
+                params._replace(w=params.w - 360.0)
             return params._replace(ecc=0.0)
 
         secondary_eclipse_phase = self._secondary_eclipse_phase
