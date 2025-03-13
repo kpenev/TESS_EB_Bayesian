@@ -6,13 +6,12 @@ from os import path, remove, makedirs
 from subprocess import run
 from glob import glob
 import logging
+from itertools import repeat
 
 from matplotlib import pyplot, rcParams
-from matplotlib.backends.backend_pdf import PdfPages
 import numpy
 from configargparse import ArgumentParser, DefaultsFormatter
 import pandas
-import h5py
 from asteval import Interpreter
 
 from general_purpose_python_modules.visuals import make_corner_plot
@@ -52,15 +51,6 @@ def parse_command_line():
         default=None,
         help="If specified, a corner plot is created and saved with the given "
         "filename. Can use ``{tic_id}`` substitution.",
-    )
-    parser.add_argument(
-        "--model-to-data-plot",
-        default=None,
-        nargs=2,
-        metavar=("STEP_IND", "PLOT_FNAME"),
-        help="If specified, create a plot comparing model to observed LCs for "
-        "the a particular MCMC sample (walker initial positions are sample "
-        "-1). Can use ``{tic_id}`` substitution in filename.",
     )
     parser.add_argument(
         "--plot-expressions",
@@ -107,11 +97,23 @@ def parse_command_line():
         "masked period).",
     )
     parser.add_argument(
-        "--show-best-model-with-lc",
-        action="store_true",
-        help="If specified, also finds the highest log-likelihood point among "
-        "the samples and plots its model along with the lightcurve for "
-        "``--plot-lightcurve``.",
+        "--show-model-with-lc",
+        help="Specify a model or models to show with the lightcurve for "
+        "``--plot-lightcurve``. Possible values are:\n"
+        "\t* top<N:int>: Plot the N highest likelihood samples.\n"
+        "\t* random<N:int>: Randomly select N samples.\n"
+        "\t* <STEP:int>,<WALKER:int>: use the specified sample. Step indexs "
+        "ignores ``--burn-in`` and ``--thin``. Step ``-1`` refers to the "
+        "initial walker positions (before sampling started). The walker "
+        "specification can be ommitted to show all samples for a given step.\n"
+        "If ``--sample-condition`` is specified, the top and random points are "
+        "selected only among surviving samples.",
+    )
+    parser.add_argument(
+        "--sample-condition",
+        default=None,
+        help="Condition to impose on the samples, excluding those which do not "
+        "satisfy the condition from plotting.",
     )
     parser.add_argument(
         "--x-range",
@@ -230,6 +232,8 @@ class MovieMaker:
 def create_corner_plot(plot_data, config):
     """Create and save a corner plot."""
 
+    if "selected" in plot_data:
+        plot_data = plot_data[plot_data["selected"]]
     for param in config.corner_plot_log_params:
         plot_data[param] = numpy.log10(plot_data[param])
     plot_data.rename(
@@ -258,24 +262,34 @@ def create_expressions_plot(plot_data, config, num_walkers=None):
     plot_y = [
         evaluate(y_expression) for y_expression in config.plot_expressions[2:]
     ]
+    selected = plot_data["selected"].array if "selected" in plot_data else None
+
     if config.expression_movie:
         assert num_walkers is not None
         shape = (plot_x.size // num_walkers, num_walkers)
         plot_x = plot_x.reshape(shape)
         plot_y = [y.reshape(shape) for y in plot_y]
+        if selected:
+            selected = selected.reshape(shape)
         with MovieMaker(config.plot_expressions[0], plot_x.shape[0]) as movie:
             for frame_ind in range(plot_x.shape[0]):
+                frame_selected = (
+                    None if selected is None else selected[frame_ind]
+                )
                 for y, label in zip(plot_y, config.plot_expressions[2:]):
                     pyplot.plot(
-                        plot_x[frame_ind], y[frame_ind], ".", label=label
+                        plot_x[frame_ind][frame_selected],
+                        y[frame_ind][frame_selected],
+                        ".",
+                        label=label,
                     )
                 pyplot.legend()
                 pyplot.xlim(config.x_range)
                 pyplot.ylim(config.y_range)
                 movie.add_frame()
     else:
-        for y, label in zip(plot_y, config.plot_expressions[2:]):
-            pyplot.plot(plot_x, y, ",", label=label)
+        for y, label in zip(plot_y[selected], config.plot_expressions[2:]):
+            pyplot.plot(plot_x[selected], y, ",", label=label)
         pyplot.legend()
         pyplot.xlim(config.x_range)
         pyplot.ylim(config.y_range)
@@ -289,10 +303,15 @@ def create_histogram_movie(plot_data, config, num_walkers):
 
     values = Evaluator(plot_data)(config.histogram_movie[1])
     values = values.reshape(values.size // num_walkers, num_walkers)
+    selected = (
+        plot_data["selected"].array.reshape(values.shape)
+        if "selected" in plot_data
+        else repeat(None)
+    )
     with MovieMaker(config.histogram_movie[0], values.shape[0]) as movie:
-        for iter_data in values:
+        for iter_data, selected in zip(values, selected):
             pyplot.hist(
-                iter_data,
+                iter_data[selected],
                 bins=config.histogram_resolution,
                 range=config.histogram_range,
                 density=True,
@@ -300,73 +319,48 @@ def create_histogram_movie(plot_data, config, num_walkers):
             movie.add_frame()
 
 
-def create_model_to_data_plot(config):
-    """Compare model to observed LCs for the initial walker positions."""
-
-    step = int(config.model_to_data_plot[0])
-    assert step >= -1
-    if step == -1:
-        positions = load_initial_positions(config.samples_fname)
-    else:
-        backend = HDFBackend(config.samples_fname, read_only=True)
-        positions = backend.get_chain(discard=step, thin=1000000)[0]
-
-    with h5py.File(config.samples_fname, "r") as samples_file:
-        tic = int(samples_file.attrs["TICID"])
-    print(f"TIC: {tic!r} ({type(tic)})")
-    log_likelihood = LogLikelihood(tic)
-    with PdfPages(config.model_to_data_plot[1]) as pdf:
-        for pos in positions:
-            print(f"Parameters: {log_likelihood.get_sample_params(pos)}")
-            print(5 * "\n")
-            try:
-                log_likelihood.plot_lc_model_comparison(pos, pdf)
-            except ValueError:
-                continue
-
-
 # pylint: disable=too-many-statements
 # pylint: disable=too-many-locals
-def create_lightcurve_plot(config, binary=None):
+def create_lightcurve_plot(config, binaries=None):
     """Create the plot(s) described in the ``--plot-lightcurve`` cmdline arg."""
 
-    def plot_full(lightcurve, model_lc):
+    def plot_full(lightcurve, model_lcs):
         """Show the full unfolded lightcurve for a sector."""
 
         pyplot.plot(lightcurve["time"], lightcurve["flux"], ".")
-        if model_lc is not None:
-            pyplot.plot(lightcurve["time"], model_lc, "-k")
+        for y in model_lcs:
+            pyplot.plot(lightcurve["time"], y, "-k")
         pyplot.xlabel("Time [d]")
         pyplot.ylabel("Flux [ppm]")
 
-    def plot_vs_phase(lightcurve, phase, model_lc):
+    def plot_vs_phase(lightcurve, phase, model_lcs):
         """Create a plot of the lightcurve vs the given phase."""
 
         phase_order = numpy.argsort(phase)
         ordered_phase = phase[phase_order]
         pyplot.plot(ordered_phase, lightcurve["flux"][phase_order], ".")
-        if model_lc is not None:
-            pyplot.plot(ordered_phase, model_lc[phase_order], "-k")
+        for y in model_lcs:
+            pyplot.plot(ordered_phase, y[phase_order], "-k")
         pyplot.xlabel("Phase")
         pyplot.ylabel("Flux [ppm]")
 
-    def plot_folded(lightcurve, bls, model_lc):
+    def plot_folded(lightcurve, bls, model_lcs):
         """Show sector lightcurve folded by the best fit BLS period."""
 
-        if binary is None:
+        if binaries is None:
             period = bls["period"][0]
             if abs(bls["depth_even"][0] - bls["depth_odd"][0]) > 5.0 * (
                 bls["depth_even"][1] + bls["depth_odd"][1]
             ):
                 period *= 2
         else:
-            period = binary.per
+            period = binaries[0].per
         phase = (lightcurve["time"] % period) / period
-        plot_vs_phase(lightcurve, phase, model_lc)
+        plot_vs_phase(lightcurve, phase, model_lcs)
         pyplot.xlim(0, 1)
         return period
 
-    def plot_zoomed(lightcurve, bls, zoom, model_lc):
+    def plot_zoomed(lightcurve, bls, zoom, model_lcs):
         """
         Show folded lightcurve near some BLS transit.
 
@@ -374,21 +368,21 @@ def create_lightcurve_plot(config, binary=None):
         """
 
         if zoom in ["primary", "secondary"]:
-            assert binary is not None
+            assert binaries is not None
             if zoom == "secondary":
-                binary.swap_components()
-            period = binary.per
-            time_reference = binary.t0
+                binaries[0].swap_components()
+            period = binaries[0].per
+            time_reference = binaries[0].t0
             eval_t = numpy.linspace(
                 time_reference - period / 2,
                 time_reference + period / 2,
                 100,
             )
-            eclipse_lc = binary.eclipse(eval_t)
+            eclipse_lc = binaries[0].eclipse(eval_t)
             eclipsed = eval_t[eclipse_lc < 1] - time_reference
             half_xrange = max(abs(eclipsed.min()), eclipsed.max())
             if zoom == "secondary":
-                binary.swap_components()
+                binaries[0].swap_components()
         else:
             if zoom == "default":
                 period = bls["period"][0]
@@ -411,7 +405,7 @@ def create_lightcurve_plot(config, binary=None):
         phase = (
             (lightcurve["time"] - time_reference + period / 2) % period
         ) / period - 0.5
-        plot_vs_phase(lightcurve, phase, model_lc)
+        plot_vs_phase(lightcurve, phase, model_lcs)
         pyplot.xlim(-half_xrange, half_xrange)
 
     tess_target = TESSTarget(config.tic_id)
@@ -446,25 +440,28 @@ def create_lightcurve_plot(config, binary=None):
         )
     ]
     title_pre = f"TIC {config.tic_id}\n"
-    model_lc = None
+    model_lcs = []
     for (header, lightcurve), subfig in zip(tess_target.lcs, subfigures):
-        if binary is not None:
-            model_lc = LogLikelihood.get_model(
-                binary, header, lightcurve, binary.lc_sys_err
-            )[0]
+        if binaries is not None:
+            model_lcs = [
+                LogLikelihood.get_model(
+                    bnry, header, lightcurve, bnry.lc_sys_err
+                )[0]
+                for bnry in binaries
+            ]
         for plot_type, axis in subfig.subplot_mosaic(
             mosaic_spec, gridspec_kw={"wspace": 0.3, "hspace": 0.3}, sharey=True
         ).items():
             pyplot.sca(axis)
             if plot_type == "full":
-                plot_full(lightcurve, model_lc)
+                plot_full(lightcurve, model_lcs)
             else:
                 if bls is None:
                     bls = LogLikelihood.get_cached_sed_and_bls(config.tic_id)[1]
                     if bls is None:
                         bls = LogLikelihood(config.tic_id).best_fit_bls
                 if plot_type == "folded":
-                    period = plot_folded(lightcurve, bls, model_lc)
+                    period = plot_folded(lightcurve, bls, model_lcs)
                     if title_pre:
                         title_pre = (
                             title_pre.strip() + f" BLS Porb = {period!r}\n"
@@ -472,7 +469,7 @@ def create_lightcurve_plot(config, binary=None):
                 else:
                     assert plot_type.startswith("zoom_")
                     plot_zoomed(
-                        lightcurve, bls, plot_type[len("zoom_") :], model_lc
+                        lightcurve, bls, plot_type[len("zoom_") :], model_lcs
                     )
         subfig.suptitle(
             title_pre
@@ -491,13 +488,56 @@ def create_lightcurve_plot(config, binary=None):
 # pylint: enable=too-many-locals
 
 
+def get_model_binaries(config, raw_data, log_prob, include):
+    """Return fully set-up binaries per ``--show-model-with-lc``."""
+
+    selection = config.show_model_with_lc
+    if selection.startswith("top") or selection.startswith("random"):
+        if selection.startswith("top"):
+            selection = int(selection[3:])
+            selection = numpy.unique(log_prob[include], return_index=True)[1][
+                -selection:
+            ]
+        else:
+            selection = int(selection[6:])
+            selection = numpy.random.choice(log_prob[include].size, selection)
+        selection = raw_data[numpy.unravel_index(selection, log_prob.shape)]
+    else:
+        selection = tuple(int(s) for s in selection.split(","))
+        if selection[0] == -1:
+            log_likelihood = LogLikelihood(config.tic_id)
+            initial_positions = load_initial_positions(config.samples_fname)
+            if len(selection) != 1:
+                initial_positions = [initial_positions[selection[1]]]
+            result = []
+            for sample in initial_positions:
+                try:
+                    result.append(
+                        Binary(
+                            from_mcmc=log_likelihood.get_sample_params(sample)
+                        )
+                    )
+                except ValueError:
+                    pass
+            return result
+        assert selection[0] >= 0
+        if len(selection) == 1:
+            include = include[
+                selection[0]
+                * log_prob.shape[1] : (selection[0] + 1)
+                * log_prob.shape[1]
+            ]
+            selection = raw_data[selection][include]
+        else:
+            selection = [raw_data[selection]]
+
+    return [Binary(from_mcmc=SampleParams(*params)) for params in selection]
+
+
 def main(config):
     """Avoid polluting global namespace."""
 
     logging.basicConfig(level=logging.DEBUG)
-    if config.model_to_data_plot:
-        create_model_to_data_plot(config)
-
     if path.exists(config.samples_fname):
         backend = HDFBackend(config.samples_fname, read_only=True)
         iteration = backend.iteration
@@ -507,10 +547,7 @@ def main(config):
             raw_data[config.burn_in : iteration : config.thin, :, :]
             .flatten()
             .reshape(
-                (
-                    (iteration - config.burn_in + config.thin - 1)
-                    // config.thin
-                )
+                ((iteration - config.burn_in + config.thin - 1) // config.thin)
                 * backend.shape[0],
                 backend.shape[1],
             ),
@@ -521,19 +558,27 @@ def main(config):
             "logprob",
             log_prob[config.burn_in : iteration : config.thin, :].flatten(),
         )
+        if config.sample_condition is not None:
+            plot_data.insert(
+                0, "selected", Evaluator(plot_data)(config.sample_condition)
+            )
 
     if config.plot_lightcurve:
-        if config.show_best_model_with_lc:
+        if config.show_model_with_lc:
             assert iteration
-            best_index = numpy.unravel_index(
-                numpy.argmax(log_prob), log_prob.shape
+            binaries = get_model_binaries(
+                config,
+                raw_data,
+                log_prob,
+                (
+                    plot_data["selected"].array
+                    if config.sample_condition is not None
+                    else None
+                ),
             )
-            best_params = SampleParams(*raw_data[best_index])
-            binary = Binary(from_mcmc=best_params)
-            binary.lc_sys_err = best_params.lc_sys
         else:
-            binary = None
-        create_lightcurve_plot(config, binary)
+            binaries = None
+        create_lightcurve_plot(config, binaries)
 
     if config.corner_plot_fname:
         create_corner_plot(plot_data, config)
