@@ -122,7 +122,7 @@ def parse_command_line():
     parser.add_argument(
         "--restart-log-likelihood-range",
         type=float,
-        default=15,
+        default=300,
         help="If the log-likelihood spread between most and least likely "
         "walker at the end of ``--restart-steps`` is less than this, the true "
         "sampling begins.",
