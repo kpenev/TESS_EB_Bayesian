@@ -1,0 +1,8 @@
+*.dat
+*.in
+*.ssv
+*.fits
+*.csv
+*.sqlite
+Green_et_al_2019_reddening
+*.fixed

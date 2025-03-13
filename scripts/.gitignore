@@ -6,3 +6,14 @@ mastDownload
 *.pkl
 *.log
 *.out
+*.err
+*.outerr
+*.fits
+*.csv
+*.db
+*.mp4
+*.png
+*.pdf
+*.sqlite
+*.txt
+*.dat
