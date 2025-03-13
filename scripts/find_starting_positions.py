@@ -5,7 +5,6 @@ from multiprocessing import Process, Queue
 import logging
 from traceback import format_exc
 
-# from matplotlib.backends.backend_pdf import PdfPages
 import numpy
 from scipy.stats import norm, uniform
 from scipy import optimize
@@ -88,7 +87,9 @@ class FindStartingPositions:
                 calc_eclipse_phase_diff(ecc, params.w) - secondary_eclipse_phase
             )
 
-        result = optimize.root_scalar(to_solve, bracket=(0.0, 1.0))
+        result = optimize.root_scalar(
+            to_solve, bracket=(0.0, LogLikelihood.max_ecc)
+        )
         assert result.converged
         return params._replace(ecc=result.root)
 
@@ -185,7 +186,10 @@ class FindStartingPositions:
             )
             return result
 
+        # False positive
+        # pylint: disable=unsubscriptable-object
         min_mass_to_mtot = Binary.mini_range[0] / params.mtotal
+        # pylint: enable=unsubscriptable-object
         min_mratio = max(
             self._log_likelihood.get_range("mratio")[0],
             min_mass_to_mtot / (1.0 - min_mass_to_mtot),
@@ -310,12 +314,12 @@ class FindStartingPositions:
             scale=config.initial_meh_smear,
             size=grid[0].size,
         )
-        result["w"] = (
-            grid[2]
-            + uniform.rvs(
+        result["w"] = grid[2]
+        result["w"][1:-1] += (
+            uniform.rvs(
                 loc=-config.initial_w_smear / 2,
                 scale=config.initial_w_smear,
-                size=grid[0].size,
+                size=grid[0].size - 2,
             )
         ) % 360
         return result
