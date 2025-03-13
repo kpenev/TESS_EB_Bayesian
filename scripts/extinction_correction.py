@@ -193,6 +193,9 @@ class Green19Correction:
                 ]
             ),
         }
+        result["mag_err"][
+            numpy.logical_not(numpy.isfinite(result["mag_err"]))
+        ] = 0.1
         print(f"Result: {result!r}")
         return result
 
