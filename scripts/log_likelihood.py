@@ -2,9 +2,6 @@
 
 import logging
 
-from matplotlib import pyplot
-from matplotlib.backends.backend_pdf import PdfPages
-import pandas
 import numpy
 from scipy.stats import norm, truncnorm
 from sqlalchemy import select, delete
@@ -340,74 +337,6 @@ class LogLikelihood(TESSTarget):
                 binned[bin_ind] = numpy.median(lightcurve[quantity][in_bin])
         return binned_lc
 
-    def plot_lc_model_comparison(
-        self, sample_or_binary, pdf=None, extra_title=""
-    ):
-        """Create multi-page PDF showing the model over LC data for each LC."""
-
-        if isinstance(sample_or_binary, Binary):
-            binary = sample_or_binary
-            lc_sys = 0.0
-        elif isinstance(sample_or_binary, SampleParams):
-            binary = Binary(from_mcmc=sample_or_binary)
-            lc_sys = sample_or_binary.lc_sys
-        else:
-            sample_params = self.get_sample_params(sample_or_binary)
-            binary = Binary(from_mcmc=sample_params)
-            lc_sys = sample_params.lc_sys
-
-        self._logger.debug(
-            "Plotting LC model comparison for binary: %s", binary
-        )
-
-        #num_bins = 100
-        for mask_name in [None, "deeper", "shallower"]:
-            for header, lightcurve, model_lc, _ in self._iter_lc_and_model(
-                binary, lc_sys, mask_name
-            ):
-                pyplot.figure(figsize=[4.8, 6.4])
-                pyplot.subplot(211)
-                pyplot.plot(lightcurve["time"], lightcurve["flux"], "-r")
-                pyplot.plot(lightcurve["time"], model_lc, "-b")
-                pyplot.xlabel("Time [days]")
-                pyplot.ylabel("Flux [ppm]")
-                pyplot.subplot(212)
-                pyplot.plot(
-                    (lightcurve["time"] % binary.per) / binary.per,
-                    lightcurve["flux"],
-                    ",",
-                    zorder=10,
-                )
-                phase = (lightcurve["time"] % binary.per) / binary.per
-                # binned_lc = self._bin_lightcurve(lightcurve, num_bins, phase)
-                # pyplot.plot(
-                #    (binned_lc["time"] % binary.per) / binary.per,
-                #    binned_lc["flux"],
-                #    "o",
-                #    markersize=3,
-                #    zorder=20,
-                # )
-
-                phase_sort = numpy.argsort(phase)
-                pyplot.plot(
-                    phase[phase_sort], model_lc[phase_sort], "-", zorder=30
-                )
-                pyplot.xlabel(f"Phase (Porb={binary.per!r})")
-                pyplot.ylabel("Flux [ppm]")
-
-                pyplot.suptitle(
-                    f"TIC {self.tic_id}, sector {header['sector']}"
-                    + f": {extra_title}"
-                    if extra_title
-                    else ""
-                )
-                if pdf is None:
-                    pyplot.show()
-                else:
-                    pdf.savefig()
-                pyplot.cla()
-                pyplot.clf()
-
     def calc_lc_log_likelihood(self, binary, lc_sys_err, eclipse_only=False):
         """
         Return log-likelihood of observing the TESS LCs for given binary.
@@ -581,65 +510,6 @@ class LogLikelihoodUnitCubePriors(LogLikelihood):
         return 0.0
 
 
-def manual_plot():
-    """Plot the lightcurve for a given set of parameters."""
-
-    params = SampleParams(
-        mtotal=1.5,
-        mratio=0.5,
-        age_gyr=1.0,
-        meh=0.0,
-        per=numpy.pi,
-        ecc=0.8,
-        w=63.0,
-        primary_impact_param=0.0,
-        eclipse_time=1.0,
-        primary_limb_dark_1=0.0,
-        primary_limb_dark_2=0.0,
-        secondary_limb_dark_1=0.0,
-        secondary_limb_dark_2=0.0,
-        primary_prot=100.0,
-        secondary_prot=100.0,
-        primary_reflection_coef=0.0,
-        secondary_reflection_coef=0.0,
-        primary_beaming_coef=0.0,
-        secondary_beaming_coef=0.0,
-        lc_sys=0.0,
-        sed_sys=0.0,
-    )
-    binary = Binary(from_mcmc=params)
-
-    plot_t = numpy.linspace(0.0, 3.0, 1000)
-    pyplot.plot(
-        plot_t, binary.get_lightcurve(plot_t), label="orig", linewidth=3
-    )
-    mod_params = params._replace(
-        w=180.0 + params.w,
-        eclipse_time=params.eclipse_time + binary.eclipse_time_difference,
-    )
-    pyplot.plot(
-        plot_t,
-        Binary(from_mcmc=mod_params).get_lightcurve(plot_t),
-        label="180+w",
-        linewidth=3,
-    )
-    mod_params = params._replace(
-        w=180.0 - params.w,
-        eclipse_time=params.eclipse_time + binary.eclipse_time_difference,
-    )
-    pyplot.plot(
-        plot_t,
-        Binary(from_mcmc=mod_params).get_lightcurve(plot_t),
-        ":",
-        label="180-w",
-        linewidth=3,
-    )
-
-    pyplot.legend()
-    pyplot.show()
-    pyplot.cla()
-    pyplot.clf()
-
 def experiment():
     """Manually experiment with things."""
 
@@ -647,41 +517,8 @@ def experiment():
     test_tic = 189639080
     logging.basicConfig(level=logging.DEBUG)
 
-    with PdfPages("best_fit_bls.pdf") as output_pdf:
-        log_likelihood = LogLikelihood(test_tic, plot_bls=output_pdf)
+    log_likelihood = LogLikelihood(test_tic)
     log_likelihood.save_jktebob_lc(f"tess{test_tic}_jktebob.dat")
 
-    # use("PDF")
-    with PdfPages("test.pdf") as output_pdf:
-        log_likelihood.plot_lc_model_comparison(
-            numpy.array(
-                [
-                    -1.22302493e00,
-                    -1.69260939e00,
-                    3.04427649e-01,
-                    1.07357590e00,
-                    -2.37418558e00,
-                    -3.13671460e00,
-                    2.49650346e00,
-                    8.60379866e-05,
-                    -2.52210796e-03,
-                    6.62451853e-01,
-                    -numpy.inf,
-                    2.58420045e00,
-                    -numpy.inf,
-                    numpy.inf,
-                    numpy.inf,
-                    -numpy.inf,
-                    -numpy.inf,
-                    -numpy.inf,
-                    -numpy.inf,
-                    1.13667091e00,
-                    2.40478964e00,
-                ]
-            ),
-            output_pdf,
-        )
-
-
 if __name__ == "__main__":
-    manual_plot()
+    experiment()
