@@ -331,7 +331,7 @@ class FindStartingPositions:
             size=grid[0].size - 2,
         )
         result["w"] %= 360
-        self._logger.debug(
+        _logger.debug(
             "Initial scenarios:\n\t%s", "\n\t".join([str(e) for e in result])
         )
         return result
