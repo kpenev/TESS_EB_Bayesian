@@ -294,7 +294,7 @@ class FindStartingPositions:
                 w_values = numpy.linspace(
                     wlimit, 360 - wlimit, config.initial_num_ws
                 )
-        self._logger.debug(
+        _logger.debug(
             "Initial grid from:\nlog(t)=%s\n[M/H]=%s\nw=%s",
             repr(log_age_values),
             repr(meh_values),
