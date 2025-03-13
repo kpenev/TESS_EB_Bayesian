@@ -76,12 +76,18 @@ def calc_eclipse_phase_diff(ecc, w, inc=None):
 
     return (central_transits_rhs + inclination_correction) / numpy.pi + 0.5
 
-class classproperty(object):
+#Meant to function as decorator
+#pylint: disable=too-few-public-methods
+#pylint: disable=invalid-name
+class classproperty:
+    """Decorator for read-only class properties."""
+
     def __init__(self, getter):
         self.getter= getter
     def __get__(self, instance, owner):
         return self.getter(owner)
-
+#pylint: enable=too-few-public-methods
+#pylint: enable=invalid-name
 
 # This is set by BATMAN
 # pylint: disable=too-many-instance-attributes
@@ -104,6 +110,9 @@ class BinaryParams(batman.TransitParams):
         cls._log_age_range = cls._cmd_interpolators[0][1].get_range("logAge")
         cls._mini_range = cls._cmd_interpolators[0][1].get_range("Mini")
 
+    #These are properties bound to class not instance
+    #pylint: disable=no-self-argument
+    #pylint: disable=missing-function-docstring
     @classproperty
     def meh_range(cls):
         BinaryParams.prepare_class()
@@ -118,6 +127,8 @@ class BinaryParams(batman.TransitParams):
     def mini_range(cls):
         BinaryParams.prepare_class()
         return cls._mini_range
+    #pylint: enable=no-self-argument
+    #pylint: enable=missing-function-docstring
 
     def _calc_eclipse_phase_diff(self, mid_transit=False):
         """Convenience wrapper around `calc_eclipse_phase_diff()`."""
@@ -356,6 +367,8 @@ class BinaryParams(batman.TransitParams):
                     sample_params, f"{component}_{param}"
                 )
         self._set_per_star()
+        self.lc_sys_err = sample_params.lc_sys
+        self.sed_sys_err = sample_params.sed_sys
 
     def shift_time(self, shift):
         """Shift the lightcurve in time i.e. new(t + shift) = old(t)."""

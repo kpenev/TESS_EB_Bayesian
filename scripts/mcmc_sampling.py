@@ -237,7 +237,7 @@ def restart_sampling(backend, config):
         "Log-likelihood spread %s. Restarting sampling.",
         repr(last_spread),
     )
-    _, top_indices = numpy.unique(log_prob, return_index=True)
+    top_indices = numpy.unique(log_prob, return_index=True)[1]
     assert top_indices.size >= backend.shape[0]
     top_indices = top_indices[-backend.shape[0] :]
     _logger.debug("Top indices (shape: %s): %s", top_indices.shape, top_indices)
