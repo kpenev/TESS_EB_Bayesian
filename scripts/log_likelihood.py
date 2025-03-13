@@ -363,7 +363,7 @@ class LogLikelihood(TESSTarget):
                   are considered
         """
 
-        if binary.a < 1 + binary.rp:
+        if binary.a < 1 + binary.rp or binary.out_of_range:
             return -numpy.inf
         result = 0.0
         for header, lightcurve in self._lcs:
