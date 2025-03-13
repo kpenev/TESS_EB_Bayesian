@@ -4,7 +4,7 @@
 #SBATCH --ntasks-per-node=64 1 #Total number of tasks to run at one time
 #SBATCH --mem=256G #Maximum amount of memory likely to be needed
 #SBATCH --time=48:00:00
-#SBATCH --partition=@@QUEUE@@
+#SBATCH --partition=@@PARTITION@@
 #SBATCH --job-name=TESS_EBs_@@WORKER@@
 #SBATCH --output=/scratch/juno/kxp174430/output/TESS_EBs/worker@@WORKER@@_slurm.out
 #SBATCH --mail-user=kxp174430@utdallas.edu
@@ -35,13 +35,13 @@ run_system() {
     cp ${scratch}/${samples} ${work}/${samples}
     cp ${work}/${samples} ${scratch}/${samples} 
 
-    cd /home1/05392/kpenev/
+    cd ${source_dir}
 
     while true; do
         echo "Starting $(date +%Y%m%d%H%M%S)" \
             >> ${log_dir}/run_system_${ticid}.out
 
-        python3 ${source_dir}/mcmc_sampling.py ${ticid} \
+        python3 mcmc_sampling.py ${ticid} \
             --verbosity debug \
             --samples-fname-pattern ${samples} \
             --std-out-err-fname \
@@ -57,7 +57,7 @@ run_system() {
 source ~/module_load_order
 source ~/set_environment.sh
 
-for TICID in @@SYSTEM_LIST@@; do 
+for TICID in @@TIC_LIST@@; do 
     run_system $TICID &
 done
 

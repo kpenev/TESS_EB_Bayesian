@@ -7,9 +7,7 @@ data_dir = path.join(path.dirname(path.dirname(path.abspath(__file__))), "data")
 grav_dark = {"TESS": path.join(data_dir, "claret_gravity_darkening_TESS.fits")}
 cmd_data_fname = path.join(data_dir, "isochrone_data_{photsys}.ssv")
 broadband_data_dir = path.join(data_dir, "Green_et_al_2019_reddening")
-prsa_ebs = path.join(
-    data_dir, "prsa_ebs.fits"
-)
+prsa_ebs = path.join(data_dir, "prsa_ebs.fits")
 
 cache_db = path.join(data_dir, "mcmc_cache.sqlite")
 results_dir = path.join(
@@ -24,3 +22,11 @@ jktebob = {
     "fitlcfname": path.join(results_dir, "tess{tic_id}_jktebob_{mode}.fit"),
 }
 samples = path.join(results_dir, "tess{tic_id:d}_samples.h5")
+
+slurm_template = path.join(
+    path.dirname(data_dir), "slurm", "{hpc}_template.slurm"
+)
+
+slurm_fname = path.join(
+    path.dirname(data_dir), "slurm", "{hpc}", "{worker}.slurm"
+)
