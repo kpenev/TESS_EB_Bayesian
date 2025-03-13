@@ -186,6 +186,7 @@ class HDFBackend(Backend):
             )
         if os.path.exists(self.unsaved_steps_fname):
             os.remove(self.unsaved_steps_fname)
+        self._flush_unsaved_steps()
 
     def has_blobs(self):
         if self._has_blobs is None:
