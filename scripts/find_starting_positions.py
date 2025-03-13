@@ -74,13 +74,15 @@ class FindStartingPositions:
                     + self._log_likelihood.best_fit_bls["period"][1]
                 ),
             )
+        final_w = params.w % 360
         if (
-            secondary_eclipse_phase < 0.5 and not 90 < params.w % 360 < 270
-        ) or (secondary_eclipse_phase > 0.5 and (90 < params.w % 360 < 270)):
-            params = params._replace(
-                w=(180.0 + params.w) % 360
-                - (360.0 if secondary_eclipse_phase > 0.5 else 0)
-            )
+            secondary_eclipse_phase < 0.5 and not 90 < final_w < 270
+        ) or (secondary_eclipse_phase > 0.5 and (90 < final_w < 270)):
+            final_w += 180.0
+        final_w %= 360
+        if final_w > 270:
+            final_w -= 360
+        params._replace(w=final_w)
 
         def to_solve(ecc):
             return (
