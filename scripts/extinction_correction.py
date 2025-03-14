@@ -63,6 +63,8 @@ def get_gaia_distance(gaia_id):
         "SELECT * FROM external.gaiaedr3_distance WHERE source_id = "
         + str(gaia_id)
     ).get_results()
+    if len(gaia_distance_entry) == 0:
+        return None
     quantiles = ["lo", "med", "hi"]
     for mode in ["photogeo", "geo"]:
         result = numpy.array(
