@@ -41,7 +41,7 @@ class FindStartingPositions:
         """Detect deeper & shallower BLS eclipses & is single eclipse viable."""
 
         bls_info = self._log_likelihood.best_fit_bls
-        if masked_is_significant(bls_info):
+        if self._log_likelihood.masked_is_significant():
             assert bls_info["depth"][0] > bls_info["masked_depth"][0]
             return "both", "masked", False
         single = abs(
@@ -557,27 +557,6 @@ def _estimate_mass(logg, teff):
     return result
 
 
-def masked_is_significant(bls):
-    """
-    Return True iff the masked BLS fit appears to fit real eclipses.
-
-    To be marked as significant all of the following must be satisfied:
-
-      * maked period should be close to unmasked period (within 5 unmasked
-        uncertanties)
-
-      * depth should exceed its uncertanity by at least a factor of 5
-
-      * masked_harmonic_delta_log_likelihood < -5
-    """
-
-    return (
-        abs(bls["masked_period"][0] - bls["period"][0]) < 5.0 * bls["period"][1]
-        and bls["masked_depth"][0] > 5.0 * bls["masked_depth"][1]
-        and bls["masked_harmonic_delta_log_likelihood"] < -5.0
-    )
-
-
 def create_jktebob_inputs(log_likelihood):
     """Create input files for running jktebob to optimize given lightcurve."""
 
@@ -598,7 +577,7 @@ def create_jktebob_inputs(log_likelihood):
         "w",
         encoding="ascii",
     ) as outf:
-        if masked_is_significant(bls):
+        if log_likelihood.masked_is_significant():
             timing_anomaly = (
                 (bls["masked_transit_time"] - bls["transit_time"])
                 % bls["period"]

@@ -152,37 +152,6 @@ class LogLikelihood(TESSTarget):
                 )
             )
 
-    def _get_lc_eclipses(self, lightcurve, which):
-        """
-        Filter the lightcure to leave only point per mask.
-
-        See `self.calc_lc_log_likelihood()` for what masks are supported.
-        """
-
-        if which == "masked":
-            period = self._best_fit_bls["masked_period"][0]
-            window = 2.0 * (
-                self._best_fit_bls["masked_duration"]
-                + 2.0 * self._best_fit_bls["masked_period"][1]
-            )
-            time = (
-                lightcurve["time"] - self._best_fit_bls["masked_transit_time"]
-            )
-        else:
-            period = self._best_fit_bls["period"][0] * (
-                1 if which == "both" else 2
-            )
-            window = 2.0 * (
-                self._best_fit_bls["duration"]
-                + 2.0 * self._best_fit_bls["period"][1]
-            )
-            time = lightcurve["time"] - self._best_fit_bls["transit_time"]
-            if which == "odd":
-                time -= self._best_fit_bls["period"][0]
-
-        folded = time % period
-        return lightcurve[numpy.minimum(folded, period - folded) < window]
-
     @property
     def tic_id(self):
         """The TIC identifier of the EB being modeled."""
@@ -262,6 +231,59 @@ class LogLikelihood(TESSTarget):
 
         self._logger.debug("LCs: %s", repr(self._lcs))
         self._logger.debug("SED: %s", repr(self._sed))
+
+    def masked_is_significant(self):
+        """
+        Return True iff the masked BLS fit appears to fit real eclipses.
+
+        To be marked as significant all of the following must be satisfied:
+
+          * maked period should be close to unmasked period (within 5 unmasked
+            uncertanties)
+
+          * depth should exceed its uncertanity by at least a factor of 5
+
+          * masked_harmonic_delta_log_likelihood < -5
+        """
+
+        bls = self._best_fit_bls
+        return (
+            abs(bls["masked_period"][0] - bls["period"][0])
+            < 5.0 * bls["period"][1]
+            and bls["masked_depth"][0] > 5.0 * bls["masked_depth"][1]
+            and bls["masked_harmonic_delta_log_likelihood"] < -5.0
+        )
+
+    def get_bls_eclipse_mask(self, lightcurve, which):
+        """
+        Filter the lightcure per best fit BLS to leave only point per mask.
+
+        See `self.calc_lc_log_likelihood()` for what masks are supported.
+        """
+
+        if which == "masked":
+            period = self._best_fit_bls["masked_period"][0]
+            window = 2.0 * (
+                self._best_fit_bls["masked_duration"]
+                + 2.0 * self._best_fit_bls["masked_period"][1]
+            )
+            time = (
+                lightcurve["time"] - self._best_fit_bls["masked_transit_time"]
+            )
+        else:
+            period = self._best_fit_bls["period"][0] * (
+                1 if which == "both" else 2
+            )
+            window = 2.0 * (
+                self._best_fit_bls["duration"]
+                + 2.0 * self._best_fit_bls["period"][1]
+            )
+            time = lightcurve["time"] - self._best_fit_bls["transit_time"]
+            if which == "odd":
+                time -= self._best_fit_bls["period"][0]
+
+        folded = time % period
+        return numpy.minimum(folded, period - folded) < window
 
     @staticmethod
     def get_model(binary, header, lightcurve, lc_sys_err):
@@ -368,7 +390,9 @@ class LogLikelihood(TESSTarget):
         result = 0.0
         for header, lightcurve in self._lcs:
             if eclipse_only:
-                lightcurve = self._get_lc_eclipses(lightcurve, eclipse_only)
+                lightcurve = lightcurve[
+                    self.get_bls_eclipse_mask(lightcurve, eclipse_only)
+                ]
             model_lc, lc_sq_errors = self.get_model(
                 binary, header, lightcurve, lc_sys_err
             )
@@ -435,7 +459,7 @@ class LogLikelihood(TESSTarget):
                 "Attempted log-likelihood evaluation for out of range "
                 "parameters (returning -inf):\n%s\n%s",
                 sample_params,
-                error.args[0]
+                error.args[0],
             )
             return (-numpy.inf,) + sample_params
         if binary.out_of_range:
@@ -513,12 +537,12 @@ class LogLikelihoodUnitCubePriors(LogLikelihood):
 def experiment():
     """Manually experiment with things."""
 
-    # TODO: figure out why 323020176 crashes
     test_tic = 189639080
     logging.basicConfig(level=logging.DEBUG)
 
     log_likelihood = LogLikelihood(test_tic)
     log_likelihood.save_jktebob_lc(f"tess{test_tic}_jktebob.dat")
+
 
 if __name__ == "__main__":
     experiment()
