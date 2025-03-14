@@ -311,7 +311,7 @@ def create_histogram_movie(plot_data, config, num_walkers):
     with MovieMaker(config.histogram_movie[0], values.shape[0]) as movie:
         for iter_data, selected in zip(values, selected):
             pyplot.hist(
-                iter_data[selected],
+                iter_data[selected].flatten(),
                 bins=config.histogram_resolution,
                 range=config.histogram_range,
                 density=True,
@@ -553,10 +553,14 @@ def main(config):
             ),
             columns=SampleParams._fields,
         )
+        sub_log_prob = log_prob[
+            config.burn_in : iteration : config.thin, :
+        ].flatten()
+        sub_log_prob -= sub_log_prob.min()
         plot_data.insert(
             0,
             "logprob",
-            log_prob[config.burn_in : iteration : config.thin, :].flatten(),
+            sub_log_prob,
         )
         if config.sample_condition is not None:
             plot_data.insert(
