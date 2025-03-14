@@ -5,9 +5,34 @@ import logging
 from matplotlib import pyplot, colormaps
 import numpy
 from astropy.timeseries import BoxLeastSquares
+from transitleastsquares import transitleastsquares
 
 from download_lcs import get_astroquery as download_lcs
 
+def get_bls_eclipse_mask(bls, lightcurve, which):
+    """
+    Filter the lightcure per best fit BLS to leave only point per mask.
+
+    See `self.calc_lc_log_likelihood()` for what masks are supported.
+    """
+
+    if which == "masked":
+        period = bls["masked_period"][0]
+        window = bls["masked_duration"] + 2.0 * bls["masked_period"][1]
+        time = (
+            lightcurve["time"] - bls["masked_transit_time"]
+        )
+    else:
+        period = bls["period"][0] * (
+            1 if which == "both" else 2
+        )
+        window = bls["duration"] + 2.0 * bls["period"][1]
+        time = lightcurve["time"] - bls["transit_time"]
+        if which == "odd":
+            time -= bls["period"][0]
+
+    folded = time % period
+    return numpy.minimum(folded, period - folded) < window
 
 class TESSTarget:
     """
@@ -191,11 +216,8 @@ class TESSTarget:
     def _get_masked_best_fit_bls(self, lightcurve, bls_results):
         """Mask the eclispes detected by given BLS and fit BLS again."""
 
-        folded = (
-            lightcurve["time"] - bls_results["transit_time"]
-        ) % bls_results["period"][0]
-        mask = numpy.minimum(folded, bls_results["period"][0] - folded) > (
-            bls_results["duration"] + 2.0 * bls_results["period"][1]
+        mask = numpy.logical_not(
+            get_bls_eclipse_mask(bls_results, lightcurve, 'both')
         )
         self._logger.debug("After masking, %d points remain", mask.sum())
         masked_bls_result = self._get_best_fit_bls(lightcurve[mask])
@@ -383,3 +405,8 @@ class TESSTarget:
         if plot:
             self.plot_best_fit_bls(combined_lc, best_fit_bls, plot)
         return best_fit_bls
+
+    def fit_tls(self):
+        """Use the Hippke & Heller (2019) TLS to find eclipses."""
+
+        combined_lc = self.get_combined_lc()
