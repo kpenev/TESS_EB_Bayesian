@@ -21,7 +21,7 @@ from autowisp import Evaluator
 from hacked_emcee_hdf5_backend import HDFBackend
 from sample_params import SampleParams
 from log_likelihood import LogLikelihood
-from tess_target import TESSTarget
+from tess_target import TESSTarget, get_bls_eclipse_mask
 from paths import samples as samples_fname
 from binary import Binary
 
@@ -321,7 +321,7 @@ def create_histogram_movie(plot_data, config, num_walkers):
 
 # pylint: disable=too-many-statements
 # pylint: disable=too-many-locals
-def create_lightcurve_plot(config, binaries=None):
+def create_lightcurve_plot(config, binaries=None, detrend=None):
     """Create the plot(s) described in the ``--plot-lightcurve`` cmdline arg."""
 
     def plot_full(lightcurve, model_lcs):
@@ -364,7 +364,8 @@ def create_lightcurve_plot(config, binaries=None):
         """
         Show folded lightcurve near some BLS transit.
 
-        Possible values for zoom are "default", "even", "odd", "masked".
+        Possible values for zoom are "default", "even", "odd", "masked",
+        "primary", "secondary".
         """
 
         if zoom in ["primary", "secondary"]:
@@ -381,6 +382,7 @@ def create_lightcurve_plot(config, binaries=None):
             eclipse_lc = binaries[0].eclipse(eval_t)
             eclipsed = eval_t[eclipse_lc < 1] - time_reference
             half_xrange = max(abs(eclipsed.min()), eclipsed.max())
+            pyplot.xlim(-half_xrange, half_xrange)
             if zoom == "secondary":
                 binaries[0].swap_components()
         else:
@@ -397,19 +399,23 @@ def create_lightcurve_plot(config, binaries=None):
                 else:
                     assert zoom == "odd"
                     time_reference = bls["transit_time"] + bls["period"][0]
-            half_xrange = (
-                bls[("masked_" if zoom == "masked" else "") + "duration"]
-                / period
-            )
+            mask = get_bls_eclipse_mask(bls, lightcurve, zoom)
+            plot_lightcurve = lightcurve[mask]
+            plot_model_lcs = [lc[mask] for lc in model_lcs]
+            #half_xrange = (
+            #    bls[("masked_" if zoom == "masked" else "") + "duration"]
+            #    / period
+            #)
 
         phase = (
-            (lightcurve["time"] - time_reference + period / 2) % period
+            (plot_lightcurve["time"] - time_reference + period / 2) % period
         ) / period - 0.5
-        plot_vs_phase(lightcurve, phase, model_lcs)
-        pyplot.xlim(-half_xrange, half_xrange)
+        plot_vs_phase(plot_lightcurve, phase, plot_model_lcs)
+
 
     tess_target = TESSTarget(config.tic_id)
     bls = None
+    log_likelihood = None
 
     full_figure = pyplot.figure(
         figsize=(
@@ -440,8 +446,10 @@ def create_lightcurve_plot(config, binaries=None):
         )
     ]
     title_pre = f"TIC {config.tic_id}\n"
-    model_lcs = []
     for (header, lightcurve), subfig in zip(tess_target.lcs, subfigures):
+        model_lcs = []
+        lightcurve = numpy.copy(lightcurve)
+        lightcurve['flux'] /= numpy.median(lightcurve['flux'])
         if binaries is not None:
             model_lcs = [
                 LogLikelihood.get_model(
@@ -449,6 +457,10 @@ def create_lightcurve_plot(config, binaries=None):
                 )[0]
                 for bnry in binaries
             ]
+        if detrend is not None:
+            if log_likelihood is None:
+                log_likelihood = LogLikelihood(config.tic_id)
+            model_lcs.append(detrend(lightcurve, log_likelihood)["flux"])
         for plot_type, axis in subfig.subplot_mosaic(
             mosaic_spec, gridspec_kw={"wspace": 0.3, "hspace": 0.3}, sharey=True
         ).items():
@@ -459,7 +471,9 @@ def create_lightcurve_plot(config, binaries=None):
                 if bls is None:
                     bls = LogLikelihood.get_cached_sed_and_bls(config.tic_id)[1]
                     if bls is None:
-                        bls = LogLikelihood(config.tic_id).best_fit_bls
+                        if log_likelihood is None:
+                            log_likelihood = LogLikelihood(config.tic_id)
+                        bls = log_likelihood.best_fit_bls
                 if plot_type == "folded":
                     period = plot_folded(lightcurve, bls, model_lcs)
                     if title_pre:
