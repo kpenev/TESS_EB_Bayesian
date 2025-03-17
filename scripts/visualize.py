@@ -130,11 +130,13 @@ def parse_command_line():
         help="The y range for plotting expressions.",
     )
     parser.add_argument(
-        "--corner-plot-log-params",
+        "--corner-plot-expression",
         default=[],
-        nargs="+",
-        help="Specify a list of parameters for which log10(parameter) instead "
-        "of parameter should be plotted in corner plot.",
+        action="append",
+        help="Add an expression to include in the corner plot. If at least one "
+        " expression is specifeid, only these expressions are included in the "
+        "corner plot. If no expressions are specified, all MCMC blob entries "
+        "are shown. Eech expression is specified as <NAME>=<EXPRESSION>.",
     )
     parser.add_argument(
         "--burn-in",
@@ -234,15 +236,18 @@ def create_corner_plot(plot_data, config):
 
     if "selected" in plot_data:
         plot_data = plot_data[plot_data["selected"]]
-    for param in config.corner_plot_log_params:
-        plot_data[param] = numpy.log10(plot_data[param])
-    plot_data.rename(
-        columns={
-            param: f"log10({param})" for param in config.corner_plot_log_params
-        },
-        inplace=True,
-    )
-
+    if config.corner_plot_expression:
+        evaluate = Evaluator(plot_data)
+        split_expressions = [
+            expression.split("=")
+            for expression in config.corner_plot_expression
+        ]
+        plot_data = pandas.DataFrame(
+            {
+                name: evaluate(expression)
+                for name, expression in split_expressions
+            }
+        )
     make_corner_plot(
         plot_data,
         corner_plot_fname=config.corner_plot_fname,
@@ -333,7 +338,7 @@ def create_lightcurve_plot(config, binaries=None, detrend=None):
         pyplot.xlabel("Time [d]")
         pyplot.ylabel("Flux [ppm]")
 
-    def plot_vs_phase(lightcurve, phase, model_lcs):
+    def plot_vs_phase(lightcurve, phase, model_lcs, xlabel="Phase"):
         """Create a plot of the lightcurve vs the given phase."""
 
         phase_order = numpy.argsort(phase)
@@ -341,7 +346,7 @@ def create_lightcurve_plot(config, binaries=None, detrend=None):
         pyplot.plot(ordered_phase, lightcurve["flux"][phase_order], ".")
         for y in model_lcs:
             pyplot.plot(ordered_phase, y[phase_order], "-k")
-        pyplot.xlabel("Phase")
+        pyplot.xlabel(xlabel)
         pyplot.ylabel("Flux [ppm]")
 
     def plot_folded(lightcurve, bls, model_lcs):
@@ -385,6 +390,8 @@ def create_lightcurve_plot(config, binaries=None, detrend=None):
             pyplot.xlim(-half_xrange, half_xrange)
             if zoom == "secondary":
                 binaries[0].swap_components()
+            plot_lightcurve = lightcurve
+            plot_model_lcs = model_lcs
         else:
             if zoom == "default":
                 period = bls["period"][0]
@@ -402,16 +409,17 @@ def create_lightcurve_plot(config, binaries=None, detrend=None):
             mask = get_bls_eclipse_mask(bls, lightcurve, zoom)
             plot_lightcurve = lightcurve[mask]
             plot_model_lcs = [lc[mask] for lc in model_lcs]
-            #half_xrange = (
+            # half_xrange = (
             #    bls[("masked_" if zoom == "masked" else "") + "duration"]
             #    / period
-            #)
+            # )
 
         phase = (
             (plot_lightcurve["time"] - time_reference + period / 2) % period
         ) / period - 0.5
-        plot_vs_phase(plot_lightcurve, phase, plot_model_lcs)
-
+        plot_vs_phase(
+            plot_lightcurve, phase, plot_model_lcs, xlabel="$\Delta$Phase"
+        )
 
     tess_target = TESSTarget(config.tic_id)
     bls = None
@@ -422,8 +430,9 @@ def create_lightcurve_plot(config, binaries=None, detrend=None):
             rcParams["figure.figsize"][0],
             rcParams["figure.figsize"][1] * 1.5 * len(tess_target.lcs),
         ),
-        layout="constrained",
+        # layout="constrained",
     )
+    print(f"Mosai spec str: {config.plot_lightcurve[1]}")
     mosaic_spec = Interpreter(
         user_symbols={
             plot_type: plot_type
@@ -449,7 +458,7 @@ def create_lightcurve_plot(config, binaries=None, detrend=None):
     for (header, lightcurve), subfig in zip(tess_target.lcs, subfigures):
         model_lcs = []
         lightcurve = numpy.copy(lightcurve)
-        lightcurve['flux'] /= numpy.median(lightcurve['flux'])
+        lightcurve["flux"] /= numpy.median(lightcurve["flux"])
         if binaries is not None:
             model_lcs = [
                 LogLikelihood.get_model(
@@ -461,6 +470,7 @@ def create_lightcurve_plot(config, binaries=None, detrend=None):
             if log_likelihood is None:
                 log_likelihood = LogLikelihood(config.tic_id)
             model_lcs.append(detrend(lightcurve, log_likelihood)["flux"])
+        print("Mosaic spec: " + repr(mosaic_spec))
         for plot_type, axis in subfig.subplot_mosaic(
             mosaic_spec, gridspec_kw={"wspace": 0.3, "hspace": 0.3}, sharey=True
         ).items():
@@ -478,7 +488,8 @@ def create_lightcurve_plot(config, binaries=None, detrend=None):
                     period = plot_folded(lightcurve, bls, model_lcs)
                     if title_pre:
                         title_pre = (
-                            title_pre.strip() + f" BLS Porb = {period!r}\n"
+                            title_pre.strip()
+                            + f": $P_{{orb}}$ = {period:.5f}\n"
                         )
                 else:
                     assert plot_type.startswith("zoom_")
