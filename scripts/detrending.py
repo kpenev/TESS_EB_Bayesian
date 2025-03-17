@@ -108,6 +108,7 @@ def test():
                     f"[[full, full], [folded, folded], {zoom}]",
                 ),
             )
+            print(f'Plotting with configuration:\n {config}')
             create_lightcurve_plot(
                 config,
                 detrend=partial(masked_detrend, get_trend=calc_moving_median),

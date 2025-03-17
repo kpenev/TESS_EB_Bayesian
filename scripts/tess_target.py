@@ -5,9 +5,14 @@ import logging
 from matplotlib import pyplot, colormaps
 import numpy
 from astropy.timeseries import BoxLeastSquares
-from transitleastsquares import transitleastsquares
+from transitleastsquares import transitleastsquares, transit_mask, period_grid
 
 from download_lcs import get_astroquery as download_lcs
+
+
+class FalsePositiveError(Exception):
+    """Raised when the TLS results suggest a false positive."""
+
 
 def get_bls_eclipse_mask(bls, lightcurve, which):
     """
@@ -18,21 +23,18 @@ def get_bls_eclipse_mask(bls, lightcurve, which):
 
     if which == "masked":
         period = bls["masked_period"][0]
-        window = bls["masked_duration"] + 2.0 * bls["masked_period"][1]
-        time = (
-            lightcurve["time"] - bls["masked_transit_time"]
-        )
+        window = 1.5 * bls["masked_duration"] + 2.0 * bls["masked_period"][1]
+        time = lightcurve["time"] - bls["masked_transit_time"]
     else:
-        period = bls["period"][0] * (
-            1 if which == "both" else 2
-        )
-        window = bls["duration"] + 2.0 * bls["period"][1]
+        period = bls["period"][0] * (1 if which == "both" else 2)
+        window = 1.5 * bls["duration"] + 2.0 * bls["period"][1]
         time = lightcurve["time"] - bls["transit_time"]
         if which == "odd":
             time -= bls["period"][0]
 
     folded = time % period
     return numpy.minimum(folded, period - folded) < window
+
 
 class TESSTarget:
     """
@@ -50,6 +52,15 @@ class TESSTarget:
 
     for bad_ind in [1, 2, 3, 4, 5, 6, 8, 10, 13, 15]:
         _bad_mask |= 1 << (bad_ind - 1)
+
+    _tls_power_kwargs = {
+        "R_star_min": 0.1,
+        "R_star_max": 10.0,
+        "M_star_max": 10.0,
+        "period_max": 30.0,
+        "transit_depth_min": 0.03,
+        "transit_template": "grazing",
+    }
 
     def _get_lc_format(self, sector, header, provenance):
         """Return the relevant column names and exposure time for gvien LC."""
@@ -132,8 +143,10 @@ class TESSTarget:
                 -0.02
                 / (
                     30.0
-                    * min((lightcurve["time"].max() - lightcurve["time"].min()),
-                          300)
+                    * min(
+                        (lightcurve["time"].max() - lightcurve["time"].min()),
+                        300,
+                    )
                 ),
             ),
             numpy.linspace(0.02, 0.2, 100),
@@ -168,8 +181,11 @@ class TESSTarget:
 
         if (
             candidate is not None
+            # False positive
+            # pylint: disable=possibly-used-before-assignment
             and candidate.depth[candidate_best_index]
             > periodogram.depth[best_index]
+            # pylint: enable=possibly-used-before-assignment
         ):
             periodogram = candidate
             best_index = candidate_best_index
@@ -217,7 +233,7 @@ class TESSTarget:
         """Mask the eclispes detected by given BLS and fit BLS again."""
 
         mask = numpy.logical_not(
-            get_bls_eclipse_mask(bls_results, lightcurve, 'both')
+            get_bls_eclipse_mask(bls_results, lightcurve, "both")
         )
         self._logger.debug("After masking, %d points remain", mask.sum())
         masked_bls_result = self._get_best_fit_bls(lightcurve[mask])
@@ -225,6 +241,44 @@ class TESSTarget:
             f"masked_{param}": value
             for param, value in masked_bls_result.items()
         }
+
+    def _get_masked_best_fit_tls(
+        self, lightcurve, tls_results, leave_unmasked=None
+    ):
+        """Mask the eclipses detected by given TLS and fit BLS again."""
+
+        out_of_transit = numpy.logical_not(
+            transit_mask(
+                lightcurve["time"]
+                + (tls_results["period"] if leave_unmasked == "even" else 0),
+                tls_results["period"] * (1 if leave_unmasked is None else 2),
+                2 * tls_results["duration"],
+                tls_results["T0"],
+            )
+        )
+        masked_lc = lightcurve[out_of_transit]
+        kwargs = self._tls_power_kwargs
+        if leave_unmasked is not None:
+            kwargs = kwargs.copy()
+            kwargs["period_min"] = 2 * tls_results["period"]
+            kwargs["period_max"] = 2 * tls_results["period"]
+            num_periods = 1
+            while num_periods < 1000 or num_periods > 10000:
+                kwargs["period_min"] -= 10.0 * tls_results["period_uncertainty"]
+                kwargs["period_max"] += 10.0 * tls_results["period_uncertainty"]
+                num_periods = period_grid(
+                    R_star=1,
+                    M_star=1,
+                    period_min=kwargs["period_min"],
+                    period_max=kwargs["period_max"],
+                    time_span=masked_lc["time"][-1] - masked_lc["time"][0],
+                ).size
+        print(f"Masked search kwargs: {kwargs}")
+        return transitleastsquares(
+            masked_lc["time"],
+            masked_lc["flux"],
+            masked_lc["flux_err"],
+        ).power(**kwargs)
 
     @staticmethod
     def _get_bls_plot_x(lightcurve, best_fit_bls, label):
@@ -352,7 +406,7 @@ class TESSTarget:
 
         lcs = {
             provenance: download_lcs(tic_id, "all", provenance=provenance)
-            for provenance in ["SPOC"]#, "QLP"]
+            for provenance in ["SPOC"]  # , "QLP"]
         }
 
         self._lcs = []
@@ -406,7 +460,56 @@ class TESSTarget:
             self.plot_best_fit_bls(combined_lc, best_fit_bls, plot)
         return best_fit_bls
 
-    def fit_tls(self):
+    def fit_tls(self, nthreads):
         """Use the Hippke & Heller (2019) TLS to find eclipses."""
 
         combined_lc = self.get_combined_lc()
+        tls_results = transitleastsquares(
+            combined_lc["time"],
+            combined_lc["flux"],
+            combined_lc["flux_err"],
+        ).power(**self._tls_power_kwargs, use_threads=nthreads)
+        if tls_results["FAP"] > 1e-3:
+            raise FalsePositiveError("FAP too high")
+        print(
+            "Main tls results: "
+            + "\n\t* ".join(
+                [f"{param}: {value}" for param, value in tls_results.items()]
+            )
+        )
+
+        if tls_results["odd_even_mismatch"] > 5:
+            for parity in ["even", "odd"]:
+                parity_tls_results = self._get_masked_best_fit_tls(
+                    combined_lc, tls_results, leave_unmasked=parity
+                )
+                print(
+                    "Parity tls results: "
+                    + "\n\t* ".join(
+                        [
+                            f"{param}: {value}"
+                            for param, value in parity_tls_results.items()
+                        ]
+                    )
+                )
+                if parity_tls_results["odd_even_mismatch"] > 5:
+                    raise FalsePositiveError(
+                        f"{parity} depths mismatch > 5sigma"
+                    )
+        masked_tls_results = self._get_masked_best_fit_tls(
+            combined_lc, tls_results
+        )
+        for param, value in masked_tls_results.items():
+            tls_results[f"masked_{param}"] = value
+
+        return tls_results
+
+
+if __name__ == "__main__":
+    # logging.basicConfig(level=logging.DEBUG)
+    target = TESSTarget(33419790)
+    print(
+        "\n\t* ".join(
+            [f"{param}: {value}" for param, value in target.fit_tls(14).items()]
+        )
+    )
