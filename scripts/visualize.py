@@ -45,6 +45,12 @@ def parse_command_line():
         "sampling continues, adding more points to the existing chain.",
     )
     parser.add_argument(
+        "--chain-name",
+        default="mcmc",
+        help="The name of the HDF5 group containin the MCMC chain to "
+        "visualize.",
+    )
+    parser.add_argument(
         "--corner-plot-fname",
         "--corner-plot",
         "--corner",
@@ -334,7 +340,9 @@ def create_lightcurve_plot(config, binaries=None, detrend=None):
 
         pyplot.plot(lightcurve["time"], lightcurve["flux"], ".")
         for y in model_lcs:
-            pyplot.plot(lightcurve["time"], y, "-k")
+            pyplot.plot(
+                lightcurve["time"], y, "-k", linewidth=3.0 / len(model_lcs)
+            )
         pyplot.xlabel("Time [d]")
         pyplot.ylabel("Flux [ppm]")
 
@@ -345,18 +353,21 @@ def create_lightcurve_plot(config, binaries=None, detrend=None):
         ordered_phase = phase[phase_order]
         pyplot.plot(ordered_phase, lightcurve["flux"][phase_order], ".")
         for y in model_lcs:
-            pyplot.plot(ordered_phase, y[phase_order], "-k")
+            pyplot.plot(
+                ordered_phase,
+                y[phase_order],
+                "-k",
+                linewidth=3.0 / len(model_lcs),
+            )
         pyplot.xlabel(xlabel)
         pyplot.ylabel("Flux [ppm]")
 
-    def plot_folded(lightcurve, bls, model_lcs):
+    def plot_folded(lightcurve, log_likelihood, model_lcs):
         """Show sector lightcurve folded by the best fit BLS period."""
 
         if binaries is None:
-            period = bls["period"][0]
-            if abs(bls["depth_even"][0] - bls["depth_odd"][0]) > 5.0 * (
-                bls["depth_even"][1] + bls["depth_odd"][1]
-            ):
+            period = log_likelihood.best_fit_bls["period"][0]
+            if not log_likelihood.masked_is_significant():
                 period *= 2
         else:
             period = binaries[0].per
@@ -374,24 +385,34 @@ def create_lightcurve_plot(config, binaries=None, detrend=None):
         """
 
         if zoom in ["primary", "secondary"]:
-            assert binaries is not None
-            if zoom == "secondary":
-                binaries[0].swap_components()
-            period = binaries[0].per
-            time_reference = binaries[0].t0
-            eval_t = numpy.linspace(
-                time_reference - period / 2,
-                time_reference + period / 2,
-                100,
-            )
-            eclipse_lc = binaries[0].eclipse(eval_t)
-            eclipsed = eval_t[eclipse_lc < 1] - time_reference
-            half_xrange = max(abs(eclipsed.min()), eclipsed.max())
-            pyplot.xlim(-half_xrange, half_xrange)
-            if zoom == "secondary":
-                binaries[0].swap_components()
-            plot_lightcurve = lightcurve
-            plot_model_lcs = model_lcs
+            binary_ind = 0
+            while binary_ind < len(binaries):
+                assert binaries is not None
+                if zoom == "secondary":
+                    binaries[binary_ind].swap_components()
+                period = binaries[binary_ind].per
+                time_reference = binaries[binary_ind].t0
+                eval_t = numpy.linspace(
+                    time_reference - period / 2,
+                    time_reference + period / 2,
+                    100,
+                )
+                eclipse_lc = binaries[binary_ind].eclipse(eval_t)
+                eclipsed = eval_t[eclipse_lc < 1] - time_reference
+                if zoom == "secondary":
+                    binaries[binary_ind].swap_components()
+                if eclipsed.size == 0:
+                    binary_ind += 1
+                    print(
+                        f"No {zoom} eclipse found, trying binary {binary_ind}"
+                    )
+                    continue
+                print(f"Found {zoom} eclipse for binary {binary_ind}")
+                half_xrange = max(abs(eclipsed.min()), eclipsed.max())
+                pyplot.xlim(-half_xrange, half_xrange)
+                plot_lightcurve = lightcurve
+                plot_model_lcs = model_lcs
+                break
         else:
             if zoom == "default":
                 period = bls["period"][0]
@@ -422,7 +443,6 @@ def create_lightcurve_plot(config, binaries=None, detrend=None):
         )
 
     tess_target = TESSTarget(config.tic_id)
-    bls = None
     log_likelihood = None
 
     full_figure = pyplot.figure(
@@ -478,14 +498,10 @@ def create_lightcurve_plot(config, binaries=None, detrend=None):
             if plot_type == "full":
                 plot_full(lightcurve, model_lcs)
             else:
-                if bls is None:
-                    bls = LogLikelihood.get_cached_sed_and_bls(config.tic_id)[1]
-                    if bls is None:
-                        if log_likelihood is None:
-                            log_likelihood = LogLikelihood(config.tic_id)
-                        bls = log_likelihood.best_fit_bls
+                if log_likelihood is None:
+                    log_likelihood = LogLikelihood(config.tic_id)
                 if plot_type == "folded":
-                    period = plot_folded(lightcurve, bls, model_lcs)
+                    period = plot_folded(lightcurve, log_likelihood, model_lcs)
                     if title_pre:
                         title_pre = (
                             title_pre.strip()
@@ -494,7 +510,10 @@ def create_lightcurve_plot(config, binaries=None, detrend=None):
                 else:
                     assert plot_type.startswith("zoom_")
                     plot_zoomed(
-                        lightcurve, bls, plot_type[len("zoom_") :], model_lcs
+                        lightcurve,
+                        log_likelihood.best_fit_bls,
+                        plot_type[len("zoom_") :],
+                        model_lcs,
                     )
         subfig.suptitle(
             title_pre
@@ -517,6 +536,7 @@ def get_model_binaries(config, raw_data, log_prob, include):
     """Return fully set-up binaries per ``--show-model-with-lc``."""
 
     selection = config.show_model_with_lc
+    sample_params = None
     if selection.startswith("top") or selection.startswith("random"):
         if selection.startswith("top"):
             selection = int(selection[3:])
@@ -531,22 +551,16 @@ def get_model_binaries(config, raw_data, log_prob, include):
         selection = tuple(int(s) for s in selection.split(","))
         if selection[0] == -1:
             log_likelihood = LogLikelihood(config.tic_id)
-            initial_positions = load_initial_positions(config.samples_fname)
+            initial_positions = load_initial_positions(
+                config.samples_fname, chain_name=config.chain_name
+            )
             if len(selection) != 1:
                 initial_positions = [initial_positions[selection[1]]]
-            result = []
-            for sample in initial_positions:
-                try:
-                    result.append(
-                        Binary(
-                            from_mcmc=log_likelihood.get_sample_params(sample)
-                        )
-                    )
-                except ValueError:
-                    pass
-            return result
-        assert selection[0] >= 0
-        if len(selection) == 1:
+            sample_params = [
+                log_likelihood.get_sample_params(sample)
+                for sample in initial_positions
+            ]
+        elif len(selection) == 1:
             include = include[
                 selection[0]
                 * log_prob.shape[1] : (selection[0] + 1)
@@ -554,9 +568,26 @@ def get_model_binaries(config, raw_data, log_prob, include):
             ]
             selection = raw_data[selection][include]
         else:
+            assert selection[0] >= 0
             selection = [raw_data[selection]]
 
-    return [Binary(from_mcmc=SampleParams(*params)) for params in selection]
+    if sample_params is None:
+        sample_params = [SampleParams(*sample) for sample in selection]
+
+    result = []
+    for params in sample_params:
+        if config.sample_condition is not None and not Interpreter(
+            user_symbols=dict(zip(SampleParams._fields, params))
+        )(config.sample_condition):
+            print(f"Skipping Porb = {params.per}")
+            continue
+        print(f"Adding Porb = {params.per}")
+        try:
+            result.append(Binary(from_mcmc=params))
+        except ValueError:
+            pass
+    print(f"Returning: {len(result)} binaries")
+    return result
 
 
 def main(config):
@@ -564,7 +595,9 @@ def main(config):
 
     logging.basicConfig(level=logging.DEBUG)
     if path.exists(config.samples_fname):
-        backend = HDFBackend(config.samples_fname, read_only=True)
+        backend = HDFBackend(
+            config.samples_fname, name=config.chain_name, read_only=True
+        )
         iteration = backend.iteration
         raw_data = backend.get_blobs()
         log_prob = backend.get_log_prob()

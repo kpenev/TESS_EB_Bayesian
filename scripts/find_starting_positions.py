@@ -370,6 +370,10 @@ class FindStartingPositions:
                         - 0.15 * self._log_likelihood.best_fit_bls["duration"],
                         scale=0.3
                         * self._log_likelihood.best_fit_bls["duration"],
+                    ),
+                    per=uniform.rvs(
+                        loc=params.per,
+                        scale = self._log_likelihood.best_fit_bls["period"][1]
                     )
                 )
 
@@ -604,7 +608,7 @@ def create_jktebob_inputs(log_likelihood):
 def test():
     """Place to implement various manual tests."""
 
-    test_tic = 16805617  # 189639080 # 4629065  #
+    test_tic = 5205367 # 16805617  # 189639080 # 4629065  #
 
     log_likelihood = LogLikelihood(test_tic)
     FindStartingPositions(log_likelihood)

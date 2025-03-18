@@ -5,7 +5,7 @@ import logging
 from matplotlib import pyplot, colormaps
 import numpy
 from astropy.timeseries import BoxLeastSquares
-from transitleastsquares import transitleastsquares, transit_mask, period_grid
+#from foldedleastsquares import transitleastsquares, transit_mask
 
 from download_lcs import get_astroquery as download_lcs
 
@@ -32,6 +32,8 @@ def get_bls_eclipse_mask(bls, lightcurve, which):
         if which == "odd":
             time -= bls["period"][0]
 
+    window = min(0.3 * period, window)
+
     folded = time % period
     return numpy.minimum(folded, period - folded) < window
 
@@ -57,9 +59,14 @@ class TESSTarget:
         "R_star_min": 0.1,
         "R_star_max": 10.0,
         "M_star_max": 10.0,
-        "period_max": 30.0,
+        "period_min": 1.0,
+        "period_max": 1.1,
         "transit_depth_min": 0.03,
-        "transit_template": "grazing",
+        "per": 3.0,
+        "rp": 0.1,
+        "a": 11.0,
+        "b": 0.0,
+        #"transit_template": "grazing",
     }
 
     def _get_lc_format(self, sector, header, provenance):
@@ -420,6 +427,7 @@ class TESSTarget:
                     continue
 
                 self._lcs.append((formatted_header, formatted_lc))
+        self._lcs.sort(key=lambda x: x[0]["sector"])
 
     def get_combined_lc(self):
         """Return LC combining all sectors after scaling by median."""
@@ -460,56 +468,86 @@ class TESSTarget:
             self.plot_best_fit_bls(combined_lc, best_fit_bls, plot)
         return best_fit_bls
 
-    def fit_tls(self, nthreads):
-        """Use the Hippke & Heller (2019) TLS to find eclipses."""
+    #def fit_tls(self, nthreads):
+    #    """
+    #    Use the Hippke & Heller (2019) TLS to find eclipses. Useless!!!
 
-        combined_lc = self.get_combined_lc()
-        tls_results = transitleastsquares(
-            combined_lc["time"],
-            combined_lc["flux"],
-            combined_lc["flux_err"],
-        ).power(**self._tls_power_kwargs, use_threads=nthreads)
-        if tls_results["FAP"] > 1e-3:
-            raise FalsePositiveError("FAP too high")
-        print(
-            "Main tls results: "
-            + "\n\t* ".join(
-                [f"{param}: {value}" for param, value in tls_results.items()]
-            )
-        )
+    #    However TLS is implemnented, it screws miserably up if multiple sectors
+    #    are combined!
+    #    """
 
-        if tls_results["odd_even_mismatch"] > 5:
-            for parity in ["even", "odd"]:
-                parity_tls_results = self._get_masked_best_fit_tls(
-                    combined_lc, tls_results, leave_unmasked=parity
-                )
-                print(
-                    "Parity tls results: "
-                    + "\n\t* ".join(
-                        [
-                            f"{param}: {value}"
-                            for param, value in parity_tls_results.items()
-                        ]
-                    )
-                )
-                if parity_tls_results["odd_even_mismatch"] > 5:
-                    raise FalsePositiveError(
-                        f"{parity} depths mismatch > 5sigma"
-                    )
-        masked_tls_results = self._get_masked_best_fit_tls(
-            combined_lc, tls_results
-        )
-        for param, value in masked_tls_results.items():
-            tls_results[f"masked_{param}"] = value
+    #    combined_lc = self.get_combined_lc()
+    #    tls_results = transitleastsquares(
+    #        combined_lc["time"],
+    #        combined_lc["flux"],
+    #        combined_lc["flux_err"],
+    #    ).power(**self._tls_power_kwargs, use_threads=nthreads)
+    #    if tls_results["FAP"] > 1e-3:
+    #        raise FalsePositiveError("FAP too high")
+    #    print(
+    #        "Main tls results: "
+    #        + "\n\t* ".join(
+    #            [f"{param}: {value}" for param, value in tls_results.items()]
+    #        )
+    #    )
 
-        return tls_results
+    #    return tls_results
+
+    #    if tls_results["odd_even_mismatch"] > 5:
+    #        for parity in ["even", "odd"]:
+    #            parity_tls_results = self._get_masked_best_fit_tls(
+    #                combined_lc, tls_results, leave_unmasked=parity
+    #            )
+    #            print(
+    #                "Parity tls results: "
+    #                + "\n\t* ".join(
+    #                    [
+    #                        f"{param}: {value}"
+    #                        for param, value in parity_tls_results.items()
+    #                    ]
+    #                )
+    #            )
+    #            if parity_tls_results["odd_even_mismatch"] > 5:
+    #                raise FalsePositiveError(
+    #                    f"{parity} depths mismatch > 5sigma"
+    #                )
+    #    masked_tls_results = self._get_masked_best_fit_tls(
+    #        combined_lc, tls_results
+    #    )
+    #    for param, value in masked_tls_results.items():
+    #        tls_results[f"masked_{param}"] = value
+
+    #    return tls_results
 
 
 if __name__ == "__main__":
     # logging.basicConfig(level=logging.DEBUG)
     target = TESSTarget(33419790)
+    tls_results = target.fit_tls(14)
     print(
         "\n\t* ".join(
-            [f"{param}: {value}" for param, value in target.fit_tls(14).items()]
+            [f"{param}: {value}" for param, value in tls_results.items()]
         )
     )
+    pyplot.plot(tls_results["periods"], tls_results["power"])
+    pyplot.show()
+    pyplot.clf()
+    combined_lc = target.get_combined_lc()
+    pyplot.plot(combined_lc["time"], combined_lc["flux"], ".k", markersize=1)
+    pyplot.plot(
+        tls_results["model_lightcurve_time"],
+        tls_results["model_lightcurve_model"],
+        "-r",
+    )
+    pyplot.show()
+    pyplot.clf()
+    pyplot.plot(tls_results["folded_phase"], tls_results["folded_y"], ".k")
+    pyplot.plot(
+        tls_results["model_folded_phase"],
+        tls_results["model_folded_model"],
+        "-r",
+    )
+    pyplot.axvline(x=0.5 - tls_results['duration'] / 2)
+    pyplot.axvline(x=0.5 + tls_results['duration'] / 2)
+
+    pyplot.show()

@@ -6,12 +6,9 @@ import logging
 
 import numpy
 
-from visualize import create_lightcurve_plot
-from log_likelihood import LogLikelihood
 from tess_target import get_bls_eclipse_mask
 
-
-def calc_moving_median(lightcurve, half_porb, mask):
+def calc_moving_median(lightcurve, half_porb, mask, min_points=20):
     """Each point is divided by the median of all points within +-Porb/2."""
 
     print(
@@ -37,7 +34,13 @@ def calc_moving_median(lightcurve, half_porb, mask):
                 )
             else:
                 left, right = numpy.searchsorted(masked_time, [min_t, max_t])
-        result[i] = numpy.median(masked_flux[left:right])
+        window_flux = masked_flux[left:right]
+        if window_flux.size < min_points:
+            raise RuntimeError(
+                f'Not enough points ({window_flux.size}) in window '
+                f'{min_t} < t < {max_t}'
+            )
+        result[i] = numpy.median(window_flux)
     return result
 
 
@@ -94,9 +97,15 @@ def masked_detrend(lightcurve, log_likelihood, get_trend):
 def test():
     """Avoid polluting global namespace."""
 
+    #That is the idea
+    #pylint: disable=import-outside-toplevel
+    from log_likelihood import LogLikelihood
+    from visualize import create_lightcurve_plot
+    #pylint: enable=import-outside-toplevel
+
     for tic in [1045298, 1129033, 1220444, 2020964]:
         try:
-            log_likelihood = LogLikelihood(tic)
+            log_likelihood = LogLikelihood(tic, detrend=None)
             if log_likelihood.masked_is_significant():
                 zoom = "[zoom_default, zoom_masked]"
             else:

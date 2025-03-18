@@ -1,12 +1,14 @@
 """Define the log-likelihood function to use for MCMC."""
 
 import logging
+from functools import partial
 
 import numpy
 from scipy.stats import norm, truncnorm
 from sqlalchemy import select, delete
 
 from tess_target import TESSTarget, get_bls_eclipse_mask
+from detrending import masked_detrend, calc_moving_median
 from extinction_correction import Green19Correction
 from binary import Binary
 from cache_interface import CacheSession, CachedSED, CachedBLS
@@ -152,6 +154,10 @@ class LogLikelihood(TESSTarget):
                 )
             )
 
+    def _detrennd_lightcurves(self, detrend):
+        """Replace the lightcurves with detrended versions."""
+
+
     @property
     def tic_id(self):
         """The TIC identifier of the EB being modeled."""
@@ -172,9 +178,11 @@ class LogLikelihood(TESSTarget):
     def __init__(
         self,
         tic_id,
+        *,
         overwrite_cache=False,
         ignore_extinction_flags=True,
         plot_bls=False,
+        detrend=partial(masked_detrend, get_trend=calc_moving_median)
     ):
         """Prepare to evaluate the log-likelihood for the given TIC ID."""
 
@@ -228,6 +236,12 @@ class LogLikelihood(TESSTarget):
         )
 
         assert self._best_fit_bls["period"][0] > self._range.per[0]
+
+        if detrend is not None:
+            self._lcs = [
+                (header, detrend(lightcurve, self))
+                for header, lightcurve in self._lcs
+            ]
 
         self._logger.debug("LCs: %s", repr(self._lcs))
         self._logger.debug("SED: %s", repr(self._sed))
