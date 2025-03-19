@@ -24,6 +24,7 @@ from log_likelihood import LogLikelihood
 from tess_target import TESSTarget, get_bls_eclipse_mask
 from paths import samples as samples_fname
 from binary import Binary
+from light_curve_plotter import LightCurvePlotter
 
 
 def parse_command_line():
@@ -330,222 +331,23 @@ def create_histogram_movie(plot_data, config, num_walkers):
             movie.add_frame()
 
 
-# pylint: disable=too-many-statements
-# pylint: disable=too-many-locals
-def create_lightcurve_plot(config, binaries=None, detrend=None):
-    """Create the plot(s) described in the ``--plot-lightcurve`` cmdline arg."""
-
-    def plot_full(lightcurve, model_lcs):
-        """Show the full unfolded lightcurve for a sector."""
-
-        pyplot.plot(lightcurve["time"], lightcurve["flux"], ".")
-        for y in model_lcs:
-            pyplot.plot(
-                lightcurve["time"], y, "-k", linewidth=3.0 / len(model_lcs)
-            )
-        pyplot.xlabel("Time [d]")
-        pyplot.ylabel("Flux [ppm]")
-
-    def plot_vs_phase(lightcurve, phase, model_lcs, xlabel="Phase"):
-        """Create a plot of the lightcurve vs the given phase."""
-
-        phase_order = numpy.argsort(phase)
-        ordered_phase = phase[phase_order]
-        pyplot.plot(ordered_phase, lightcurve["flux"][phase_order], ".")
-        for y in model_lcs:
-            pyplot.plot(
-                ordered_phase,
-                y[phase_order],
-                "-k",
-                linewidth=3.0 / len(model_lcs),
-            )
-        pyplot.xlabel(xlabel)
-        pyplot.ylabel("Flux [ppm]")
-
-    def plot_folded(lightcurve, log_likelihood, model_lcs):
-        """Show sector lightcurve folded by the best fit BLS period."""
-
-        if binaries is None:
-            period = log_likelihood.best_fit_bls["period"][0]
-            if not log_likelihood.masked_is_significant():
-                period *= 2
-        else:
-            period = binaries[0].per
-        phase = (lightcurve["time"] % period) / period
-        plot_vs_phase(lightcurve, phase, model_lcs)
-        pyplot.xlim(0, 1)
-        return period
-
-    def plot_zoomed(lightcurve, bls, zoom, model_lcs):
-        """
-        Show folded lightcurve near some BLS transit.
-
-        Possible values for zoom are "default", "even", "odd", "masked",
-        "primary", "secondary".
-        """
-
-        if zoom in ["primary", "secondary"]:
-            binary_ind = 0
-            while binary_ind < len(binaries):
-                assert binaries is not None
-                if zoom == "secondary":
-                    binaries[binary_ind].swap_components()
-                period = binaries[binary_ind].per
-                time_reference = binaries[binary_ind].t0
-                eval_t = numpy.linspace(
-                    time_reference - period / 2,
-                    time_reference + period / 2,
-                    100,
-                )
-                eclipse_lc = binaries[binary_ind].eclipse(eval_t)
-                eclipsed = eval_t[eclipse_lc < 1] - time_reference
-                if zoom == "secondary":
-                    binaries[binary_ind].swap_components()
-                if eclipsed.size == 0:
-                    binary_ind += 1
-                    print(
-                        f"No {zoom} eclipse found, trying binary {binary_ind}"
-                    )
-                    continue
-                print(f"Found {zoom} eclipse for binary {binary_ind}")
-                half_xrange = max(abs(eclipsed.min()), eclipsed.max())
-                pyplot.xlim(-half_xrange, half_xrange)
-                plot_lightcurve = lightcurve
-                plot_model_lcs = model_lcs
-                break
-        else:
-            if zoom == "default":
-                period = bls["period"][0]
-                time_reference = bls["transit_time"]
-            elif zoom == "masked":
-                period = bls["masked_period"][0]
-                time_reference = bls["masked_transit_time"]
-            else:
-                period = 2 * bls["period"][0]
-                if zoom == "even":
-                    time_reference = bls["transit_time"]
-                else:
-                    assert zoom == "odd"
-                    time_reference = bls["transit_time"] + bls["period"][0]
-            mask = get_bls_eclipse_mask(bls, lightcurve, zoom)
-            plot_lightcurve = lightcurve[mask]
-            plot_model_lcs = [lc[mask] for lc in model_lcs]
-            # half_xrange = (
-            #    bls[("masked_" if zoom == "masked" else "") + "duration"]
-            #    / period
-            # )
-
-        phase = (
-            (plot_lightcurve["time"] - time_reference + period / 2) % period
-        ) / period - 0.5
-        plot_vs_phase(
-            plot_lightcurve, phase, plot_model_lcs, xlabel="$\Delta$Phase"
-        )
-
-    tess_target = TESSTarget(config.tic_id)
-    log_likelihood = None
-
-    full_figure = pyplot.figure(
-        figsize=(
-            rcParams["figure.figsize"][0],
-            rcParams["figure.figsize"][1] * 1.5 * len(tess_target.lcs),
-        ),
-        # layout="constrained",
-    )
-    print(f"Mosai spec str: {config.plot_lightcurve[1]}")
-    mosaic_spec = Interpreter(
-        user_symbols={
-            plot_type: plot_type
-            for plot_type in [
-                "full",
-                "folded",
-                "zoom_default",
-                "zoom_even",
-                "zoom_odd",
-                "zoom_masked",
-                "zoom_primary",
-                "zoom_secondary",
-            ]
-        }
-    )(config.plot_lightcurve[1])
-    subfigures = [
-        subfig[0]
-        for subfig in full_figure.subfigures(
-            len(tess_target.lcs), 1, hspace=0.03, squeeze=False
-        )
-    ]
-    title_pre = f"TIC {config.tic_id}\n"
-    for (header, lightcurve), subfig in zip(tess_target.lcs, subfigures):
-        model_lcs = []
-        lightcurve = numpy.copy(lightcurve)
-        lightcurve["flux"] /= numpy.median(lightcurve["flux"])
-        if binaries is not None:
-            model_lcs = [
-                LogLikelihood.get_model(
-                    bnry, header, lightcurve, bnry.lc_sys_err
-                )[0]
-                for bnry in binaries
-            ]
-        if detrend is not None:
-            if log_likelihood is None:
-                log_likelihood = LogLikelihood(config.tic_id)
-            model_lcs.append(detrend(lightcurve, log_likelihood)["flux"])
-        print("Mosaic spec: " + repr(mosaic_spec))
-        for plot_type, axis in subfig.subplot_mosaic(
-            mosaic_spec, gridspec_kw={"wspace": 0.3, "hspace": 0.3}, sharey=True
-        ).items():
-            pyplot.sca(axis)
-            if plot_type == "full":
-                plot_full(lightcurve, model_lcs)
-            else:
-                if log_likelihood is None:
-                    log_likelihood = LogLikelihood(config.tic_id)
-                if plot_type == "folded":
-                    period = plot_folded(lightcurve, log_likelihood, model_lcs)
-                    if title_pre:
-                        title_pre = (
-                            title_pre.strip()
-                            + f": $P_{{orb}}$ = {period:.5f}\n"
-                        )
-                else:
-                    assert plot_type.startswith("zoom_")
-                    plot_zoomed(
-                        lightcurve,
-                        log_likelihood.best_fit_bls,
-                        plot_type[len("zoom_") :],
-                        model_lcs,
-                    )
-        subfig.suptitle(
-            title_pre
-            + f"Sector {header['sector']} {header['provenance']} lightcurve"
-        )
-        title_pre = ""
-    if isinstance(config.plot_lightcurve[0], tuple):
-        pyplot.savefig(
-            config.plot_lightcurve[0][0], format=config.plot_lightcurve[0][1]
-        )
-    else:
-        pyplot.savefig(config.plot_lightcurve[0])
-
-
-# pylint: enable=too-many-statements
-# pylint: enable=too-many-locals
-
-
 def get_model_binaries(config, raw_data, log_prob, include):
     """Return fully set-up binaries per ``--show-model-with-lc``."""
 
     selection = config.show_model_with_lc
+    assert selection.strip().startswith("-1") or raw_data is not None
     sample_params = None
     if selection.startswith("top") or selection.startswith("random"):
         if selection.startswith("top"):
             selection = int(selection[3:])
-            selection = numpy.unique(log_prob[include], return_index=True)[1][
-                -selection:
-            ]
+            selection = numpy.unique(
+                log_prob.flatten()[include], return_index=True
+            )[1][-selection:]
         else:
             selection = int(selection[6:])
-            selection = numpy.random.choice(log_prob[include].size, selection)
+            selection = numpy.random.choice(
+                log_prob.flatten()[include].size, selection
+            )
         selection = raw_data[numpy.unravel_index(selection, log_prob.shape)]
     else:
         selection = tuple(int(s) for s in selection.split(","))
@@ -576,9 +378,13 @@ def get_model_binaries(config, raw_data, log_prob, include):
 
     result = []
     for params in sample_params:
-        if config.sample_condition is not None and not Interpreter(
-            user_symbols=dict(zip(SampleParams._fields, params))
-        )(config.sample_condition):
+        if (
+            selection[0] == -1
+            and config.sample_condition is not None
+            and not Interpreter(
+                user_symbols=dict(zip(SampleParams._fields, params))
+            )(config.sample_condition)
+        ):
             print(f"Skipping Porb = {params.per}")
             continue
         print(f"Adding Porb = {params.per}")
@@ -599,48 +405,54 @@ def main(config):
             config.samples_fname, name=config.chain_name, read_only=True
         )
         iteration = backend.iteration
-        raw_data = backend.get_blobs()
-        log_prob = backend.get_log_prob()
-        plot_data = pandas.DataFrame(
-            raw_data[config.burn_in : iteration : config.thin, :, :]
-            .flatten()
-            .reshape(
-                ((iteration - config.burn_in + config.thin - 1) // config.thin)
-                * backend.shape[0],
-                backend.shape[1],
-            ),
-            columns=SampleParams._fields,
-        )
-        sub_log_prob = log_prob[
-            config.burn_in : iteration : config.thin, :
-        ].flatten()
-        sub_log_prob -= sub_log_prob.min()
-        plot_data.insert(
-            0,
-            "logprob",
-            sub_log_prob,
-        )
-        if config.sample_condition is not None:
-            plot_data.insert(
-                0, "selected", Evaluator(plot_data)(config.sample_condition)
+        if iteration > 0:
+            raw_data = backend.get_blobs()
+            log_prob = backend.get_log_prob()
+            plot_data = pandas.DataFrame(
+                raw_data[config.burn_in : iteration : config.thin, :, :]
+                .flatten()
+                .reshape(
+                    (
+                        (iteration - config.burn_in + config.thin - 1)
+                        // config.thin
+                    )
+                    * backend.shape[0],
+                    backend.shape[1],
+                ),
+                columns=SampleParams._fields,
             )
+            sub_log_prob = log_prob[
+                config.burn_in : iteration : config.thin, :
+            ].flatten()
+            sub_log_prob -= numpy.nanmin(sub_log_prob)
+            plot_data.insert(
+                0,
+                "logprob",
+                sub_log_prob,
+            )
+            if config.sample_condition is not None:
+                plot_data.insert(
+                    0, "selected", Evaluator(plot_data)(config.sample_condition)
+                )
+        else:
+            raw_data = None
+            log_prob = None
 
     if config.plot_lightcurve:
         if config.show_model_with_lc:
-            assert iteration
             binaries = get_model_binaries(
                 config,
                 raw_data,
                 log_prob,
                 (
                     plot_data["selected"].array
-                    if config.sample_condition is not None
+                    if config.sample_condition is not None and iteration > 0
                     else None
                 ),
             )
         else:
             binaries = None
-        create_lightcurve_plot(config, binaries)
+        LightCurvePlotter(config)(config.tic_id, binaries)
 
     if config.corner_plot_fname:
         create_corner_plot(plot_data, config)

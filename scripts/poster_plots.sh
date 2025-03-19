@@ -1,6 +1,11 @@
 #!/bin/bash
 
 TIC=$1
+BURNIN=$2
+
+if [ "$BURNIN" == "" ]; then
+    BURNIN=5000
+fi
 
 ./visualize.py ${TIC} \
     --corner-plot-fname tess${TIC}_corner_eproj.pdf \
@@ -12,7 +17,7 @@ TIC=$1
     --corner-plot-expression '$e \cos \omega$=ecc * cos(w)' \
     --corner-plot-expression '$e \sin \omega$=ecc * sin(w)' \
     --corner-plot-expression '$b$=primary_impact_param' \
-    --burn-in 5000 \
+    --burn-in ${BURNIN} \
     && \
 ./visualize.py ${TIC} \
     --corner-plot-fname tess${TIC}_corner_ew.pdf \
@@ -24,7 +29,7 @@ TIC=$1
     --corner-plot-expression '$e$=ecc' \
     --corner-plot-expression '$\omega$=w' \
     --corner-plot-expression '$b$=primary_impact_param' \
-    --burn-in 5000 \
+    --burn-in ${BURNIN} \
     && \
 ./visualize.py ${TIC} \
     --plot-lightcurve \
@@ -39,9 +44,9 @@ TIC=$1
     --show-model-with-lc random100 \
     && \
 ./visualize.py ${TIC} \
-    --chain-name prelim_mcmc_0 \
+    --chain-name prelim_mcmc \
     --plot-lightcurve \
     tess${TIC}_starting.pdf \
     '[[full, full], [folded, folded], [zoom_primary, zoom_secondary]]' \
     --show-model-with-lc -1 \
-    --sample-condition '(0 < per) & (per < 30)'
+    --sample-condition '(3.98 < per) & (per < 4)'
