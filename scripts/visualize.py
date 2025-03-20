@@ -340,15 +340,24 @@ def get_model_binaries(config, raw_data, log_prob, include):
     if selection.startswith("top") or selection.startswith("random"):
         if selection.startswith("top"):
             selection = int(selection[3:])
-            selection = numpy.unique(
-                log_prob.flatten()[include], return_index=True
-            )[1][-selection:]
+            print("Include: ", include)
+            print("Selection: ", selection)
+            ordered = numpy.flip(
+                numpy.unique(log_prob.flatten(), return_index=True)[1]
+            )
+            if include is not None:
+                ordered = ordered[include[ordered]]
+            selection = ordered[:selection]
+            print("Selection:", selection)
+            print(
+                "Unraveled selection: "
+                + repr(numpy.unravel_index(selection, log_prob.shape))
+            )
         else:
             selection = int(selection[6:])
-            selection = numpy.random.choice(
-                log_prob.flatten()[include].size, selection
-            )
+            selection = numpy.random.choice(numpy.nonzero(include), selection)
         selection = raw_data[numpy.unravel_index(selection, log_prob.shape)]
+        print("Selected samples shape: ", selection.shape)
     else:
         selection = tuple(int(s) for s in selection.split(","))
         if selection[0] == -1:
@@ -379,7 +388,7 @@ def get_model_binaries(config, raw_data, log_prob, include):
     result = []
     for params in sample_params:
         if (
-            selection[0] == -1
+            config.show_model_with_lc.strip().startswith("-1")
             and config.sample_condition is not None
             and not Interpreter(
                 user_symbols=dict(zip(SampleParams._fields, params))
@@ -424,7 +433,7 @@ def main(config):
             sub_log_prob = log_prob[
                 config.burn_in : iteration : config.thin, :
             ].flatten()
-            sub_log_prob -= numpy.nanmin(sub_log_prob)
+            sub_log_prob -= sub_log_prob[numpy.isfinite(sub_log_prob)].min()
             plot_data.insert(
                 0,
                 "logprob",
