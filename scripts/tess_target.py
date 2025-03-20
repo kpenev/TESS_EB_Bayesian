@@ -132,6 +132,12 @@ class TESSTarget:
 
         return self._lcs
 
+    @property
+    def time_span(self):
+        """The time span of the lightcurves for this target."""
+
+        return self._time_span
+
     @staticmethod
     def _get_best_fit_bls(lightcurve):
         """Return the best fit orbital period and time of primary transit."""
@@ -417,12 +423,17 @@ class TESSTarget:
         }
 
         self._lcs = []
+        self._time_span = [numpy.inf, -numpy.inf]
 
         for provenance, lc_collection in lcs.items():
             for sector, (header, observed_lc) in lc_collection.items():
                 formatted_lc, formatted_header = self._format_lc(
                     sector, header, provenance, observed_lc
                 )
+                self._time_span[0] = min(formatted_lc["time"].min(),
+                                         self._time_span[0])
+                self._time_span[1] = max(formatted_lc["time"].max(),
+                                         self._time_span[1])
                 if formatted_lc is None:
                     continue
 
