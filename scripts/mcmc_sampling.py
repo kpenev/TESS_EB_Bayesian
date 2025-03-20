@@ -231,7 +231,7 @@ def restart_sampling(backend, config):
     select_from = backend.shape[0]
     while select_from <= ordered_indices.size:
         top_indices = numpy.random.choice(
-            ordered_indices[backend.shape[0] - select_from :], backend.shape[0]
+            ordered_indices[-select_from:], backend.shape[0]
         )
         _logger.debug(
             "Top indices (shape: %s): %s", top_indices.shape, top_indices
@@ -239,15 +239,15 @@ def restart_sampling(backend, config):
         top_indices = numpy.unravel_index(top_indices, log_prob.shape)
         initial_state = backend.get_chain()[top_indices]
         if walkers_independent(initial_state):
-
             top_log_likelihood = log_prob[top_indices]
             log_likelihood_spread = (
                 top_log_likelihood.max() - top_log_likelihood.min()
             )
             if log_likelihood_spread < config.restart_log_likelihood_range:
                 _logger.info(
-                    "Starting final sampling from log-likelihood spread %s "
-                    "(within %s).",
+                    "Starting final sampling from random subset of the top %d "
+                    "samples. Log-likelihood spread %s (within %s).",
+                    select_from,
                     repr(log_likelihood_spread),
                     repr(config.restart_log_likelihood_range),
                 )
@@ -267,8 +267,9 @@ def restart_sampling(backend, config):
                     )
                 return backend, initial_state, True
             _logger.info(
-                "Top samples log-likelihood spread (%s) > %s. Continuing "
-                "preliminary MCMC.",
+                "Random subset of top %d samples log-likelihood spread "
+                "(%s) > %s. Continuing preliminary MCMC.",
+                select_from,
                 repr(log_likelihood_spread),
                 repr(config.restart_log_likelihood_range),
             )
