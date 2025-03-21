@@ -364,17 +364,24 @@ class FindStartingPositions:
                         (scenario_ind, norm.rvs(size=len(SampleParams._fields)))
                     )
                     continue
-                params = params._replace(
-                    eclipse_time=uniform.rvs(
-                        loc=params.eclipse_time
-                        - 0.15 * self._log_likelihood.best_fit_bls["duration"],
-                        scale=0.3
-                        * self._log_likelihood.best_fit_bls["duration"],
-                    ),
-                    per=uniform.rvs(
-                        loc=params.per,
-                        scale = self._log_likelihood.best_fit_bls["period"][1]
+                period_tweak = uniform.rvs(
+                    loc=-self._log_likelihood.best_fit_bls["period"][1] / 4,
+                    scale=self._log_likelihood.best_fit_bls["period"][1] / 2,
+                )
+                timing_tweak = uniform.rvs(
+                    loc=-0.1 * self._log_likelihood.best_fit_bls["duration"],
+                    scale=0.2 * self._log_likelihood.best_fit_bls["duration"],
+                ) - period_tweak * (
+                    (
+                        self._log_likelihood.time_span[1]
+                        - self._log_likelihood.time_span[0]
                     )
+                    / params.per
+                    / 2
+                )
+                params = params._replace(
+                    eclipse_time=params.eclipse_time + timing_tweak,
+                    per=params.per + period_tweak,
                 )
 
                 mcmc_sample = numpy.array(
@@ -608,7 +615,7 @@ def create_jktebob_inputs(log_likelihood):
 def test():
     """Place to implement various manual tests."""
 
-    test_tic = 5205367 # 16805617  # 189639080 # 4629065  #
+    test_tic = 5205367  # 16805617  # 189639080 # 4629065  #
 
     log_likelihood = LogLikelihood(test_tic)
     FindStartingPositions(log_likelihood)

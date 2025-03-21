@@ -172,6 +172,12 @@ def parse_command_line():
         help="Specify a custom range for the histograms for the "
         "``--histogram-movie`` option.",
     )
+    parser.add_argument(
+        "--data-on-top",
+        action="store_true",
+        help="By default model is plotted on top of the data. If this flag is "
+        "passed, the data is plotted on top of the model.",
+    )
 
     result = parser.parse_args()
     result.samples_fname = result.samples_fname_pattern.format(
@@ -355,7 +361,9 @@ def get_model_binaries(config, raw_data, log_prob, include):
             )
         else:
             selection = int(selection[6:])
-            selection = numpy.random.choice(numpy.nonzero(include), selection)
+            selection = numpy.random.choice(
+                numpy.nonzero(include)[0], selection
+            )
         selection = raw_data[numpy.unravel_index(selection, log_prob.shape)]
         print("Selected samples shape: ", selection.shape)
     else:

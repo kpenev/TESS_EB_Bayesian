@@ -12,32 +12,99 @@ class LightCurvePlotter:
     """Plot lightcurves, models, and detrndeing of TESS targets."""
 
     lc_plot_config = {
-        "marker": ".",
-        "markersize": 5,
-        "linestyle": "none",
-        "markerfacecolor": "green",
-        "markeredgecolor": "none",
-        "markeredgewidth": 0,
+        "good": {
+            "marker": ".",
+            "markersize": 5,
+            "linestyle": "none",
+            "markerfacecolor": "green",
+            "markeredgecolor": "none",
+            "markeredgewidth": 0,
+            "zorder": 10,
+        },
+        "bad": {
+            "marker": ".",
+            "markersize": 5,
+            "linestyle": "none",
+            "markerfacecolor": "red",
+            "markeredgecolor": "none",
+            "markeredgewidth": 0,
+            "zorder": 10,
+        },
     }
-    model_plot_config = {
+    model_lc_plot_config = {
         "marker": "none",
         "linestyle": "-",
         "color": "black",
+        "zorder": 20,
+    }
+
+    sed_plot_config = {
+        "marker": "o",
+        "linestyle": "none",
+        "markerfacecolor": "green",
+        "markeredgecolor": "none",
+        "markersize": 10,
+        "ecolor": "green",
+        "capsize": 5,
+        "zorder": 10,
+    }
+
+    model_sed_plot_config = {
+        "marker": "x",
+        "linestyle": "none",
+        "color": "black",
+        "markersize": 10,
+        "zorder": 20,
+    }
+
+    sed_filters = {
+        "SDSS": {
+            "u": 0.354,
+            "g": 0.477,
+            "r": 0.623,
+            "i": 0.762,
+            "z": 0.913,
+            "y": 1.021,
+        },
+        "2MASS": {
+            "J": 1.235,
+            "H": 1.662,
+            "Ks": 2.159,
+        },
+        "WISE": {
+            "W1": 3.35,
+            "W2": 4.6,
+            "W3": 11.56,
+            "W4": 22.09,
+        },
+        "PanSTARRS": {
+            "g": 0.481,
+            "r": 0.617,
+            "i": 0.752,
+            "z": 0.866,
+            "y": 0.962,
+        },
     }
 
     @classmethod
     def plot_full(cls, lightcurve, model_lcs):
         """Plot the full unfolded lightcurve for a sector."""
 
-        pyplot.plot(
-            lightcurve["time"], lightcurve["flux"], **cls.lc_plot_config
-        )
+        for mask, plot_config in [
+            (lightcurve["good"], cls.lc_plot_config["good"]),
+            (numpy.logical_not(lightcurve["good"]), cls.lc_plot_config["bad"]),
+        ]:
+            pyplot.plot(
+                lightcurve["time"][mask],
+                lightcurve["flux"][mask],
+                **plot_config,
+            )
         for y in model_lcs:
             pyplot.plot(
                 lightcurve["time"],
                 y,
                 linewidth=3.0 / len(model_lcs),
-                **cls.model_plot_config,
+                **cls.model_lc_plot_config,
             )
         pyplot.xlabel("Time [d]")
         pyplot.ylabel("Flux")
@@ -48,15 +115,24 @@ class LightCurvePlotter:
 
         phase_order = numpy.argsort(phase)
         ordered_phase = phase[phase_order]
-        pyplot.plot(
-            ordered_phase, lightcurve["flux"][phase_order], **cls.lc_plot_config
-        )
+        for mask, plot_config in [
+            (lightcurve["good"][phase_order], cls.lc_plot_config["good"]),
+            (
+                numpy.logical_not(lightcurve["good"][phase_order]),
+                cls.lc_plot_config["bad"],
+            ),
+        ]:
+            pyplot.plot(
+                ordered_phase[mask],
+                lightcurve["flux"][phase_order][mask],
+                **plot_config,
+            )
         for y in model_lcs:
             pyplot.plot(
                 ordered_phase,
                 y[phase_order],
                 linewidth=3.0 / len(model_lcs),
-                **cls.model_plot_config,
+                **cls.model_lc_plot_config,
             )
         pyplot.xlabel(xlabel)
         pyplot.ylabel("Flux [ppm]")
@@ -190,6 +266,25 @@ class LightCurvePlotter:
             [lc[mask] for lc in model_lcs],
         )
 
+    def plot_sed(self, tess_target, binaries):
+        """Create a plot of the SED of the target along with model."""
+
+        plot_x = numpy.array(
+            [self.sed_filters["PanSTARRS"][filter] for filter in "grizy"]
+            + [self.sed_filters["2MASS"][filter] for filter in ["J", "H", "Ks"]]
+            + [self.sed_filters["WISE"][filter] for filter in ["W1", "W2"]]
+        )
+        pyplot.errorbar(
+            plot_x,
+            tess_target.sed[0],
+            yerr=tess_target.sed[1],
+            **self.sed_plot_config,
+        )
+        for bnry in binaries:
+            pyplot.plot(plot_x, bnry.absmag, **self.model_sed_plot_config)
+        pyplot.xlabel("Wavelength [$\mu$]")
+        pyplot.ylabel("Absolute magnitude")
+
     def plot_diff(self, mode, lightcurve, model_lcs):
         """Plot the difference between the LC and the first model vs time."""
 
@@ -253,6 +348,8 @@ class LightCurvePlotter:
                     "zoom_secondary",
                     "zoom_ooe",
                     "zoom_ooe_folded",
+                    "sed",
+                    "empty",
                 ]
             }
         )(self._config.plot_lightcurve[1])
@@ -261,6 +358,9 @@ class LightCurvePlotter:
             plot_types.size != 1 or plot_types[0] != "full"
         )
         self._folding_period = None
+        if config.data_on_top:
+            self.lc_plot_config["zorder"] = 30
+            self.sed_plot_config["zorder"] = 30
 
     def __call__(self, tic_id, binaries=None, detrend=None):
         """
@@ -306,6 +406,7 @@ class LightCurvePlotter:
             print("Mosaic spec: " + repr(self._mosaic_spec))
             for plot_type, axis in subfig.subplot_mosaic(
                 self._mosaic_spec,
+                empty_sentinel="empty",
                 gridspec_kw={"hspace": 0.0},
             ).items():
                 pyplot.sca(axis)
@@ -325,6 +426,8 @@ class LightCurvePlotter:
                     self.plot_diff(
                         plot_type[: -len("_diff")], lightcurve, model_lcs
                     )
+                elif plot_type == "sed":
+                    self.plot_sed(tess_target, binaries)
                 else:
                     getattr(self, f"plot_{plot_type}")(lightcurve, model_lcs)
 
