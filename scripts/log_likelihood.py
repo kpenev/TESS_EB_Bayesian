@@ -30,6 +30,9 @@ class LogLikelihood(TESSTarget):
     ]
 
     max_ecc = 0.96
+    max_outlier_iterations = 5
+    outlier_thresh2 = 25.0
+    outlier_bins = 30
 
     @classmethod
     def get_cached_sed_and_bls(cls, tic_id):
@@ -154,10 +157,6 @@ class LogLikelihood(TESSTarget):
                 )
             )
 
-    def _detrennd_lightcurves(self, detrend):
-        """Replace the lightcurves with detrended versions."""
-
-
     @property
     def tic_id(self):
         """The TIC identifier of the EB being modeled."""
@@ -170,11 +169,26 @@ class LogLikelihood(TESSTarget):
 
         return self._best_fit_bls
 
+    @property
+    def sed(self):
+        """The observed spectral energy distribution in absolute magnitudes."""
+
+        return self._sed
+
+    @property
+    def bls_porb(self):
+        """The best fit orbital period of the target."""
+
+        return (1 if self.masked_is_significant() else 2) * self._best_fit_bls[
+            "period"
+        ][0]
+
     def get_range(self, param):
         """The support of the prior for a given parameter."""
 
         return getattr(self._range, param)
 
+    # pylint: disable=too-many-arguments
     def __init__(
         self,
         tic_id,
@@ -182,7 +196,7 @@ class LogLikelihood(TESSTarget):
         overwrite_cache=False,
         ignore_extinction_flags=True,
         plot_bls=False,
-        detrend=partial(masked_detrend, get_trend=calc_moving_median)
+        detrend=partial(masked_detrend, get_trend=calc_moving_median),
     ):
         """Prepare to evaluate the log-likelihood for the given TIC ID."""
 
@@ -231,8 +245,8 @@ class LogLikelihood(TESSTarget):
             secondary_reflection_coef=(-2, 2),
             primary_beaming_coef=(-2, 2),
             secondary_beaming_coef=(-2, 2),
-            lc_sys=(-10, 0),
-            sed_sys=(-10, 0),
+            lc_sys=(numpy.log10(self._find_syserr_and_outliers()), 0),
+            sed_sys=(-10, -1.5),
         )
 
         assert self._best_fit_bls["period"][0] > self._range.per[0]
@@ -245,6 +259,8 @@ class LogLikelihood(TESSTarget):
 
         self._logger.debug("LCs: %s", repr(self._lcs))
         self._logger.debug("SED: %s", repr(self._sed))
+
+    # pylint: enable=too-many-arguments
 
     def masked_is_significant(self):
         """
@@ -314,6 +330,10 @@ class LogLikelihood(TESSTarget):
         if param in self._log_uniform:
             value = numpy.log10(value)
         low, high = self.get_range(param)
+        if value < low:
+            return param_ind, -numpy.inf
+        if value > high:
+            return param_ind, numpy.inf
         return param_ind, norm.ppf((value - low) / (high - low))
 
     def get_sample_params(self, mcmc_sample):
@@ -341,6 +361,96 @@ class LogLikelihood(TESSTarget):
                 in_bin = bin_destinations == bin_ind
                 binned[bin_ind] = numpy.median(lightcurve[quantity][in_bin])
         return binned_lc
+
+    def _find_syserr_and_outliers(self):
+        """
+        Estimate the systematic error and find outliers in the lightcurves.
+
+        Bin the phase-folded eclipse masked LC in phase after masking eclipses
+        and find the variance from the median in each bin after iteratively
+        rejecting outliers.
+
+        Modify `self.max_outlier_iterations`, `self.outlier_thresh2` and
+        `self.outlier_bins` attributes to control the process.
+        """
+
+        def calc_bin_var(bin_flux):
+            """Calculate stddev(flux) and flag >5 sigma outliers."""
+
+            outliers = False
+            for _ in range(self.max_outlier_iterations):
+                square_dev = (bin_flux - numpy.median(bin_flux)) ** 2
+                var = numpy.mean(square_dev)
+                new_outliers = square_dev > self.outlier_thresh2 * var
+                if not new_outliers.any():
+                    break
+                outliers = numpy.logical_or(outliers, new_outliers)
+            if outliers is False:
+                outliers = new_outliers
+            return var, outliers
+
+        combined_lc = self.get_combined_lc()
+        period = self._best_fit_bls["period"][0]
+        if self.masked_is_significant():
+            ooe_mask = numpy.logical_not(
+                numpy.logical_or(
+                    get_bls_eclipse_mask(
+                        self._best_fit_bls, combined_lc, "both"
+                    ),
+                    get_bls_eclipse_mask(
+                        self._best_fit_bls, combined_lc, "masked"
+                    ),
+                )
+            )
+        else:
+            period *= 2
+            ooe_mask = numpy.logical_not(
+                get_bls_eclipse_mask(self._best_fit_bls, combined_lc, "both")
+            )
+
+        phase = (combined_lc["time"] % period) / period
+        phase_sorter = numpy.argsort(phase)
+        ooe_mask = ooe_mask[phase_sorter]
+        phase_sorter = phase_sorter[ooe_mask]
+
+        bin_boundaries = numpy.searchsorted(
+            phase[phase_sorter], numpy.linspace(0, 1, self.outlier_bins + 1)
+        )
+        sys_err = numpy.zeros(self.outlier_bins)
+        outliers = numpy.zeros_like(combined_lc["flux"], dtype=bool)
+
+        weights = bin_boundaries[1:] - bin_boundaries[:-1] - 1
+
+        for i in range(self.outlier_bins):
+            bin_indices = phase_sorter[
+                bin_boundaries[i] : bin_boundaries[i + 1]
+            ]
+            if bin_indices.size < 10:
+                weights[i] = 0.0
+                continue
+            sys_err[i], outliers[bin_indices] = calc_bin_var(
+                combined_lc["flux"][bin_indices]
+            )
+            sys_err[i] -= (
+                numpy.median(combined_lc["flux_err"][bin_indices]) ** 2
+            )
+
+        sys_err = numpy.average(sys_err, weights=weights)** 0.5
+
+        lc_start = 0
+        for _, formatted_lc in self.lcs:
+            formatted_lc["good"] = numpy.logical_not(
+                outliers[lc_start : lc_start + formatted_lc.size]
+            )
+            lc_start += formatted_lc.size
+
+        self._logger.info(
+            "TIC %d: LC systematic error: %f, outliers %d",
+            self.tic_id,
+            sys_err,
+            outliers.sum(),
+        )
+        return sys_err
 
     def calc_lc_log_likelihood(self, binary, lc_sys_err, eclipse_only=False):
         """
@@ -372,6 +482,7 @@ class LogLikelihood(TESSTarget):
             return -numpy.inf
         result = 0.0
         for header, lightcurve in self._lcs:
+            lightcurve = lightcurve[lightcurve["good"]]
             if eclipse_only:
                 lightcurve = lightcurve[
                     get_bls_eclipse_mask(

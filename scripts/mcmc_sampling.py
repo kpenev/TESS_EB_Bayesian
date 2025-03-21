@@ -218,65 +218,82 @@ def get_backend(samples_fname, config):
     with h5py.File(samples_fname, "r") as samples_file:
         return backend, samples_file["mcmc"].attrs.get("final_run", False)
 
+def prepare_restart(backend):
+    """Prepare to restart sampling and return accumulated samples & log-prob."""
+
+    log_prob = backend.get_log_prob()
+    samples = backend.get_chain()
+    with h5py.File(backend.filename, "r+") as samples_f:
+        for prelim in count():
+            chain_name = f"prelim_mcmc_{prelim}"
+            if chain_name not in samples_f:
+                samples_f.move("mcmc", chain_name)
+                break
+            prelim_backend = HDFBackend(
+                backend.filename, name=chain_name, read_only=True
+            )
+            log_prob = numpy.concatenate(
+                (log_prob, prelim_backend.get_log_prob())
+            )
+            samples = numpy.concatenate((samples, prelim_backend.get_chain()))
+
+    return log_prob, samples
+
 
 def restart_sampling(backend, config):
     """Prepare the next round of sampling."""
 
-    log_prob = backend.get_log_prob()
+    backend_shape = backend.shape
+    log_prob, samples = prepare_restart(backend)
     _logger.info(
-        "Restarting sampling. Last step log-likelihood spread: %s.",
+        "Restarting sampling. Last step log-likelihood spread: %s. Choosing top"
+        "samples from %d.",
         repr(log_prob[-1].max() - log_prob[-1].min()),
+        log_prob.size,
     )
     ordered_indices = numpy.unique(log_prob, return_index=True)[1]
-    select_from = backend.shape[0]
+    select_from = backend_shape[0]
+
+    backend.reset(*backend_shape)
     while select_from <= ordered_indices.size:
         top_indices = numpy.random.choice(
-            ordered_indices[-select_from:], backend.shape[0]
+            ordered_indices[-select_from:], backend_shape[0]
         )
         _logger.debug(
             "Top indices (shape: %s): %s", top_indices.shape, top_indices
         )
         top_indices = numpy.unravel_index(top_indices, log_prob.shape)
-        initial_state = backend.get_chain()[top_indices]
+        initial_state = samples[top_indices]
         if walkers_independent(initial_state):
+            for pos_ind, pos in enumerate(initial_state):
+                save_initial_position(
+                    pos,
+                    backend.filename,
+                    nwalkers=backend_shape[0],
+                    index=pos_ind,
+                )
             top_log_likelihood = log_prob[top_indices]
             log_likelihood_spread = (
                 top_log_likelihood.max() - top_log_likelihood.min()
             )
-            if log_likelihood_spread < config.restart_log_likelihood_range:
-                _logger.info(
-                    "Starting final sampling from random subset of the top %d "
-                    "samples. Log-likelihood spread %s (within %s).",
-                    select_from,
-                    repr(log_likelihood_spread),
-                    repr(config.restart_log_likelihood_range),
-                )
-
-                backend_shape = backend.shape
-                with h5py.File(backend.filename, "r+") as samples_f:
-                    group_name = "mcmc"
-                    samples_f.move("mcmc", "prelim_mcmc")
-                backend.reset(*backend_shape)
-
-                for pos_ind, pos in enumerate(initial_state):
-                    save_initial_position(
-                        pos,
-                        backend.filename,
-                        nwalkers=backend.shape[0],
-                        index=pos_ind,
-                    )
-                return backend, initial_state, True
+            final = log_likelihood_spread < config.restart_log_likelihood_range
             _logger.info(
-                "Random subset of top %d samples log-likelihood spread "
-                "(%s) > %s. Continuing preliminary MCMC.",
+                "Starting %s sampling from random subset of the top %d "
+                "samples. Log-likelihood spread %s (%swithin %s).",
+                'final' if final else 'preliminary',
                 select_from,
                 repr(log_likelihood_spread),
+                '' if final else 'not ',
                 repr(config.restart_log_likelihood_range),
             )
-            return backend, None, False
 
-    _logger.warning("Failed to find a set of independent walkers. Continuing "
-                    "preliminary MCMC.")
+            return backend, initial_state, final
+        select_from += 1
+
+    _logger.warning(
+        "Failed to find a set of independent walkers. Continuing "
+        "preliminary MCMC."
+    )
     return backend, None, False
 
 
@@ -313,7 +330,8 @@ def main(config):
                     if final_run
                     else (
                         (int(backend.iteration / config.restart_steps) + 1)
-                        * config.restart_steps - backend.iteration
+                        * config.restart_steps
+                        - backend.iteration
                     )
                 ),
             )

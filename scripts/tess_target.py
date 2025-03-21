@@ -5,7 +5,8 @@ import logging
 from matplotlib import pyplot, colormaps
 import numpy
 from astropy.timeseries import BoxLeastSquares
-#from foldedleastsquares import transitleastsquares, transit_mask
+
+# from foldedleastsquares import transitleastsquares, transit_mask
 
 from download_lcs import get_astroquery as download_lcs
 
@@ -66,7 +67,7 @@ class TESSTarget:
         "rp": 0.1,
         "a": 11.0,
         "b": 0.0,
-        #"transit_template": "grazing",
+        # "transit_template": "grazing",
     }
 
     def _get_lc_format(self, sector, header, provenance):
@@ -115,11 +116,13 @@ class TESSTarget:
                 ("time", ">f8"),
                 ("flux", ">f4"),
                 ("flux_err", ">f4"),
+                ("good", "bool"),
             ],
         )
         formatted_lc["time"] = observed_lc["TIME"]
         formatted_lc["flux"] = observed_lc[flux_columns[0]]
         formatted_lc["flux_err"] = observed_lc[flux_columns[1]]
+        formatted_lc["good"] = True
         return formatted_lc, {
             "exptime": exptime,
             "sector": sector,
@@ -430,10 +433,12 @@ class TESSTarget:
                 formatted_lc, formatted_header = self._format_lc(
                     sector, header, provenance, observed_lc
                 )
-                self._time_span[0] = min(formatted_lc["time"].min(),
-                                         self._time_span[0])
-                self._time_span[1] = max(formatted_lc["time"].max(),
-                                         self._time_span[1])
+                self._time_span[0] = min(
+                    formatted_lc["time"].min(), self._time_span[0]
+                )
+                self._time_span[1] = max(
+                    formatted_lc["time"].max(), self._time_span[1]
+                )
                 if formatted_lc is None:
                     continue
 
@@ -479,7 +484,7 @@ class TESSTarget:
             self.plot_best_fit_bls(combined_lc, best_fit_bls, plot)
         return best_fit_bls
 
-    #def fit_tls(self, nthreads):
+    # def fit_tls(self, nthreads):
     #    """
     #    Use the Hippke & Heller (2019) TLS to find eclipses. Useless!!!
 
@@ -558,7 +563,7 @@ if __name__ == "__main__":
         tls_results["model_folded_model"],
         "-r",
     )
-    pyplot.axvline(x=0.5 - tls_results['duration'] / 2)
-    pyplot.axvline(x=0.5 + tls_results['duration'] / 2)
+    pyplot.axvline(x=0.5 - tls_results["duration"] / 2)
+    pyplot.axvline(x=0.5 + tls_results["duration"] / 2)
 
     pyplot.show()
