@@ -2,11 +2,17 @@
     <ul>
         {% for ticid in list %}
         <li
-                {% if ticid == displayed_ticid %}
+                {% if ticid.0 == displayed_ticid %}
                 class="displayed"
                 {% endif %}
             >
-            <a href="{% url 'jump' displayed_ticid=ticid %}"> TIC ID: {{ ticid }} </a> 
+            <a href="{% url 'jump' displayed_ticid=ticid.0 %}" 
+               {% if ticid.1 == 1 %}
+               class="rendered"
+               {% else %}
+               not-rendered
+               {% endif %}> TIC ID: {{ ticid }} 
+            </a> 
         </li>
         {% endfor %}
     </ul>

@@ -77,8 +77,8 @@ class TICIdSelectorView(View):
 
             # pylint: enable=no-member
             context = {
-                state: db_session.scalars(
-                    select(SelectTICIDs.id)
+                state: db_session.execute(
+                    select(SelectTICIDs.id, SelectTICIDs.rendered)
                     .filter_by(flag=flag)
                     .order_by(SelectTICIDs.id)
                 ).all()
