@@ -72,6 +72,8 @@ class TICIdSelectorView(View):
                     ).group_by(SelectTICIDs.rendered)
                 ).all()
             )
+            if 1 not in rendered_progress:
+                rendered_progress[1] = 0
 
             # pylint: enable=no-member
             context = {
@@ -86,23 +88,35 @@ class TICIdSelectorView(View):
                     ("discarded", "-1"),
                 ]
             }
-            context["render_progress"] = (
-                rendered_progress.get(1, 0),
-                rendered_progress[0] + rendered_progress.get(1, 0),
-            )
 
         if displayed_ticid is None:
             displayed_ticid = context["pending"][0]
         context["displayed_ticid"] = displayed_ticid
+        plot_fname = path.join(
+            self.render_root, self.tablename, f"tess{displayed_ticid}.png"
+        )
+        new_plot = not path.exists(plot_fname)
         # False positive
         # pylint: disable=not-callable
-        context["image"] = self.plot(
-            displayed_ticid,
-            fname=None,
-            # fname=path.join(
-            #    self.render_root, self.tablename, f"tess{displayed_ticid}.png"
-            # ),
-        )
+        context["image"] = self.plot(displayed_ticid, fname=plot_fname)
         # pylint: enable=not-callable
+
+        if new_plot:
+            # False positivie
+            # pylint: disable=no-member
+            with Session.begin() as db_session:
+                # pylint: enable=no-member
+                db_session.execute(
+                    update(SelectTICIDs)
+                    .filter_by(id=displayed_ticid)
+                    .values(rendered=1)
+                )
+                rendered_progress[1] += 1
+                rendered_progress[0] -= 1
+
+        context["render_progress"] = (
+            rendered_progress[1],
+            rendered_progress[0] + rendered_progress[1],
+        )
 
         return render(request, "select_ticids/index.html", context)

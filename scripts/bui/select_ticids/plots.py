@@ -3,7 +3,8 @@
 from collections import namedtuple
 from base64 import b64encode
 from io import BytesIO
-from os import path
+from os import path, makedirs
+from functools import partial
 
 from multiprocessing import Pool
 import matplotlib
@@ -17,9 +18,10 @@ from light_curve_plotter import LightCurvePlotter
 from bui.db_interface import Session
 
 # pylint: enable=import-error
-from .data_model import get_ticid_select_table
+from bui.select_ticids.data_model import get_ticid_select_table
 
-matplotlib.use('Agg')
+matplotlib.use("Agg")
+
 
 def lightcurve(tic_id, fname=None):
     """Plot the lightcurves available for the given TIC."""
@@ -31,6 +33,8 @@ def lightcurve(tic_id, fname=None):
         destination = (png_stream, "png")
     else:
         destination = fname
+        if not path.exists(path.dirname(fname)):
+            makedirs(path.dirname(fname))
     # pylint: enable=possibly-used-before-assignment
     if fname is None or not path.exists(fname):
         # pylint: enable=possibly-used-before-assignment
@@ -56,23 +60,32 @@ def lightcurve(tic_id, fname=None):
         return b64encode(f.read()).decode("utf-8")
 
 
-def render_all_plots(tablename, render_dir, num_parallel):
-    """Render the lightcurves plots for a list of TIC IDs for faster review."""
+def render_one(tic_id, tablename, render_dir):
+    """Render the lightcurve for a single TIC ID."""
 
-    def render_one(tic_id):
-        """Render the lightcurve for a single TIC ID."""
+    # That's the whole point
+    # pylint: disable=no-member
+    # This is actually a class
+    # pylint: disable=invalid-name
+    SelectTICIDs = get_ticid_select_table(tablename)
+    # pylint: enable=no-member
+    # pylint: enable=invalid-name
 
+    try:
         lightcurve(tic_id, path.join(render_dir, f"tess{tic_id}.png"))
         # False positivie
         # pylint: disable=no-member
         with Session.begin() as db_session:
             # pylint: enable=no-member
             db_session.execute(
-                update(SelectTICIDs)
-                .filter_by(id=tic_id)
-                .values(rendered=1)
+                update(SelectTICIDs).filter_by(id=tic_id).values(rendered=1)
             )
+    except:
+        pass
 
+
+def render_all_plots(tablename, render_dir, num_parallel):
+    """Render the lightcurves plots for a list of TIC IDs for faster review."""
 
     # That's the whole point
     # pylint: disable=no-member
@@ -86,11 +99,16 @@ def render_all_plots(tablename, render_dir, num_parallel):
     # pylint: disable=no-member
     with Session.begin() as db_session:
         # pylint: enable=no-member
-        tic_id_list = db_session.execute(select(SelectTICIDs.id)).scalars()
+        tic_id_list = list(
+            db_session.execute(select(SelectTICIDs.id)).scalars()
+        )
 
     with Pool(num_parallel) as pool:
-        pool.map(render_one, tic_id_list)
+        pool.map(
+            partial(render_one, tablename=tablename, render_dir=render_dir),
+            tic_id_list,
+        )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     render_all_plots("prsa_ebs", "/mnt/md2/TESS_EBs/prsa_ebs", 16)
