@@ -1,13 +1,3 @@
-.ticid_lists {
-    display: flex;
-    flex-direction: column;
-    width: 20em;
-    height: 90vh;
-    flex-grow: 0;
-    position: relative;
-    oveflow: hidden
-}
-
 .selected:before {
     content: "Selected";
     position: absolute;
