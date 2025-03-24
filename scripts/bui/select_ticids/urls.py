@@ -12,6 +12,13 @@ urlpatterns = [
         name="index",
     ),
     path(
+        "render",
+        TICIdSelectorView.as_view(
+            tablename="prsa_ebs", plot=plots.lightcurve
+        ),
+        name="index",
+    ),
+    path(
         "<int:displayed_ticid>/",
         TICIdSelectorView.as_view(
             tablename="prsa_ebs", plot=plots.lightcurve

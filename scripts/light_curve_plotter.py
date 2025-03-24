@@ -245,6 +245,7 @@ class LightCurvePlotter:
     def plot_zoomed_bls(cls, zoom, lightcurve, model_lcs, bls):
         """Create zoomed plot on BLS detected eclipses."""
 
+        print(f"Creating zoom {zoom} LC plot")
         if zoom == "default":
             period = bls["period"][0]
             time_reference = bls["transit_time"]
@@ -256,6 +257,7 @@ class LightCurvePlotter:
             if zoom == "even":
                 time_reference = bls["transit_time"]
             else:
+                print(f"Zoom: {zoom}")
                 assert zoom == "odd"
                 time_reference = bls["transit_time"] + bls["period"][0]
         mask = get_bls_eclipse_mask(bls, lightcurve, zoom)
@@ -280,9 +282,9 @@ class LightCurvePlotter:
             yerr=tess_target.sed[1],
             **self.sed_plot_config,
         )
-        for bnry in binaries:
+        for bnry in binaries or ():
             pyplot.plot(plot_x, bnry.absmag, **self.model_sed_plot_config)
-        pyplot.xlabel("Wavelength [$\mu$]")
+        pyplot.xlabel(r"Wavelength [$\mu$]")
         pyplot.ylabel("Absolute magnitude")
 
     def plot_diff(self, mode, lightcurve, model_lcs):
@@ -379,7 +381,7 @@ class LightCurvePlotter:
             None
         """
 
-        title_pre = f"TIC {self._config.tic_id}\n"
+        title_pre = f"TIC {tic_id}\n"
         if self._full_log_likelihood:
             tess_target = LogLikelihood(tic_id)
             if binaries:

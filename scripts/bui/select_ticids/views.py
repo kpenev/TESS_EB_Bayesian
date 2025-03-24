@@ -6,7 +6,7 @@ from os import path
 sys.path.append(path.dirname(path.dirname(__file__)))
 
 # pylint: disable=wrong-import-position
-from sqlalchemy import select, update
+from sqlalchemy import select, update, func
 from django.shortcuts import render
 from django.views import View
 
@@ -24,14 +24,18 @@ class TICIdSelectorView(View):
 
     tablename = None
     plot = None
+    render_root = "/mnt/md2/TESS_EBs/"
 
     def get(self, request, displayed_ticid=None, decision=None):
         """Allow user to review LCs from Villanova catalog and select some."""
 
         # That's the whole point
         # pylint: disable=no-member
+        # This is actually a class
+        # pylint: disable=invalid-name
         SelectTICIDs = get_ticid_select_table(self.tablename)
         # pylint: enable=no-member
+        # pylint: enable=invalid-name
 
         # False positive
         # pylint: disable=no-member
@@ -57,6 +61,17 @@ class TICIdSelectorView(View):
                     .where(SelectTICIDs.id > displayed_ticid)
                     .order_by(SelectTICIDs.id)
                 )
+            rendered_progress = dict(
+                db_session.execute(
+                    select(
+                        # False positive
+                        # pylint: disable=not-callable
+                        SelectTICIDs.rendered,
+                        func.count(SelectTICIDs.id),
+                        # pylint: enable=not-callable
+                    ).group_by(SelectTICIDs.rendered)
+                ).all()
+            )
 
             # pylint: enable=no-member
             context = {
@@ -71,9 +86,23 @@ class TICIdSelectorView(View):
                     ("discarded", "-1"),
                 ]
             }
+            context["render_progress"] = (
+                rendered_progress.get(1, 0),
+                rendered_progress[0] + rendered_progress.get(1, 0),
+            )
+
         if displayed_ticid is None:
             displayed_ticid = context["pending"][0]
         context["displayed_ticid"] = displayed_ticid
-        context['image'] = self.plot(displayed_ticid)
+        # False positive
+        # pylint: disable=not-callable
+        context["image"] = self.plot(
+            displayed_ticid,
+            fname=None,
+            # fname=path.join(
+            #    self.render_root, self.tablename, f"tess{displayed_ticid}.png"
+            # ),
+        )
+        # pylint: enable=not-callable
 
         return render(request, "select_ticids/index.html", context)

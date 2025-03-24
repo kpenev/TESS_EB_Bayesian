@@ -6,7 +6,9 @@
     <head>
         <meta charset="utf-8">
         <link rel="stylesheet" 
-              href="{% static 'select_ticids/css/top_navbar.css' %}">
+              href="{% static 'select_ticids/css/main.css' %}">
+        <link rel="stylesheet" 
+              href="{% static 'select_ticids/css/tic_lists.css' %}">
         <title>Select TIC IDs</title>
     </head>
     <body>
@@ -15,6 +17,14 @@
             <li><a href="{% url 'decision' decision="discard" displayed_ticid=displayed_ticid %}">Discard</a></li>
             <li><a href="{% url 'decision' decision="skip" displayed_ticid=displayed_ticid %}">Skip</a></li>
         </ul>
+        <div class="render_progress">
+            <span style="width: {% widthratio render_progress.0 render_progress.1 100 %}%;">
+                Render progress: {{ render_progress.0 }}/{{ render_progress.1 }}
+            </span>
+            <div class="progress-success" 
+                 style="width: {% widthratio render_progress.0 render_progress.1 100 %}%">
+            </div>
+        </div>
         <div class="main">
             <div class="img-parent"> 
                 <img id="main-image" src="data:image/png;base64,{{image}}"></img>

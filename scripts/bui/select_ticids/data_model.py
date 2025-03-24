@@ -9,6 +9,7 @@ class SelectTICIDBase(DeclarativeBase):
     id = Column(Integer, primary_key=True, doc="The TIC ID to consider.")
 
     flag = Column(Integer, doc="-1 - rejected, 0 - pending, 1 - selected")
+    rendered = Column(Integer, doc="1 - rendered, 0 - not")
 
     timestamp = Column(
         TIMESTAMP,

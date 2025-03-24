@@ -48,46 +48,4 @@ ul.navbar  {
     oveflow: hidden
 }
 
-.selected:before {
-    content: "Selected";
-    position: absolute;
-    left: 30%;
-    font-weight: bold;
-    background-color: white;
-}
 
-.selected {
-    flex: 1 1 100px;
-    overflow: scroll;
-}
-
-.pending:before {
-    content: "Pending";
-    position: absolute;
-    left: 30%;
-    font-weight: bold;
-    background-color: white;
-}
-
-.pending {
-    flex: 3 3 100px;
-    overflow: scroll;
-}
-
-.discarded:before {
-    content: "Discarded";
-    position: absolute;
-    left: 30%;
-    font-weight: bold;
-    background-color: white;
-}
-
-.discarded {
-    flex: 1 1 100px;
-    overflow: scroll;
-}
-
-.displayed {
-    font-weight: bold;
-    background-color: red;
-}

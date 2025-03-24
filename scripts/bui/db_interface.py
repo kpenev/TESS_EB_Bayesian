@@ -32,4 +32,4 @@ if __name__ == "__main__":
         with fits.open(prsa_ebs, 'readonly') as prsa:
             data = prsa[1].data
             for ticid in data['TIC'][data['m_TIC'] == 1]:
-                db_session.add(SelectTICIDs(id=int(ticid), flag=0))
+                db_session.add(SelectTICIDs(id=int(ticid), flag=0, rendered=0))
