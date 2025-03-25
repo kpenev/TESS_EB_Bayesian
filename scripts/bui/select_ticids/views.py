@@ -90,7 +90,7 @@ class TICIdSelectorView(View):
             }
 
         if displayed_ticid is None:
-            displayed_ticid = context["pending"][0]
+            displayed_ticid = context["pending"][0][0]
         context["displayed_ticid"] = displayed_ticid
         plot_fname = path.join(
             self.render_root, self.tablename, f"tess{displayed_ticid}.png"
