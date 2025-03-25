@@ -78,7 +78,7 @@ class TESSTarget:
                 if existing_header["sector"] == sector:
                     return None, None
 
-            return ("KSPSAP_FLUX", "KSPSAP_FLUX_ERR"), header["TIMEDEL"]
+            return ("SAP_FLUX", "KSPSAP_FLUX_ERR"), header["TIMEDEL"]
 
         assert header["TIMEPIXR"] == 0.5
         # Iterable needs to be modified
@@ -422,7 +422,7 @@ class TESSTarget:
 
         lcs = {
             provenance: download_lcs(tic_id, "all", provenance=provenance)
-            for provenance in ["SPOC"]  # , "QLP"]
+            for provenance in ["SPOC", "QLP"]
         }
 
         self._lcs = []
@@ -433,6 +433,8 @@ class TESSTarget:
                 formatted_lc, formatted_header = self._format_lc(
                     sector, header, provenance, observed_lc
                 )
+                if formatted_lc is None:
+                    continue
                 self._time_span[0] = min(
                     formatted_lc["time"].min(), self._time_span[0]
                 )

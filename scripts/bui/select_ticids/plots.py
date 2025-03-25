@@ -5,6 +5,7 @@ from base64 import b64encode
 from io import BytesIO
 from os import path, makedirs
 from functools import partial
+from traceback import print_exc
 
 from multiprocessing import Pool
 import matplotlib
@@ -81,7 +82,7 @@ def render_one(tic_id, tablename, render_dir):
                 update(SelectTICIDs).filter_by(id=tic_id).values(rendered=1)
             )
     except:
-        pass
+        print_exc()
 
 
 def render_all_plots(tablename, render_dir, num_parallel):
