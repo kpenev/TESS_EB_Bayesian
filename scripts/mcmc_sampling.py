@@ -26,7 +26,7 @@ from find_starting_positions import FindStartingPositions
 
 _logger = logging.getLogger(__name__)
 
-_default_logging_format = (
+default_logging_format = (
     "%(levelname)s %(asctime)s %(name)s: %(message)s | "
     "%(pathname)s.%(funcName)s:%(lineno)d"
 )
@@ -175,7 +175,7 @@ def parse_command_line():
         "--logging-message-format",
         "--logging-format",
         "--log-fmt",
-        default=_default_logging_format,
+        default=default_logging_format,
         help="How to format logging messages. See python logging module "
         "documentation for details.",
     )
