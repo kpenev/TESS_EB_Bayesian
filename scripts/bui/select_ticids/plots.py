@@ -6,12 +6,14 @@ from io import BytesIO
 from os import path, makedirs
 from functools import partial
 from traceback import print_exc
+from time import sleep
 
 from multiprocessing import Pool
 import matplotlib
 from matplotlib.pyplot import savefig
 from sqlalchemy import select, update
 from configargparse import ArgumentParser, DefaultsFormatter
+from numpy.random import randint, seed
 
 from general_purpose_python_modules.multiprocessing_util import (
     setup_process_map,
@@ -71,6 +73,7 @@ def lightcurve(tic_id, fname=None):
 def render_one(tic_id, tablename, render_dir):
     """Render the lightcurve for a single TIC ID."""
 
+    seed()
     # That's the whole point
     # pylint: disable=no-member
     # This is actually a class
@@ -80,7 +83,14 @@ def render_one(tic_id, tablename, render_dir):
     # pylint: enable=invalid-name
 
     try:
-        lightcurve(tic_id, path.join(render_dir, f"tess{tic_id}.png"))
+        while True:
+            try:
+                lightcurve(tic_id, path.join(render_dir, f"tess{tic_id}.png"))
+                break
+            except (MemoryError, OSError):
+                wait = randint(60)
+                print(f'Memory error. Waiting {wait}s and retrying!')
+                sleep(wait)
         # False positivie
         # pylint: disable=no-member
         with Session.begin() as db_session:

@@ -2,6 +2,7 @@
 
 import logging
 from functools import partial
+from time import sleep
 
 import numpy
 from scipy.stats import norm, truncnorm
@@ -158,12 +159,6 @@ class LogLikelihood(TESSTarget):
             )
 
     @property
-    def tic_id(self):
-        """The TIC identifier of the EB being modeled."""
-
-        return self._tic_id
-
-    @property
     def best_fit_bls(self):
         """The best fit BLS parameters."""
 
@@ -201,7 +196,6 @@ class LogLikelihood(TESSTarget):
         """Prepare to evaluate the log-likelihood for the given TIC ID."""
 
         super().__init__(tic_id)
-        self._tic_id = tic_id
 
         # https://outerspace.stsci.edu/display/TESS/2.0+-+Data+Product+Overview#id-2.0-DataProductOverview-Table:CadenceQualityFlags
 

@@ -5,9 +5,12 @@
 from os import path
 from glob import glob
 import re
+from traceback import print_exc
+from time import sleep
 
 from matplotlib import pyplot
 from astroquery.mast import Observations
+from requests import HTTPError
 
 # from astroquery.exceptions import InvalidQueryError
 from astropy.io import fits
@@ -82,76 +85,83 @@ def get_astroquery(tic, sector, provenance="SPOC", plot=False):
             for fits_fname in fits_list
         ]
     else:
-        # False positive
-        # pylint: disable=no-member
-        objects = Observations.query_criteria(
-            target_name=tic, project="TESS", provenance_name=provenance
-        )
-        # pylint: enable=no-member
-
-        print("\tFound %d objects:\n" % len(objects) + repr(objects))
-
-        selection = numpy.logical_and(
-            objects["obs_collection"]
-            == ("TESS" if provenance == "SPOC" else "HLSP"),
-            objects["dataproduct_type"] == "timeseries",
-        )
-        selection = numpy.logical_and(selection, objects["project"] == "TESS")
-
-        print(
-            "\tAvailable sectors: "
-            + repr(objects["sequence_number"][selection])
-        )
-
-        if sector != "all":
-            selection = numpy.logical_and(
-                selection, objects["sequence_number"] == sector
-            )
-            print(
-                "\tSelected %d objects from sectors:\n" % selection.sum()
-                + repr(objects[selection]["sequence_number"])
-            )
-
-        # False positive
-        # pylint: disable=bad-string-format-type
-        print("\tSelected %d/%d objects" % (selection.sum(), len(objects)))
-        # pylint: enable=bad-string-format-type
-
-        fits_list = []
-        for get_object in objects[selection]:
-            # False positive
-            # pylint: disable=no-member
-            products = Observations.get_product_list(get_object)
-            # pylint: enable=no-member
-
-            print("\tFound %d products:" + repr(products))
-
-            product_selection = numpy.logical_and(
-                products["productType"] == "SCIENCE",
-                products["description"]
-                == ("Light curves" if provenance == "SPOC" else "FITS"),
-            )
-            if product_selection.sum() == 0:
-                continue
-            if provenance == "SPOC" and sector != "all":
-                if product_selection.sum() != 1:
-                    print(
-                        "Ambiguous products:\n"
-                        + repr(products[product_selection])
-                    )
-                assert product_selection.sum() == 1
-            download = Observations.download_products(
-                products[product_selection]
-            ).to_pandas()
-            print(f"Download: type={type(download)}: {download!r}")
-            assert len(download["Local Path"]) == 1
-            print(f"Local path: {download['Local Path']}")
-            fits_list.append(
-                (
-                    download["Local Path"].iloc[0],
-                    get_object["sequence_number"],
+        while True:
+            try:
+                # False positive
+                # pylint: disable=no-member
+                objects = Observations.query_criteria(
+                    target_name=tic, project="TESS", provenance_name=provenance
                 )
-            )
+                # pylint: enable=no-member
+
+                print("\tFound %d objects:\n" % len(objects) + repr(objects))
+
+                selection = numpy.logical_and(
+                    objects["obs_collection"]
+                    == ("TESS" if provenance == "SPOC" else "HLSP"),
+                    objects["dataproduct_type"] == "timeseries",
+                )
+                selection = numpy.logical_and(selection, objects["project"] == "TESS")
+
+                print(
+                    "\tAvailable sectors: "
+                    + repr(objects["sequence_number"][selection])
+                )
+
+                if sector != "all":
+                    selection = numpy.logical_and(
+                        selection, objects["sequence_number"] == sector
+                    )
+                    print(
+                        "\tSelected %d objects from sectors:\n" % selection.sum()
+                        + repr(objects[selection]["sequence_number"])
+                    )
+
+                # False positive
+                # pylint: disable=bad-string-format-type
+                print("\tSelected %d/%d objects" % (selection.sum(), len(objects)))
+                # pylint: enable=bad-string-format-type
+
+                fits_list = []
+                for get_object in objects[selection]:
+                    # False positive
+                    # pylint: disable=no-member
+                    products = Observations.get_product_list(get_object)
+                    # pylint: enable=no-member
+
+                    print("\tFound %d products:" + repr(products))
+
+                    product_selection = numpy.logical_and(
+                        products["productType"] == "SCIENCE",
+                        products["description"]
+                        == ("Light curves" if provenance == "SPOC" else "FITS"),
+                    )
+                    if product_selection.sum() == 0:
+                        continue
+                    if provenance == "SPOC" and sector != "all":
+                        if product_selection.sum() != 1:
+                            print(
+                                "Ambiguous products:\n"
+                                + repr(products[product_selection])
+                            )
+                        assert product_selection.sum() == 1
+                    download = Observations.download_products(
+                        products[product_selection]
+                    ).to_pandas()
+                    print(f"Download: type={type(download)}: {download!r}")
+                    assert len(download["Local Path"]) == 1
+                    print(f"Local path: {download['Local Path']}")
+                    fits_list.append(
+                        (
+                            download["Local Path"].iloc[0],
+                            get_object["sequence_number"],
+                        )
+                    )
+                break 
+            except HTTPError:
+                print_exc()
+                print('Retrying')
+                sleep(60)
 
     result = {}
     for fits_path, fits_sector in fits_list:

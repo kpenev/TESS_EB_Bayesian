@@ -6,7 +6,7 @@
 #SBATCH -o /scratch/05392/kpenev/output/TESS_EBs/render_output/@@JOBIND@@_slurm.out
 #SBATCH --mail-user=kxp174430@utdallas.edu
 #SBATCH --mail-type=all
-#SBATCH -t 24:00:00
+#SBATCH -t 12:00:00
 #SBATCH -p normal
 
 render() {
@@ -29,7 +29,7 @@ render() {
         ${source_dir}/bui/select_ticids/plots.py \
         --start ${start} \
         --count ${count} \
-        --num-parallel 128 \
+        --num-parallel 32 \
         --plot-dir ${plot_dir} \
         --std-out-err-fname \
         "${log_dir}/render_{table_name}_{start}_{count}_{now!s}_{pid:d}.outerr"\
@@ -41,7 +41,7 @@ render() {
         2>&1
 }
 
-source /home1/08402/vortebo/module_load_order.txt
+source ~/module_load_order.txt
 
 
 export PYTHONUNBUFFERED=1

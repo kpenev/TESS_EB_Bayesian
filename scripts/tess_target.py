@@ -78,7 +78,17 @@ class TESSTarget:
                 if existing_header["sector"] == sector:
                     return None, None
 
-            return ("SAP_FLUX", "KSPSAP_FLUX_ERR"), header["TIMEDEL"]
+            for err_col in ["KSPSAP_FLUX_ERR", "DET_FLUX_ERR"]:
+                if err_col in header.values():
+                    return ("SAP_FLUX", err_col), header["TIMEDEL"]
+            self._logger.critical(
+                "TIC %d, sector %d, %s lightcurve has no flux error "
+                "column.",
+                self._tic_id, 
+                sector, 
+                provenance, 
+            )
+            assert False
 
         assert header["TIMEPIXR"] == 0.5
         # Iterable needs to be modified
@@ -101,6 +111,16 @@ class TESSTarget:
         if exptime is None:
             assert flux_columns is None
             return None, None
+        for column in flux_columns:
+            if column not in observed_lc.columns.names:
+                self._logger.critical(
+                    "TIC %d, sector %d, %s lightcurve has no %s column.",
+                    self._tic_id, 
+                    sector, 
+                    provenance, 
+                    column
+                )
+
         usable = numpy.logical_and(
             numpy.isfinite(observed_lc[flux_columns[0]]),
             numpy.isfinite(observed_lc[flux_columns[1]]),
@@ -109,6 +129,15 @@ class TESSTarget:
             usable,
             numpy.logical_not(observed_lc["QUALITY"] & self._bad_mask),
         )
+        if not usable.any():
+            self._logger.warning(
+                "TIC %d, sector %d, %s lightcurve has 0/%d usable points.",
+                self._tic_id, 
+                sector, 
+                provenance, 
+                usable.size
+            )
+            return None, None
         observed_lc = observed_lc[usable]
         formatted_lc = numpy.empty(
             usable.sum(),
@@ -417,9 +446,16 @@ class TESSTarget:
             else:
                 pdf.savefig()
 
+    @property
+    def tic_id(self):
+        """The TIC identifier of the EB being modeled."""
+
+        return self._tic_id
+
     def __init__(self, tic_id):
         """Download and organize the lightcurves for the given TIC ID."""
 
+        self._tic_id = tic_id
         lcs = {
             provenance: download_lcs(tic_id, "all", provenance=provenance)
             for provenance in ["SPOC", "QLP"]

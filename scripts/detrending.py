@@ -20,13 +20,13 @@ def calc_moving_median(lightcurve, half_porb, mask, min_points=20):
     masked_flux = lightcurve["flux"][mask]
     for i, time in enumerate(lightcurve["time"]):
         min_t = time - half_porb
+        max_t = time + half_porb
         if min_t < lightcurve["time"][0]:
             left = 0
             right = numpy.searchsorted(
                 masked_time, lightcurve["time"][0] + 2 * half_porb
             )
         else:
-            max_t = time + half_porb
             if max_t > lightcurve["time"][-1]:
                 right = masked_time.size
                 left = numpy.searchsorted(
