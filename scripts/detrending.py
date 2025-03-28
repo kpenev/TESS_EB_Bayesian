@@ -36,10 +36,7 @@ def calc_moving_median(lightcurve, half_porb, mask, min_points=20):
                 left, right = numpy.searchsorted(masked_time, [min_t, max_t])
         window_flux = masked_flux[left:right]
         if window_flux.size < min_points:
-            raise RuntimeError(
-                f'Not enough points ({window_flux.size}) in window '
-                f'{min_t} < t < {max_t}'
-            )
+            return numpy.nan
         result[i] = numpy.median(window_flux)
     return result
 
@@ -88,6 +85,9 @@ def masked_detrend(lightcurve, exptime, log_likelihood, get_trend):
             half_porb,
             mask[start_index:end_index],
         )
+        if not numpy.isfinite(scaling):
+            good_mask[start_index:end_index] = False
+            continue
         print(
             f"Scaling ({lightcurve['time'][start_index]} < t < "
             f"{lightcurve['time'][end_index-1]}): {scaling!r}"

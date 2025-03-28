@@ -243,7 +243,7 @@ class LogLikelihood(TESSTarget):
             sed_sys=(-10, -1.5),
         )
 
-        assert self._best_fit_bls["period"][0] > self._range.per[0]
+        assert self._best_fit_bls["period"][0] > 2 * self._range.per[0]
 
         if detrend is not None:
             self._lcs = [
