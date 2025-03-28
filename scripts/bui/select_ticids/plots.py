@@ -103,6 +103,7 @@ def render_one(tic_id, tablename, render_dir):
     except:
         print_exc()
     # pylint: enable=bare-except
+    print('Finished rendering ', tic_id)
 
 
 def render_all_plots(config):
