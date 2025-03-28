@@ -247,7 +247,7 @@ class LogLikelihood(TESSTarget):
 
         if detrend is not None:
             self._lcs = [
-                (header, detrend(lightcurve, self))
+                (header, detrend(lightcurve, header['exptime'], self))
                 for header, lightcurve in self._lcs
             ]
 

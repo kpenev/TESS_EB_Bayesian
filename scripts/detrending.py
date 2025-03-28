@@ -44,14 +44,15 @@ def calc_moving_median(lightcurve, half_porb, mask, min_points=20):
     return result
 
 
-def masked_detrend(lightcurve, log_likelihood, get_trend):
+def masked_detrend(lightcurve, exptime, log_likelihood, get_trend):
     """Return the given lightcurve detrended after masking eclipses."""
 
     half_porb = log_likelihood.best_fit_bls["period"][0]
     gap_indices = (
         numpy.nonzero(
             lightcurve["time"][1:] - lightcurve["time"][:-1]
-            > 2 * log_likelihood.best_fit_bls["duration"]
+            > max(2 * log_likelihood.best_fit_bls["duration"],
+                  30 * exptime)
         )[0]
         + 1
     )
