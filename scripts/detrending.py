@@ -78,7 +78,11 @@ def masked_detrend(lightcurve, exptime, log_likelihood, get_trend):
 
     detrended = numpy.copy(lightcurve)
     start_index = 0
+    good_mask = numpy.ones(detrended.size, dtype=bool)
     for end_index in gap_indices:
+        if end_index - start_index < 20:
+            good_mask[start_index:end_index] = False
+            continue
         scaling = get_trend(
             lightcurve[start_index:end_index],
             half_porb,
@@ -92,7 +96,7 @@ def masked_detrend(lightcurve, exptime, log_likelihood, get_trend):
         detrended[start_index:end_index]["flux_err"] /= scaling
         start_index = end_index
 
-    return detrended
+    return detrended[good_mask]
 
 
 def test():
