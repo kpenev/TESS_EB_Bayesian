@@ -90,7 +90,6 @@ def parse_command_line():
 def get_ticid_list(tablename):
     """Return the list of TIC IDs to sample."""
 
-    return range(17)
     # pylint: disable=no-member
     # This is actually a class
     # pylint: disable=invalid-name
