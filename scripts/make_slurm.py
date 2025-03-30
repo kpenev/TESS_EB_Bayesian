@@ -100,7 +100,7 @@ def get_ticid_list(tablename):
         # pylint: enable=no-member
         return list(
             db_session.scalars(
-                select(SelectTICIDs.tic_id).filter_by(flag=1)
+                select(SelectTICIDs.id).filter_by(flag=1)
             ).all()
         )
 
