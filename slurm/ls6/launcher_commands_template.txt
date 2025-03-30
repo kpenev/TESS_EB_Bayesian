@@ -1,0 +1,1 @@
+echo -e '=========\n' "PWD=$(pwd)\n" "ENVIRONMENT:\n$(printenv)"

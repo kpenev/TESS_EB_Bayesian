@@ -23,10 +23,10 @@ jktebob = {
 }
 samples = path.join(results_dir, "tess{tic_id:d}_samples.h5")
 
-slurm_template = path.join(
-    path.dirname(data_dir), "slurm", "{hpc}_template.slurm"
+slurm_fname = path.join(
+    path.dirname(data_dir), "slurm", "{hpc}", "{mode}_{jobid}.slurm"
 )
 
-slurm_fname = path.join(
-    path.dirname(data_dir), "slurm", "{hpc}", "{worker}.slurm"
+launcher_fname = path.join(
+    path.dirname(data_dir), "slurm", "{hpc}", "launcher_commands_{jobid}.txt"
 )
