@@ -15,5 +15,4 @@ export PYTHONPATH=$PYTHONPATH:${source_dir}:~/projects/git
 
 cd ~/projects/git/TESS_EB_Bayesian/scripts
 python3 -c \
-    'import pylauncher pylauncher.ClassicLauncher("@@LAUNCHER_CMD@@", cores=@@NUM_PARALLEL@@, debug="host+job")'
-
+    'import pylauncher; pylauncher.ClassicLauncher("@@LAUNCHER_CMD@@", cores=@@NUM_PARALLEL@@, debug="host+job")'
