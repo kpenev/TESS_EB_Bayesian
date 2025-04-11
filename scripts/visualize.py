@@ -16,6 +16,10 @@ from asteval import Interpreter
 
 from general_purpose_python_modules.visuals import make_corner_plot
 from general_purpose_python_modules.emcee_util import load_initial_positions
+from general_purpose_python_modules.emcee_quantile_convergence import (
+    find_emcee_quantiles,
+)
+from autowisp import Evaluator
 
 from hacked_emcee_hdf5_backend import HDFBackend
 from sample_params import SampleParams
@@ -115,6 +119,13 @@ def parse_command_line():
         "selected only among surviving samples.",
     )
     parser.add_argument(
+        "--convergence-plot",
+        help="If specified, a figure is created showing comparison between the "
+        "chain length to Raftery-Lewis burn-in estimate and/or quantile "
+        "precision estimate for either the directly sampled quantities or those"
+        " specified in ``--chain-expression``.",
+    )
+    parser.add_argument(
         "--sample-condition",
         default=None,
         help="Condition to impose on the samples, excluding those which do not "
@@ -135,7 +146,7 @@ def parse_command_line():
         help="The y range for plotting expressions.",
     )
     parser.add_argument(
-        "--corner-plot-expression",
+        "--chain-expression",
         default=[],
         action="append",
         help="Add an expression to include in the corner plot. If at least one "
@@ -176,6 +187,27 @@ def parse_command_line():
         action="store_true",
         help="By default model is plotted on top of the data. If this flag is "
         "passed, the data is plotted on top of the model.",
+    )
+    parser.add_argument(
+        "--burnin-tolerance",
+        type=float,
+        default=1e-5,
+        help="Tolerance for the Raftery-Lewis burn-in estimate.",
+    )
+    parser.add_argument(
+        "--quantile-variance-realizations",
+        type=int,
+        default=100000,
+        help="The number of realizations to use for the Raftery-Lewis variance "
+        "estimate for the quantiles.",
+    )
+    parser.add_argument(
+        "--diagnostic-quantiles",
+        type=float,
+        nargs="+",
+        default=numpy.linspace(0.1, 0.9, 9),
+        help="The quantiles at which to use for the Raftery-Lewis diagnostic to"
+        " determine convergence.",
     )
 
     result = parser.parse_args()
@@ -243,16 +275,15 @@ class MovieMaker:
         self._frame_ind += 1
 
 
-def create_corner_plot(plot_data, config):
-    """Create and save a corner plot."""
+def get_chain_expressions(plot_data, chain_expressions):
+    """Evaluate the chain expressions specified on the command line."""
 
     if "selected" in plot_data:
         plot_data = plot_data[plot_data["selected"]]
-    if config.corner_plot_expression:
-        evaluate = Interpreter(user_symbols=plot_data)
+    if chain_expressions:
+        evaluate = Evaluator(plot_data)
         split_expressions = [
-            expression.split("=")
-            for expression in config.corner_plot_expression
+            expression.split("=") for expression in chain_expressions
         ]
         plot_data = pandas.DataFrame(
             {
@@ -260,14 +291,58 @@ def create_corner_plot(plot_data, config):
                 for name, expression in split_expressions
             }
         )
+    return plot_data
+
+
+def create_corner_plot(plot_data, config):
+    """Create and save a corner plot."""
+
+    plot_data = get_chain_expressions(plot_data, config.chain_expression)
     make_corner_plot(
         plot_data,
         corner_plot_fname=config.corner_plot_fname,
         plot_contours=False,
         bins=30,
+        labelpad=0.08,
     )
     pyplot.cla()
     pyplot.clf()
+
+
+def create_convergence_plot(plot_data, config, num_walkers):
+    """Create a figure to gauge convergence of the chain per Raftery-Lewis."""
+
+    plot_data = get_chain_expressions(plot_data, config.chain_expression)
+    num_steps = plot_data.shape[0] // num_walkers
+    assert num_walkers * num_steps == plot_data.shape[0]
+
+    quantile_height = 2 / 3 / len(plot_data.columns)
+    quantile_offset = 1 / 6
+    y_pos = numpy.arange(
+        [
+            quantile_ind + quantile_offset + quantile_height * sub_quantile_ind
+            for quantile_ind in range(len(plot_data.columns))
+            for sub_quantile_ind in range(len(config.diagnostic_quantiles))
+        ]
+    )
+    burnin = numpy.empty(y_pos.size, dtype=float)
+    burnin_ind = 0
+    for column in plot_data.columns:
+        for cdf_value in config.diagnostic_quantiles:
+            quantile_info = find_emcee_quantiles(
+                plot_data[column].values.reshape(num_steps, num_walkers),
+                cdf_value,
+                config.burnin_tolerance,
+                config.quantile_variance_realizations,
+                min(100, num_steps),
+            )
+            burnin[burnin_ind] = quantile_info[-1]
+            burnin_ind += 1
+
+    pyplot.axvspan(0, num_steps, zorder=10)
+    pyplot.barh(y_pos, burnin, height=quantile_height, align="edge", zorder=20)
+    pyplot.yticks(0.5 + numpy.arange(len(plot_data.columns)), plot_data.columns)
+    pyplot.savefig(config.convergence_plot)
 
 
 def create_expressions_plot(plot_data, config, num_walkers=None):
