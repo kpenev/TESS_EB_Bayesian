@@ -6,7 +6,7 @@
                 class="displayed"
                 {% endif %}
             >
-            <a href="{% url 'jump' displayed_ticid=ticid.0 %}" 
+            <a href="{% url review|add:'_jump' displayed_ticid=ticid.0 %}" 
                {% if ticid.1 == 1 %}
                class="rendered"
                {% else %}

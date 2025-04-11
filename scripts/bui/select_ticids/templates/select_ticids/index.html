@@ -15,9 +15,9 @@
     </head>
     <body>
         <ul class="navbar">
-            <li><a href="{% url 'decision' decision="select" displayed_ticid=displayed_ticid %}">Select</a></li>
-            <li><a href="{% url 'decision' decision="discard" displayed_ticid=displayed_ticid %}">Discard</a></li>
-            <li><a href="{% url 'decision' decision="skip" displayed_ticid=displayed_ticid %}">Skip</a></li>
+            <li><a href="{% url review|add:'_decision' decision="select" displayed_ticid=displayed_ticid %}">Select</a></li>
+            <li><a href="{% url review|add:'_decision' decision="discard" displayed_ticid=displayed_ticid %}">Discard</a></li>
+            <li><a href="{% url review|add:'_decision' decision="skip" displayed_ticid=displayed_ticid %}">Skip</a></li>
         </ul>
         <div id="progress-with-label">
             <span style="width: {% widthratio render_progress.0 render_progress.1 100 %}%;">

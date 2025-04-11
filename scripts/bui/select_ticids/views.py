@@ -22,9 +22,11 @@ from .data_model import get_ticid_select_table
 class TICIdSelectorView(View):
     """Base for views that displays plots per TIC and allows selecting some."""
 
+    reviewing = None
     tablename = None
     plot = None
     render_root = "/mnt/md2/TESS_EBs/"
+    rendered_only = False
 
     def get(self, request, displayed_ticid=None, decision=None):
         """Allow user to review LCs from Villanova catalog and select some."""
@@ -57,7 +59,7 @@ class TICIdSelectorView(View):
                     )
                 displayed_ticid = db_session.scalar(
                     select(SelectTICIDs.id)
-                    .filter_by(flag=0)
+                    .filter_by(flag=0, rendered=1)
                     .where(SelectTICIDs.id > displayed_ticid)
                     .order_by(SelectTICIDs.id)
                 )
@@ -75,12 +77,13 @@ class TICIdSelectorView(View):
             if 1 not in rendered_progress:
                 rendered_progress[1] = 0
 
+            select_expr = select(SelectTICIDs.id, SelectTICIDs.rendered)
+            if self.rendered_only:
+                select_expr = select_expr.filter_by(rendered=1)
             # pylint: enable=no-member
             context = {
                 state: db_session.execute(
-                    select(SelectTICIDs.id, SelectTICIDs.rendered)
-                    .filter_by(flag=flag)
-                    .order_by(SelectTICIDs.id)
+                    select_expr.filter_by(flag=flag).order_by(SelectTICIDs.id)
                 ).all()
                 for state, flag in [
                     ("selected", "1"),
@@ -92,6 +95,7 @@ class TICIdSelectorView(View):
         if displayed_ticid is None:
             displayed_ticid = context["pending"][0][0]
         context["displayed_ticid"] = displayed_ticid
+        context["review"] = self.reviewing
         plot_fname = path.join(
             self.render_root, self.tablename, f"tess{displayed_ticid}.png"
         )

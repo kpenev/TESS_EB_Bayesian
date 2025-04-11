@@ -1,6 +1,6 @@
 """Plots that can be used for selecting TESS objects."""
 
-from collections import namedtuple
+from argparse import Namespace
 from base64 import b64encode
 from io import BytesIO
 from os import path, makedirs
@@ -10,7 +10,6 @@ from time import sleep
 
 from multiprocessing import Pool
 import matplotlib
-from matplotlib.pyplot import savefig
 from sqlalchemy import select, update
 from configargparse import ArgumentParser, DefaultsFormatter
 from numpy.random import randint, seed
@@ -19,9 +18,9 @@ from general_purpose_python_modules.multiprocessing_util import (
     setup_process_map,
 )
 
-from light_curve_plotter import LightCurvePlotter
+from visualize import main as visualize
 from mcmc_sampling import default_logging_format
-from paths import results_dir
+from paths import results_dir, samples as samples_fname
 
 # False positive
 # pylint: disable=import-error
@@ -33,35 +32,24 @@ from bui.select_ticids.data_model import get_ticid_select_table
 matplotlib.use("Agg")
 
 
-def lightcurve(tic_id, fname=None):
-    """Plot the lightcurves available for the given TIC."""
+def plot_lc(config, fname):
+    """Plot or encode lightcurve (and possibly models) with given config."""
 
     # False positive
     # pylint: disable=possibly-used-before-assignment
     if fname is None:
         png_stream = BytesIO()
-        destination = (png_stream, "png")
+        config.plot_lightcurve[0] = (png_stream, "png")
     else:
-        destination = fname
+        config.plot_lightcurve[0] = fname
         if not path.exists(path.dirname(fname)):
             makedirs(path.dirname(fname))
     # pylint: enable=possibly-used-before-assignment
+
     if fname is None or not path.exists(fname):
         # pylint: enable=possibly-used-before-assignment
 
-        config = namedtuple("ConfigType", ["plot_lightcurve", "data_on_top"])(
-            (
-                destination,
-                "[[full, full],"
-                " [folded, folded],"
-                " [zoom_odd, zoom_even],"
-                " [sed, zoom_masked]]",
-            ),
-            False,
-        )
-        LightCurvePlotter(config)(tic_id)
-        if fname is not None:
-            savefig(fname)
+        visualize(config)
 
     if fname is None:
         return b64encode(png_stream.getvalue()).decode("utf-8")
@@ -70,7 +58,51 @@ def lightcurve(tic_id, fname=None):
         return b64encode(plotf.read()).decode("utf-8")
 
 
-def render_one(tic_id, tablename, render_dir):
+def lightcurve(tic_id, fname=None):
+    """Plot the lightcurves available for the given TIC."""
+
+    return plot_lc(
+        Namespace(
+            tic_id=tic_id,
+            plot_lightcurve=[
+                None,
+                "[[full, full],"
+                " [folded, folded],"
+                " [zoom_odd, zoom_even],"
+                " [sed, zoom_masked]]",
+            ],
+            data_on_top=False,
+        ),
+        fname,
+    )
+
+
+def starting(tic_id, fname=None):
+    """Plot the initial walker models for the given TIC."""
+
+    return plot_lc(
+        Namespace(
+            tic_id=tic_id,
+            plot_lightcurve=[
+                None,
+                "[[full, full], [folded, sed], [zoom_primary, zoom_secondary]]",
+            ],
+            show_model_with_lc="-1",
+            data_on_top=True,
+            samples_fname=samples_fname.format(tic_id=tic_id),
+            chain_name="prelim_mcmc_0",
+            burn_in=0,
+            thin=1,
+            sample_condition=(
+                "(bls_porb - 5 * bls_duration < per) & "
+                "(per < bls_porb + 5 * bls_duration)"
+            ),
+        ),
+        fname,
+    )
+
+
+def render_one(tic_id, tablename, plot_func, render_dir):
     """Render the lightcurve for a single TIC ID."""
 
     seed()
@@ -85,11 +117,11 @@ def render_one(tic_id, tablename, render_dir):
     try:
         while True:
             try:
-                lightcurve(tic_id, path.join(render_dir, f"tess{tic_id}.png"))
+                plot_func(tic_id, path.join(render_dir, f"tess{tic_id}.png"))
                 break
             except (MemoryError, OSError):
                 wait = randint(60)
-                print(f'Memory error. Waiting {wait}s and retrying!')
+                print(f"Memory error. Waiting {wait}s and retrying!")
                 sleep(wait)
         # False positivie
         # pylint: disable=no-member
@@ -103,7 +135,7 @@ def render_one(tic_id, tablename, render_dir):
     except:
         print_exc()
     # pylint: enable=bare-except
-    print('Finished rendering ', tic_id)
+    print("Finished rendering ", tic_id)
 
 
 def render_all_plots(config):
@@ -130,19 +162,29 @@ def render_all_plots(config):
     if config.count is not None:
         tic_id_list = tic_id_list[: config.count]
 
-    with Pool(
-        config.num_parallel,
-        initializer=setup_process_map,
-        initargs=[vars(config)],
-    ) as pool:
-        pool.map(
-            partial(
-                render_one,
+    if config.num_parallel > 1:
+        with Pool(
+            config.num_parallel,
+            initializer=setup_process_map,
+            initargs=[vars(config)],
+        ) as pool:
+            pool.map(
+                partial(
+                    render_one,
+                    tablename=config.table_name,
+                    plot_func=globals()[config.plot_type],
+                    render_dir=config.plot_dir,
+                ),
+                tic_id_list,
+            )
+    else:
+        for tic_id in tic_id_list:
+            render_one(
+                tic_id,
                 tablename=config.table_name,
+                plot_func=globals()[config.plot_type],
                 render_dir=config.plot_dir,
-            ),
-            tic_id_list,
-        )
+            )
 
 
 def parse_command_line():
@@ -156,6 +198,7 @@ def parse_command_line():
         formatter_class=DefaultsFormatter,
         ignore_unknown_config_file_keys=False,
     )
+    parser.add_argument("plot_type", help="The type of plot to render")
     parser.add_argument(
         "--start",
         type=int,
