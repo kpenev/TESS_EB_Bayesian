@@ -1,8 +1,8 @@
 #!/bin/bash
 
 #SBATCH --nodes=1  #Number of nodes on which to distribute the tasks evenly
-#SBATCH --ntasks-per-node=64 1 #Total number of tasks to run at one time
-#SBATCH --mem=384G #Maximum amount of memory likely to be needed
+#SBATCH --ntasks-per-node=64 #Total number of tasks to run at one time
+#SBATCH --mem=384000M #Maximum amount of memory likely to be needed
 #SBATCH --time=48:00:00
 #SBATCH --partition=normal
 #SBATCH --job-name=render_prsa
@@ -27,9 +27,9 @@ render() {
 
     cd ${source_dir}
 
-    python3 \
+    conda run -n py311 python3 \
         ${source_dir}/bui/select_ticids/plots.py "${plot_mode}"\
-        --num-parallel 72 \
+        --num-parallel 64 \
         --table-name "${table}" \
         --plot-dir ${plot_dir} \
         --std-out-err-fname \
@@ -42,7 +42,7 @@ render() {
         2>&1
 }
 
-source ~/module_load_order
+source ~/module_load_order.sh
 source ~/set_environment.sh
 
 render attempted_sampling best

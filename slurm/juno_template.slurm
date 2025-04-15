@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #SBATCH --nodes=1  #Number of nodes on which to distribute the tasks evenly
-#SBATCH --ntasks-per-node=64 1 #Total number of tasks to run at one time
+#SBATCH --ntasks-per-node=64 #Total number of tasks to run at one time
 #SBATCH --mem=256G #Maximum amount of memory likely to be needed
 #SBATCH --time=48:00:00
 #SBATCH --partition=@@PARTITION@@
@@ -35,13 +35,15 @@ run_system() {
     cp ${scratch}/${samples} ${work}/${samples}
     cp ${work}/${samples} ${scratch}/${samples} 
 
+    samples=${scratch}/${samples}
+
     cd ${source_dir}
 
     while true; do
         echo "Starting $(date +%Y%m%d%H%M%S)" \
             >> ${log_dir}/run_system_${ticid}.out
 
-        python3 mcmc_sampling.py ${ticid} \
+        conda run -n py311 python3 mcmc_sampling.py ${ticid} \
             --verbosity debug \
             --samples-fname-pattern ${samples} \
             --std-out-err-fname \
@@ -54,7 +56,7 @@ run_system() {
     done
 }
 
-source ~/module_load_order
+source ~/module_load_order.sh
 source ~/set_environment.sh
 
 for TICID in @@TIC_LIST@@; do 
