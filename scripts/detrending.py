@@ -85,9 +85,7 @@ def masked_detrend(lightcurve, exptime, log_likelihood, get_trend):
             half_porb,
             mask[start_index:end_index],
         )
-        if not numpy.isfinite(scaling):
-            good_mask[start_index:end_index] = False
-            continue
+        good_mask[start_index:end_index] = numpy.isfinite(scaling)
         print(
             f"Scaling ({lightcurve['time'][start_index]} < t < "
             f"{lightcurve['time'][end_index-1]}): {scaling!r}"

@@ -219,7 +219,7 @@ class LogLikelihood(TESSTarget):
             mratio=(0.01, 2),
             age_gyr=(-3, 1.1),
             meh=Binary.meh_range,
-            per=(0.5, 300),
+            per=(0.1, 300),
             ecc=(0, self.max_ecc),
             w=(-360, 360),
             primary_impact_param=(-10, 10),

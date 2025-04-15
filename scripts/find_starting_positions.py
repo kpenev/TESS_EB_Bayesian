@@ -364,9 +364,19 @@ class FindStartingPositions:
                         (scenario_ind, norm.rvs(size=len(SampleParams._fields)))
                     )
                     continue
+                period_tweak = min(
+                    self._log_likelihood.best_fit_bls["period"][1] / 4,
+                    0.2
+                    * self._log_likelihood.best_fit_bls["duration"]
+                    * self._log_likelihood.best_fit_bls["period"][0]
+                    / (
+                        self._log_likelihood.time_span[1]
+                        - self._log_likelihood.time_span[0]
+                    ),
+                )
                 period_tweak = uniform.rvs(
-                    loc=-self._log_likelihood.best_fit_bls["period"][1] / 4,
-                    scale=self._log_likelihood.best_fit_bls["period"][1] / 2,
+                    loc=-period_tweak,
+                    scale=2 * period_tweak,
                 )
                 timing_tweak = uniform.rvs(
                     loc=-0.1 * self._log_likelihood.best_fit_bls["duration"],

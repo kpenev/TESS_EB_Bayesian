@@ -32,10 +32,18 @@ class LightCurvePlotter:
         },
     }
     model_lc_plot_config = {
-        "marker": "none",
-        "linestyle": "-",
-        "color": "black",
-        "zorder": 20,
+        "first": {
+            "marker": "none",
+            "linestyle": "-",
+            "color": "red",
+            "zorder": 100,
+        },
+        "others": {
+            "marker": "none",
+            "linestyle": "-",
+            "color": "black",
+            "zorder": 20,
+        },
     }
 
     sed_plot_config = {
@@ -50,11 +58,20 @@ class LightCurvePlotter:
     }
 
     model_sed_plot_config = {
-        "marker": "x",
-        "linestyle": "none",
-        "color": "black",
-        "markersize": 10,
-        "zorder": 20,
+        "first": {
+            "marker": "x",
+            "linestyle": "none",
+            "color": "red",
+            "markersize": 10,
+            "zorder": 100,
+        },
+        "others": {
+            "marker": "x",
+            "linestyle": "none",
+            "color": "black",
+            "markersize": 10,
+            "zorder": 20,
+        },
     }
 
     sed_filters = {
@@ -99,15 +116,21 @@ class LightCurvePlotter:
                 lightcurve["flux"][mask],
                 **plot_config,
             )
+        ylim = pyplot.ylim()
+        config_key = "first"
         for y in model_lcs:
             pyplot.plot(
                 lightcurve["time"],
                 y,
-                linewidth=3.0 / len(model_lcs),
-                **cls.model_lc_plot_config,
+                linewidth=(
+                    3.0 / (1 if config_key == "first" else len(model_lcs))
+                ),
+                **cls.model_lc_plot_config[config_key],
             )
+            config_key = "others"
         pyplot.xlabel("Time [d]")
         pyplot.ylabel("Flux")
+        pyplot.ylim(ylim)
 
     @classmethod
     def plot_vs_phase(cls, lightcurve, phase, model_lcs=(), xlabel="Phase"):
@@ -127,15 +150,19 @@ class LightCurvePlotter:
                 lightcurve["flux"][phase_order][mask],
                 **plot_config,
             )
+        ylim = pyplot.ylim()
+        first = True
         for y in model_lcs:
             pyplot.plot(
                 ordered_phase,
                 y[phase_order],
-                linewidth=3.0 / len(model_lcs),
-                **cls.model_lc_plot_config,
+                linewidth=3.0 / (1 if first else len(model_lcs)),
+                **cls.model_lc_plot_config["first" if first else "others"],
             )
+            first = False
         pyplot.xlabel(xlabel)
         pyplot.ylabel("Flux [ppm]")
+        pyplot.ylim(ylim)
 
     def plot_folded(self, lightcurve, model_lcs=()):
         """Show sector lightcurve folded by the best fit BLS period."""
@@ -181,6 +208,15 @@ class LightCurvePlotter:
     # pylint: enable=too-many-arguments
     # pylint: enable=too-many-positional-arguments
 
+    @staticmethod
+    def _convert_binary_to_bsl_zoom(zoom, log_likelihood):
+        """Return BLS zoom name that corresponds to given binary zoom name."""
+
+        if log_likelihood.masked_is_significant():
+            return "default" if zoom == "primary" else "masked"
+
+        return "even" if zoom == "primary" else "odd"
+
     @classmethod
     def plot_zoomed_binary(cls, zoom, lightcurve, model_lcs, binaries):
         """Create zoomed plot on primary or secondary eclipse per binary."""
@@ -191,6 +227,7 @@ class LightCurvePlotter:
         for eclipse in (
             ["primary", "secondary"] if zoom.startswith("ooe") else [zoom]
         ):
+            half_xrange = None
             while binary_ind < len(binaries):
                 assert binaries is not None
                 if eclipse == "secondary":
@@ -217,6 +254,8 @@ class LightCurvePlotter:
                 print(f"Found {eclipse} eclipse for binary {binary_ind}")
                 half_xrange = max(abs(eclipsed.min()), eclipsed.max())
                 break
+            if half_xrange is None:
+                raise RuntimeError()
             if zoom.startswith("ooe"):
                 phase = cls._get_phase(lightcurve, period, time_reference)
                 ooe_mask = numpy.logical_and(
@@ -257,8 +296,8 @@ class LightCurvePlotter:
             if zoom == "even":
                 time_reference = bls["transit_time"]
             else:
-                print(f"Zoom: {zoom}")
-                assert zoom == "odd"
+                if zoom != "odd":
+                    raise RuntimeError(f"Unrecognized BLS zoom label: {zoom}")
                 time_reference = bls["transit_time"] + bls["period"][0]
         mask = get_bls_eclipse_mask(bls, lightcurve, zoom)
         cls._plot_phase_zoomed(
@@ -282,8 +321,12 @@ class LightCurvePlotter:
             yerr=tess_target.sed[1],
             **self.sed_plot_config,
         )
+        config_key = "first"
         for bnry in binaries or ():
-            pyplot.plot(plot_x, bnry.absmag, **self.model_sed_plot_config)
+            pyplot.plot(
+                plot_x, bnry.absmag, **self.model_sed_plot_config[config_key]
+            )
+            config_key = "others"
         pyplot.xlabel(r"Wavelength [$\mu$]")
         pyplot.ylabel("Absolute magnitude")
 
@@ -334,6 +377,7 @@ class LightCurvePlotter:
         """Prepare to plot lightcurves with given configuration."""
 
         self._config = config
+        print(f"Setting mosaic from: {self._config.plot_lightcurve!r}")
         self._mosaic_spec = Interpreter(
             user_symbols={
                 plot_type: plot_type
@@ -355,23 +399,29 @@ class LightCurvePlotter:
                 ]
             }
         )(self._config.plot_lightcurve[1])
+        if self._mosaic_spec is None:
+            raise ValueError(
+                "Unable to parse mosaic specification: "
+                + repr(self._config.plot_lightcurve[1])
+            )
         plot_types = numpy.unique(numpy.array(self._mosaic_spec).flatten())
         self._full_log_likelihood = (
             plot_types.size != 1 or plot_types[0] != "full"
         )
-        self._folding_period = None
+        self._folding_period = getattr(config, "folding_period", None)
         if config.data_on_top:
-            self.lc_plot_config["zorder"] = 30
+            for cfg in self.lc_plot_config.values():
+                cfg["zorder"] = 30
             self.sed_plot_config["zorder"] = 30
 
-    def __call__(self, tic_id, binaries=None, detrend=None):
+    def __call__(self, tic_id, binaries=None, detrend=None, title_info=None):
         """
         Plot lightcurves of TESS target together with detrending and model(s).
 
         Args:
             tic_id (int):    TIC ID of target to plot.
 
-            binaries (Binary|None):    Collection of binaries configured with
+            binaries ([Binary]|None):    Collection of binaries configured with
                 the model lightcurves to plot.
 
             detrend(callable):    Function to detrend the lightcurve (detrended
@@ -384,18 +434,21 @@ class LightCurvePlotter:
         title_pre = f"TIC {tic_id}\n"
         if self._full_log_likelihood:
             tess_target = LogLikelihood(tic_id)
-            if binaries:
-                self._folding_period = binaries[0].per
-            else:
-                self._folding_period = tess_target.best_fit_bls["period"][0]
-                if not tess_target.masked_is_significant():
-                    self._folding_period *= 2
+            if self._folding_period is None:
+                self._folding_period = tess_target.bls_porb
+
+                if binaries and numpy.allclose(
+                    binaries[0].per, self._folding_period, rtol=1e-3
+                ):
+                    self._folding_period = binaries[0].per
             title_pre = (
                 title_pre.strip()
                 + f": $P_{{orb}}$ = {self._folding_period:.5f}\n"
             )
         else:
             tess_target = TESSTarget(tic_id)
+
+        title_pre += f"({title_info})"
 
         subfigures = self._setup_figure(len(tess_target.lcs))
         for (header, lightcurve), subfig in zip(tess_target.lcs, subfigures):
@@ -414,16 +467,26 @@ class LightCurvePlotter:
                 pyplot.sca(axis)
                 if plot_type.startswith("zoom_"):
                     zoom_type = plot_type[len("zoom_") :]
-                    getattr(
-                        self,
-                        "plot_zoomed_"
-                        + ("binary" if binaries is not None else "bls"),
-                    )(
-                        zoom_type,
-                        lightcurve,
-                        model_lcs,
-                        binaries or tess_target.best_fit_bls,
-                    )
+                    try:
+                        getattr(
+                            self,
+                            "plot_zoomed_"
+                            + ("binary" if binaries is not None else "bls"),
+                        )(
+                            zoom_type,
+                            lightcurve,
+                            model_lcs,
+                            binaries or tess_target.best_fit_bls,
+                        )
+                    except RuntimeError:
+                        self.plot_zoomed_bls(
+                            self._convert_binary_to_bsl_zoom(
+                                zoom_type, tess_target
+                            ),
+                            lightcurve,
+                            model_lcs,
+                            tess_target.best_fit_bls,
+                        )
                 elif plot_type.endswith("_diff"):
                     self.plot_diff(
                         plot_type[: -len("_diff")], lightcurve, model_lcs
