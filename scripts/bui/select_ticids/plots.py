@@ -102,9 +102,37 @@ def starting(tic_id, fname=None):
     )
 
 
+def best(tic_id, fname=None):
+    """Plot the best fit model on top of the lightcurve and SED."""
+
+    return plot_lc(
+        Namespace(
+            tic_id=tic_id,
+            plot_lightcurve=[
+                None,
+                "[[full,         full,        zoom_primary],"
+                " [folded,       folded,      zoom_secondary],"
+                " [folded_diff,  folded_diff, sed]]",
+            ],
+            show_model_with_lc="top1",
+            data_on_top=False,
+            samples_fname=samples_fname.format(tic_id=tic_id),
+            chain_name="mcmc",
+            burn_in=0,
+            thin=1,
+            sample_condition=None,
+        ),
+        fname,
+    )
+
+
 def render_one(tic_id, tablename, plot_func, render_dir):
     """Render the lightcurve for a single TIC ID."""
 
+    print(
+        f"Rendering {plot_func.__name__} for {tic_id} from {tablename} "
+        f"to {render_dir}"
+    )
     seed()
     # That's the whole point
     # pylint: disable=no-member

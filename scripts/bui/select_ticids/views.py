@@ -97,7 +97,10 @@ class TICIdSelectorView(View):
         context["displayed_ticid"] = displayed_ticid
         context["review"] = self.reviewing
         plot_fname = path.join(
-            self.render_root, self.tablename, f"tess{displayed_ticid}.png"
+            self.render_root,
+            self.tablename,
+            self.plot.__name__,
+            f"tess{displayed_ticid}.png",
         )
         new_plot = not path.exists(plot_fname)
         # False positive

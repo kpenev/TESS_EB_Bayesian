@@ -34,35 +34,41 @@ urlpatterns = [
         ),
         name="prsa_decision",
     ),
-    path(
-        "starting",
-        TICIdSelectorView.as_view(
-            reviewing="starting",
-            tablename="attempted_sampling",
-            plot=plots.starting,
-            rendered_only=False,
-        ),
-        name="starting_index",
+] + sum(
+    (
+        [
+            path(
+                plot_type,
+                TICIdSelectorView.as_view(
+                    reviewing=plot_type,
+                    tablename="attempted_sampling",
+                    plot=getattr(plots, plot_type),
+                    rendered_only=False,
+                ),
+                name=f"{plot_type}_index",
+            ),
+            path(
+                f"{plot_type}/<int:displayed_ticid>/",
+                TICIdSelectorView.as_view(
+                    reviewing=plot_type,
+                    tablename="attempted_sampling",
+                    plot=getattr(plots, plot_type),
+                    rendered_only=False,
+                ),
+                name=f"{plot_type}_jump",
+            ),
+            path(
+                f"{plot_type}/<int:displayed_ticid>/<slug:decision>/",
+                TICIdSelectorView.as_view(
+                    reviewing=plot_type,
+                    tablename="attempted_sampling",
+                    plot=getattr(plots, plot_type),
+                    rendered_only=False,
+                ),
+                name=f"{plot_type}_decision",
+            ),
+        ]
+        for plot_type in ["starting", "best"]
     ),
-    path(
-        "starting/<int:displayed_ticid>/",
-        TICIdSelectorView.as_view(
-            reviewing="starting",
-            tablename="attempted_sampling",
-            plot=plots.starting,
-            rendered_only=False,
-        ),
-        name="starting_jump",
-    ),
-    path(
-        "starting/<int:displayed_ticid>/<slug:decision>/",
-        TICIdSelectorView.as_view(
-            reviewing="starting",
-            tablename="attempted_sampling",
-            plot=plots.starting,
-            rendered_only=False,
-        ),
-        name="starting_decision",
-    ),
-
-]
+    [],
+)

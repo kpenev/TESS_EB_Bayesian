@@ -297,7 +297,7 @@ class LightCurvePlotter:
                 time_reference = bls["transit_time"]
             else:
                 if zoom != "odd":
-                    raise RuntimeError(f'Unrecognized BLS zoom label: {zoom}')
+                    raise RuntimeError(f"Unrecognized BLS zoom label: {zoom}")
                 time_reference = bls["transit_time"] + bls["period"][0]
         mask = get_bls_eclipse_mask(bls, lightcurve, zoom)
         cls._plot_phase_zoomed(
@@ -399,6 +399,11 @@ class LightCurvePlotter:
                 ]
             }
         )(self._config.plot_lightcurve[1])
+        if self._mosaic_spec is None:
+            raise ValueError(
+                "Unable to parse mosaic specification: "
+                + repr(self._config.plot_lightcurve[1])
+            )
         plot_types = numpy.unique(numpy.array(self._mosaic_spec).flatten())
         self._full_log_likelihood = (
             plot_types.size != 1 or plot_types[0] != "full"

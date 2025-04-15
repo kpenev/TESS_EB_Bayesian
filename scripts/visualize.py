@@ -8,7 +8,7 @@ from glob import glob
 import logging
 from itertools import repeat
 
-from matplotlib import pyplot
+from matplotlib import pyplot, colormaps
 import numpy
 from configargparse import ArgumentParser, DefaultsFormatter
 import pandas
@@ -119,7 +119,7 @@ def parse_command_line():
         "selected only among surviving samples.",
     )
     parser.add_argument(
-        "--convergence-plot",
+        "--plot-convergence",
         help="If specified, a figure is created showing comparison between the "
         "chain length to Raftery-Lewis burn-in estimate and/or quantile "
         "precision estimate for either the directly sampled quantities or those"
@@ -316,9 +316,14 @@ def create_convergence_plot(plot_data, config, num_walkers):
     num_steps = plot_data.shape[0] // num_walkers
     assert num_walkers * num_steps == plot_data.shape[0]
 
-    quantile_height = 2 / 3 / len(plot_data.columns)
+    if len(config.diagnostic_quantiles) <= 10:
+        cmap = colormaps["tab10"]
+    else:
+        cmap = colormaps["tab20"]
+
+    quantile_height = 2 / 3 / len(config.diagnostic_quantiles)
     quantile_offset = 1 / 6
-    y_pos = numpy.arange(
+    y_pos = numpy.array(
         [
             quantile_ind + quantile_offset + quantile_height * sub_quantile_ind
             for quantile_ind in range(len(plot_data.columns))
@@ -339,10 +344,22 @@ def create_convergence_plot(plot_data, config, num_walkers):
             burnin[burnin_ind] = quantile_info[-1]
             burnin_ind += 1
 
-    pyplot.axvspan(0, num_steps, zorder=10)
-    pyplot.barh(y_pos, burnin, height=quantile_height, align="edge", zorder=20)
+    pyplot.xscale('log')
+    pyplot.axvspan(0, num_steps, zorder=10, color='black')
+    pyplot.barh(
+        y_pos,
+        burnin,
+        height=quantile_height,
+        align="edge",
+        zorder=20,
+        color=[
+            cmap(quantile_ind)
+            for _ in plot_data.columns
+            for quantile_ind in config.diagnostic_quantiles
+        ],
+    )
     pyplot.yticks(0.5 + numpy.arange(len(plot_data.columns)), plot_data.columns)
-    pyplot.savefig(config.convergence_plot)
+    pyplot.savefig(config.plot_convergence)
 
 
 def create_expressions_plot(plot_data, config, num_walkers=None):
@@ -520,9 +537,11 @@ def get_plot_data(config, backend, log_likelihood):
                     dict(
                         zip(
                             SampleParams._fields,
-                            raw_data.flatten().reshape(
+                            raw_data.flatten()
+                            .reshape(
                                 iteration * backend.shape[0], backend.shape[1]
-                            ).T,
+                            )
+                            .T,
                         )
                     )
                     | {
@@ -623,6 +642,9 @@ def main(config):
 
     if getattr(config, "histogram_movie", False):
         create_histogram_movie(plot_data, config, backend.shape[0])
+
+    if getattr(config, "plot_convergence", False):
+        create_convergence_plot(plot_data, config, backend.shape[0])
 
 
 if __name__ == "__main__":
