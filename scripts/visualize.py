@@ -19,7 +19,6 @@ from general_purpose_python_modules.emcee_util import load_initial_positions
 from general_purpose_python_modules.emcee_quantile_convergence import (
     find_emcee_quantiles,
 )
-from autowisp import Evaluator
 
 from hacked_emcee_hdf5_backend import HDFBackend
 from sample_params import SampleParams
@@ -281,7 +280,7 @@ def get_chain_expressions(plot_data, chain_expressions):
     if "selected" in plot_data:
         plot_data = plot_data[plot_data["selected"]]
     if chain_expressions:
-        evaluate = Evaluator(plot_data)
+        evaluate = Interpreter(user_symbols=plot_data)
         split_expressions = [
             expression.split("=") for expression in chain_expressions
         ]
