@@ -191,13 +191,13 @@ def parse_command_line():
     parser.add_argument(
         "--burnin-tolerance",
         type=float,
-        default=1e-5,
+        default=1e-4,
         help="Tolerance for the Raftery-Lewis burn-in estimate.",
     )
     parser.add_argument(
         "--quantile-variance-realizations",
         type=int,
-        default=100000,
+        default=10000,
         help="The number of realizations to use for the Raftery-Lewis variance "
         "estimate for the quantiles.",
     )
