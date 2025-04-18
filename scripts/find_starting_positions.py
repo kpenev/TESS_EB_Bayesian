@@ -1,5 +1,6 @@
 """Methods for finding initial walker positions for MCMC."""
 
+from sys import argv
 from collections import namedtuple
 from multiprocessing import Process, Queue
 import logging
@@ -59,23 +60,29 @@ class FindStartingPositions:
 
         if self._bls_eclipses["shallower"] != "masked" and not randomize_e:
             if params.w % 360 > 270:
-                params._replace(w=params.w - 360.0)
+                params = params._replace(w=params.w - 360.0)
             return params._replace(ecc=0.0)
 
         secondary_eclipse_phase = self._secondary_eclipse_phase
         if randomize_e:
             secondary_eclipse_phase += uniform.rvs(
-                loc=-0.15
+                loc=-0.05
                 * (
                     self._log_likelihood.best_fit_bls["duration"]
                     + self._log_likelihood.best_fit_bls["period"][1]
                 ),
-                scale=0.3
+                scale=0.1
                 * (
                     self._log_likelihood.best_fit_bls["duration"]
                     + self._log_likelihood.best_fit_bls["period"][1]
                 ),
             )
+
+        _logger.debug(
+            "Matching eclipse times: Secondary eclipse phase = %s",
+            repr(secondary_eclipse_phase),
+        )
+
         final_w = params.w % 360
         if (secondary_eclipse_phase < 0.5 and not 90 < final_w < 270) or (
             secondary_eclipse_phase > 0.5 and (90 < final_w < 270)
@@ -84,7 +91,19 @@ class FindStartingPositions:
         final_w %= 360
         if final_w > 270:
             final_w -= 360
-        params._replace(w=final_w)
+        params = params._replace(w=final_w)
+
+        _logger.debug("Matching eclipse times: final w = %s", repr(final_w))
+
+        _logger.debug(
+            "Matching eclipse times: e=0 phase diff = %s",
+            calc_eclipse_phase_diff(0, params.w),
+        )
+        _logger.debug(
+            "Matching eclipse times: e=%s phase diff = %s",
+            repr(LogLikelihood.max_ecc),
+            calc_eclipse_phase_diff(LogLikelihood.max_ecc, params.w),
+        )
 
         def to_solve(ecc):
             return (
@@ -100,6 +119,7 @@ class FindStartingPositions:
     def _match_deeper_eclipse_phase(self, params):
         """Set binary LC model deeper eclipse to match the BLS deeper one."""
 
+        _logger.debug("Matching deeper eclipse params: %s", repr(params))
         binary = Binary(from_mcmc=params._replace(primary_impact_param=0.0))
         bls_info = self._log_likelihood.best_fit_bls
         if self._bls_eclipses["shallower"] == "maked":
@@ -170,7 +190,7 @@ class FindStartingPositions:
         assert result.success
         return params._replace(primary_impact_param=min(result.x, max_impact))
 
-    def _match_both_depths(self, params):
+    def _match_both_depths(self, params, mass_range):
         """Tune primary impact and mratio to best fit both eclipses."""
 
         def to_minimize(mratio):
@@ -192,22 +212,37 @@ class FindStartingPositions:
 
         # False positive
         # pylint: disable=unsubscriptable-object
-        min_mass_to_mtot = Binary.mini_range[0] / params.mtotal
+        min_mratio = max(
+            params.mtotal / mass_range[1] - 1,
+            mass_range[0] / (params.mtotal - mass_range[0]),
+        )
+        _logger.debug(
+            "Matching both depths: Mass ratio range = (%s, 1)", repr(min_mratio)
+        )
         # pylint: enable=unsubscriptable-object
         min_mratio = max(
             self._log_likelihood.get_range("mratio")[0],
-            min_mass_to_mtot / (1.0 - min_mass_to_mtot),
+            min_mratio,
         )
         result = optimize.minimize_scalar(
             to_minimize, bounds=(min_mratio, 1.0), options={"xatol": 1e-3}
         )
         assert result.success
+        _logger.debug("Matching both depths solution: %s", repr(result))
         return self._match_deeper_eclipse_depth(
             params._replace(mratio=min(max(result.x, min_mratio), 1.0))
         )
 
     def _match_eclipses_and_sed(self, params):
         """Tune masses and impact parameter to best fit eclipses and SED."""
+
+        mass_range = Binary.mini_range(params.meh, params.age_gyr)
+        _logger.debug(
+            "Matching eclipses and SED: for [M/H]=%s, t=%s Gyr, mass range=%s",
+            repr(params.meh),
+            repr(params.age_gyr),
+            repr(mass_range),
+        )
 
         def to_minimize(mtotal, lc_tuned_params):
             try:
@@ -220,7 +255,7 @@ class FindStartingPositions:
 
         def to_solve(mtotal, get_params=False):
             lc_tuned_params = self._match_both_depths(
-                params._replace(mtotal=mtotal)
+                params._replace(mtotal=mtotal), mass_range
             )
             result = optimize.minimize_scalar(
                 to_minimize,
@@ -245,6 +280,10 @@ class FindStartingPositions:
             return result.x - mtotal
 
         mtotal_range = self._log_likelihood.get_range("mtotal")
+        mtotal_range = (
+            max(mtotal_range[0], 2 * mass_range[0]),
+            min(mtotal_range[1], 2 * mass_range[1]),
+        )
         try:
             result = optimize.root_scalar(
                 to_solve,
@@ -620,54 +659,3 @@ def create_jktebob_inputs(log_likelihood):
             )
         )
         outf.write(template.read().format_map(values))
-
-
-def test():
-    """Place to implement various manual tests."""
-
-    test_tic = 5205367  # 16805617  # 189639080 # 4629065  #
-
-    log_likelihood = LogLikelihood(test_tic)
-    FindStartingPositions(log_likelihood)
-    # params = SampleParams(
-    #    mtotal=3.1180989692599335,
-    #    mratio=0.9797246475335591,
-    #    age_gyr=1.0,
-    #    meh=0.0,
-    #    per=11.793843600300352,
-    #    ecc=0.0,
-    #    w=180.0,
-    #    primary_impact_param=0.7279367331829606,
-    #    eclipse_time=1420.3748436711664,
-    #    primary_limb_dark_1=0.0,
-    #    primary_limb_dark_2=0.0,
-    #    secondary_limb_dark_1=0.0,
-    #    secondary_limb_dark_2=0.0,
-    #    primary_prot=100.0,
-    #    secondary_prot=100.0,
-    #    primary_reflection_coef=0.01,
-    #    secondary_reflection_coef=0.01,
-    #    primary_beaming_coef=0.01,
-    #    secondary_beaming_coef=0.01,
-    #    lc_sys=1e-10,
-    #    sed_sys=1e-10,
-    # )
-    # with PdfPages(f"tess{test_tic}_deeper_depth_match.pdf") as pdf:
-    #    for impact in numpy.linspace(0.5, 1.0, 10):
-    #        binary = Binary(
-    #            from_mcmc=params._replace(primary_impact_param=impact)
-    #        )
-    #        binary.lc_sys = 0.0
-    #        log_likelihood.plot_lc_model_comparison(
-    #            binary,
-    #            pdf,
-    #            f"b: {impact}, LL: "
-    #            + repr(
-    #                log_likelihood.calc_lc_log_likelihood(binary, 0.0, "odd")
-    #            ),
-    #        )
-
-
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.DEBUG)
-    test()

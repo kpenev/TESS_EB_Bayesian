@@ -179,6 +179,12 @@ def parse_command_line():
         help="How to format logging messages. See python logging module "
         "documentation for details.",
     )
+    parser.add_argument(
+        "--starting-positions-only",
+        action="store_true",
+        help="If passed, no sampling is performed. Instead a samples files is "
+        "created containing only the starting walker positions.",
+    )
 
     return parser.parse_args()
 
@@ -217,6 +223,7 @@ def get_backend(samples_fname, config):
 
     with h5py.File(samples_fname, "r") as samples_file:
         return backend, samples_file["mcmc"].attrs.get("final_run", False)
+
 
 def prepare_restart(backend):
     """Prepare to restart sampling and return accumulated samples & log-prob."""
@@ -280,10 +287,10 @@ def restart_sampling(backend, config):
             _logger.info(
                 "Starting %s sampling from random subset of the top %d "
                 "samples. Log-likelihood spread %s (%swithin %s).",
-                'final' if final else 'preliminary',
+                "final" if final else "preliminary",
                 select_from,
                 repr(log_likelihood_spread),
-                '' if final else 'not ',
+                "" if final else "not ",
                 repr(config.restart_log_likelihood_range),
             )
 
@@ -314,6 +321,9 @@ def main(config):
         _logger.info("Full set of initial positions found. Starting sampling.")
     elif not final_run and backend.iteration >= config.restart_steps:
         backend, initial_state, final_run = restart_sampling(backend, config)
+
+    if config.starting_positions_only:
+        return
 
     while True:
         with Pool(
