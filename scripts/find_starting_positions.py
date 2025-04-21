@@ -361,15 +361,26 @@ class FindStartingPositions:
         result["meh"] = grid[1] + uniform.rvs(
             loc=-config.initial_meh_smear / 2,
             scale=config.initial_meh_smear,
-            size=grid[0].size,
+            size=grid[1].size,
         )
-        result["w"] = grid[2]
-        result["w"][1:-1] += uniform.rvs(
-            loc=-config.initial_w_smear / 2,
-            scale=config.initial_w_smear,
-            size=grid[0].size - 2,
-        )
-        result["w"] %= 360
+        wmin, wmax = w_values[[0, -1]]
+        out_of_range = numpy.ones(result.shape, dtype=bool)
+        while out_of_range.any():
+            result["w"][out_of_range] = grid[2][out_of_range] + uniform.rvs(
+                loc=-config.initial_w_smear / 2,
+                scale=config.initial_w_smear,
+                size=out_of_range.sum(),
+            )
+            out_of_range = numpy.logical_or(
+                result["w"] < wmin, result["w"] > wmax
+            )
+            _logger.debug(
+                "Found %d proposed arguments of periapsis outside %s < w < %s",
+                out_of_range.sum(),
+                repr(wmin),
+                repr(wmax),
+            )
+
         _logger.debug(
             "Initial scenarios:\n\t%s", "\n\t".join([str(e) for e in result])
         )

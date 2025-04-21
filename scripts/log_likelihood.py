@@ -2,7 +2,6 @@
 
 import logging
 from functools import partial
-from time import sleep
 
 import numpy
 from scipy.stats import norm, truncnorm
@@ -239,7 +238,7 @@ class LogLikelihood(TESSTarget):
             secondary_reflection_coef=(-2, 2),
             primary_beaming_coef=(-2, 2),
             secondary_beaming_coef=(-2, 2),
-            lc_sys=(numpy.log10(self._find_syserr_and_outliers()), 0),
+            lc_sys=(min(numpy.log10(self._find_syserr_and_outliers()), -1), 0),
             sed_sys=(-10, -1.5),
         )
 
@@ -247,7 +246,7 @@ class LogLikelihood(TESSTarget):
 
         if detrend is not None:
             self._lcs = [
-                (header, detrend(lightcurve, header['exptime'], self))
+                (header, detrend(lightcurve, header["exptime"], self))
                 for header, lightcurve in self._lcs
             ]
 
@@ -305,7 +304,10 @@ class LogLikelihood(TESSTarget):
 
         if param == "meh":
             return truncnorm.ppf(
-                norm.cdf(sample_entry), *self._range.meh, scale=0.5
+                norm.cdf(sample_entry),
+                2 * self._range.meh[0],
+                2 * self._range.meh[1],
+                scale=0.5,
             )
         low, high = self.get_range(param)
         value = low + (high - low) * norm.cdf(sample_entry)
@@ -319,11 +321,23 @@ class LogLikelihood(TESSTarget):
         param_ind = SampleParams._fields.index(param)
         if param == "meh":
             return param_ind, norm.ppf(
-                truncnorm.cdf(value, *self._range.meh, scale=0.5)
+                truncnorm.cdf(
+                    value,
+                    2 * self._range.meh[0],
+                    2 * self._range.meh[1],
+                    scale=0.5,
+                )
             )
         if param in self._log_uniform:
             value = numpy.log10(value)
         low, high = self.get_range(param)
+        self._logger.debug(
+            "Inverse prior %s: value=%s, range=(%s, %s)",
+            param,
+            repr(value),
+            repr(low),
+            repr(high),
+        )
         if value < low:
             return param_ind, -numpy.inf
         if value > high:
@@ -371,16 +385,21 @@ class LogLikelihood(TESSTarget):
         def calc_bin_var(bin_flux):
             """Calculate stddev(flux) and flag >5 sigma outliers."""
 
-            outliers = False
+            assert numpy.isfinite(bin_flux).all()
+            outliers = None
             for _ in range(self.max_outlier_iterations):
                 square_dev = (bin_flux - numpy.median(bin_flux)) ** 2
-                var = numpy.mean(square_dev)
+                var = numpy.mean(
+                    square_dev
+                    if outliers is None
+                    else square_dev[numpy.logical_not(outliers)]
+                )
+                assert numpy.isfinite(var)
                 new_outliers = square_dev > self.outlier_thresh2 * var
-                if not new_outliers.any():
+                if outliers is None:
+                    outliers = new_outliers
+                elif (outliers == new_outliers).all():
                     break
-                outliers = numpy.logical_or(outliers, new_outliers)
-            if outliers is False:
-                outliers = new_outliers
             return var, outliers
 
         combined_lc = self.get_combined_lc()
@@ -413,7 +432,7 @@ class LogLikelihood(TESSTarget):
         sys_err = numpy.zeros(self.outlier_bins)
         outliers = numpy.zeros_like(combined_lc["flux"], dtype=bool)
 
-        weights = bin_boundaries[1:] - bin_boundaries[:-1] - 1
+        weights = numpy.empty(shape=self.outlier_bins, dtype=float)
 
         for i in range(self.outlier_bins):
             bin_indices = phase_sorter[
@@ -428,8 +447,14 @@ class LogLikelihood(TESSTarget):
             sys_err[i] -= (
                 numpy.median(combined_lc["flux_err"][bin_indices]) ** 2
             )
+            if sys_err[i] < 0:
+                sys_err[i] = 0
+            weights[i] = numpy.logical_not(outliers[bin_indices]).sum() - 1
+            if weights[i] < 10:
+                weights[i] = 0.0
+                sys_err[i] = 0.0
 
-        sys_err = numpy.average(sys_err, weights=weights)** 0.5
+        sys_err = numpy.average(sys_err, weights=weights) ** 0.5
 
         lc_start = 0
         for _, formatted_lc in self.lcs:

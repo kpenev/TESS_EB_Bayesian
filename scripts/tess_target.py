@@ -82,11 +82,10 @@ class TESSTarget:
                 if err_col in header.values():
                     return ("SAP_FLUX", err_col), header["TIMEDEL"]
             self._logger.critical(
-                "TIC %d, sector %d, %s lightcurve has no flux error "
-                "column.",
-                self._tic_id, 
-                sector, 
-                provenance, 
+                "TIC %d, sector %d, %s lightcurve has no flux error column.",
+                self._tic_id,
+                sector,
+                provenance,
             )
             assert False
 
@@ -115,10 +114,10 @@ class TESSTarget:
             if column not in observed_lc.columns.names:
                 self._logger.critical(
                     "TIC %d, sector %d, %s lightcurve has no %s column.",
-                    self._tic_id, 
-                    sector, 
-                    provenance, 
-                    column
+                    self._tic_id,
+                    sector,
+                    provenance,
+                    column,
                 )
 
         usable = numpy.logical_and(
@@ -132,10 +131,10 @@ class TESSTarget:
         if not usable.any():
             self._logger.warning(
                 "TIC %d, sector %d, %s lightcurve has 0/%d usable points.",
-                self._tic_id, 
-                sector, 
-                provenance, 
-                usable.size
+                self._tic_id,
+                sector,
+                provenance,
+                usable.size,
             )
             return None, None
         observed_lc = observed_lc[usable]
@@ -488,13 +487,21 @@ class TESSTarget:
 
         combined_lc = None
         for _, formatted_lc in self.lcs:
+            finite_lc = numpy.copy(
+                formatted_lc[
+                    numpy.logical_and(
+                        numpy.isfinite(formatted_lc["flux"]),
+                        numpy.isfinite(formatted_lc["flux_err"]),
+                    )
+                ]
+            )
             med_flux = numpy.nanmedian(formatted_lc["flux"])
             if combined_lc is None:
-                combined_lc = numpy.copy(formatted_lc)
+                combined_lc = finite_lc
                 combined_lc["flux"] /= med_flux
                 combined_lc["flux_err"] /= med_flux
             else:
-                combined_lc = numpy.concatenate([combined_lc, formatted_lc])
+                combined_lc = numpy.concatenate([combined_lc, finite_lc])
                 # False positive
                 # pylint: disable=invalid-unary-operand-type
                 combined_lc[-formatted_lc.size :]["flux"] /= med_flux
@@ -574,7 +581,9 @@ class TESSTarget:
     #    return tls_results
 
 
-if __name__ == "__main__":
+def main():
+    """Avoid polluting global namespace."""
+
     # logging.basicConfig(level=logging.DEBUG)
     target = TESSTarget(33419790)
     tls_results = target.fit_tls(14)
@@ -605,3 +614,7 @@ if __name__ == "__main__":
     pyplot.axvline(x=0.5 + tls_results["duration"] / 2)
 
     pyplot.show()
+
+
+if __name__ == "__main__":
+    main()
