@@ -13,6 +13,7 @@ import matplotlib
 from sqlalchemy import select, update
 from configargparse import ArgumentParser, DefaultsFormatter
 from numpy.random import randint, seed
+import h5py
 
 from general_purpose_python_modules.multiprocessing_util import (
     setup_process_map,
@@ -20,7 +21,7 @@ from general_purpose_python_modules.multiprocessing_util import (
 
 from visualize import main as visualize
 from mcmc_sampling import default_logging_format
-from paths import results_dir, samples as samples_fname
+from paths import results_dir, samples as samples_fname_template
 
 # False positive
 # pylint: disable=import-error
@@ -80,6 +81,16 @@ def lightcurve(tic_id, fname=None):
 def starting(tic_id, fname=None):
     """Plot the initial walker models for the given TIC."""
 
+    samples_fname = samples_fname_template.format(tic_id=tic_id)
+    chain_name = None
+    with h5py.File(samples_fname, 'r') as samples_file:
+        for candidate_name in 'prelim_mcmc', 'mcmc':
+            if candidate_name in samples_file:
+                chain_name = candidate_name
+                break
+    if chain_name is None:
+        return None
+
     return plot_lc(
         Namespace(
             tic_id=tic_id,
@@ -89,9 +100,9 @@ def starting(tic_id, fname=None):
             ],
             show_model_with_lc="-1",
             data_on_top=True,
-            samples_fname=samples_fname.format(tic_id=tic_id),
-            chain_name="prelim_mcmc_0",
-            burn_in=0,
+            samples_fname=samples_fname,
+            chain_name=chain_name,
+            burn_in=-1,
             thin=1,
             sample_condition=(
                 "(bls_porb - 5 * bls_duration < per) & "
@@ -116,7 +127,7 @@ def best(tic_id, fname=None):
             ],
             show_model_with_lc="top1",
             data_on_top=False,
-            samples_fname=samples_fname.format(tic_id=tic_id),
+            samples_fname=samples_fname_template.format(tic_id=tic_id),
             chain_name="mcmc",
             burn_in=0,
             thin=1,
