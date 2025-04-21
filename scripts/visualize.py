@@ -343,8 +343,8 @@ def create_convergence_plot(plot_data, config, num_walkers):
             burnin[burnin_ind] = quantile_info[-1]
             burnin_ind += 1
 
-    pyplot.xscale('log')
-    pyplot.axvspan(0, num_steps, zorder=10, color='black')
+    pyplot.xscale("log")
+    pyplot.axvspan(0, num_steps, zorder=10, color="black")
     pyplot.barh(
         y_pos,
         burnin,
@@ -435,7 +435,7 @@ def get_param_binaries(sample_params, config, **extra_condition_vars):
     for params in sample_params:
         if (
             config.show_model_with_lc.strip().startswith("-1")
-            and config.sample_condition is not None
+            and getattr(config, 'sample_condition', None) is not None
             and not Interpreter(
                 user_symbols=(
                     dict(zip(SampleParams._fields, params))
@@ -472,6 +472,8 @@ def get_model_binaries(config, raw_data, log_prob, include, log_likelihood):
         )
     else:
         top_params = None
+
+    config.highlight_first_model = top_params is not None
 
     if selection.startswith("top") or selection.startswith("random"):
         if selection.startswith("top"):
@@ -522,40 +524,21 @@ def get_model_binaries(config, raw_data, log_prob, include, log_likelihood):
 def get_plot_data(config, backend, log_likelihood):
     """Return the data required to generate the plots spceified by config."""
 
-    iteration = backend.iteration
+    num_iterations = backend.iteration
     raw_data = None
     log_prob = None
     selected = None
 
-    if iteration > 0:
+    if num_iterations > 0:
         raw_data = backend.get_blobs()
         log_prob = backend.get_log_prob()
-        if config.sample_condition is not None:
-            selected = Interpreter(
-                user_symbols=(
-                    dict(
-                        zip(
-                            SampleParams._fields,
-                            raw_data.flatten()
-                            .reshape(
-                                iteration * backend.shape[0], backend.shape[1]
-                            )
-                            .T,
-                        )
-                    )
-                    | {
-                        "bls_porb": log_likelihood.bls_porb,
-                        "bls_duration": log_likelihood.best_fit_bls["duration"],
-                    }
-                )
-            )(config.sample_condition).reshape(iteration, backend.shape[0])
         if config.burn_in >= 0:
             plot_data = pandas.DataFrame(
-                raw_data[config.burn_in : iteration : config.thin, :, :]
+                raw_data[config.burn_in : num_iterations : config.thin, :, :]
                 .flatten()
                 .reshape(
                     (
-                        (iteration - config.burn_in + config.thin - 1)
+                        (num_iterations - config.burn_in + config.thin - 1)
                         // config.thin
                     )
                     * backend.shape[0],
@@ -564,7 +547,7 @@ def get_plot_data(config, backend, log_likelihood):
                 columns=SampleParams._fields,
             )
             sub_log_prob = log_prob[
-                config.burn_in : iteration : config.thin, :
+                config.burn_in : num_iterations : config.thin, :
             ].flatten()
             sub_log_prob -= sub_log_prob[numpy.isfinite(sub_log_prob)].min()
             plot_data.insert(
@@ -580,12 +563,33 @@ def get_plot_data(config, backend, log_likelihood):
             [log_likelihood.get_sample_params(sample) for sample in plot_data],
             columns=SampleParams._fields,
         )
+        num_iterations = 1
 
-    if config.sample_condition is not None:
+    if getattr(config, "sample_condition", None) is not None:
+        print(
+            f"BLS: porb = {log_likelihood.bls_porb!r}, duration = "
+            f"{log_likelihood.best_fit_bls['duration']!r}"
+        )
+        print(f"Data per: {plot_data.to_dict('series')['per']!r}")
+        selected = Interpreter(
+            user_symbols=(
+                {col: plot_data[col].to_numpy() for col in plot_data.columns}
+                | {
+                    "bls_porb": log_likelihood.bls_porb,
+                    "bls_duration": log_likelihood.best_fit_bls["duration"],
+                }
+            )
+        )(config.sample_condition).reshape(num_iterations, backend.shape[0])
+
+        if config.burn_in >= 0:
+            selected = selected[
+                config.burn_in : num_iterations : config.thin, :
+            ]
+
         plot_data.insert(
             0,
             "selected",
-            selected[config.burn_in : iteration : config.thin, :].flatten(),
+            selected.flatten(),
         )
 
     return plot_data, raw_data, log_prob, selected
@@ -612,12 +616,16 @@ def main(config):
         selected = None
 
     if config.plot_lightcurve:
-        if config.show_model_with_lc and raw_data is not None:
+        if config.show_model_with_lc and plot_data is not None:
             binaries, num_skipped = get_model_binaries(
                 config,
                 raw_data,
                 log_prob,
-                (selected if config.sample_condition is not None else None),
+                (
+                    selected
+                    if getattr(config, "sample_condition", None) is not None
+                    else None
+                ),
                 log_likelihood,
             )
         else:

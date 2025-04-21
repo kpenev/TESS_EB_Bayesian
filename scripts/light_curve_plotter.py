@@ -103,13 +103,12 @@ class LightCurvePlotter:
         },
     }
 
-    @classmethod
-    def plot_full(cls, lightcurve, model_lcs):
+    def plot_full(self, lightcurve, model_lcs):
         """Plot the full unfolded lightcurve for a sector."""
 
         for mask, plot_config in [
-            (lightcurve["good"], cls.lc_plot_config["good"]),
-            (numpy.logical_not(lightcurve["good"]), cls.lc_plot_config["bad"]),
+            (lightcurve["good"], self.lc_plot_config["good"]),
+            (numpy.logical_not(lightcurve["good"]), self.lc_plot_config["bad"]),
         ]:
             pyplot.plot(
                 lightcurve["time"][mask],
@@ -117,7 +116,7 @@ class LightCurvePlotter:
                 **plot_config,
             )
         ylim = pyplot.ylim()
-        config_key = "first"
+        config_key = "first" if self._config.highlight_first_model else "others"
         for y in model_lcs:
             pyplot.plot(
                 lightcurve["time"],
@@ -125,24 +124,25 @@ class LightCurvePlotter:
                 linewidth=(
                     3.0 / (1 if config_key == "first" else len(model_lcs))
                 ),
-                **cls.model_lc_plot_config[config_key],
+                **self.model_lc_plot_config[config_key],
             )
             config_key = "others"
         pyplot.xlabel("Time [d]")
         pyplot.ylabel("Flux")
         pyplot.ylim(ylim)
 
-    @classmethod
-    def plot_vs_phase(cls, lightcurve, phase, model_lcs=(), xlabel="Phase"):
+    def plot_vs_phase(self, lightcurve, phase, model_lcs=(), xlabel="Phase"):
         """Create a plot of the lightcurve vs the given phase."""
 
         phase_order = numpy.argsort(phase)
+        print(f"Phase order: {phase_order!r}")
+        print(f"Phase: {phase!r}")
         ordered_phase = phase[phase_order]
         for mask, plot_config in [
-            (lightcurve["good"][phase_order], cls.lc_plot_config["good"]),
+            (lightcurve["good"][phase_order], self.lc_plot_config["good"]),
             (
                 numpy.logical_not(lightcurve["good"][phase_order]),
-                cls.lc_plot_config["bad"],
+                self.lc_plot_config["bad"],
             ),
         ]:
             pyplot.plot(
@@ -151,13 +151,13 @@ class LightCurvePlotter:
                 **plot_config,
             )
         ylim = pyplot.ylim()
-        first = True
+        first = self._config.highlight_first_model
         for y in model_lcs:
             pyplot.plot(
                 ordered_phase,
                 y[phase_order],
                 linewidth=3.0 / (1 if first else len(model_lcs)),
-                **cls.model_lc_plot_config["first" if first else "others"],
+                **self.model_lc_plot_config["first" if first else "others"],
             )
             first = False
         pyplot.xlabel(xlabel)
@@ -181,17 +181,17 @@ class LightCurvePlotter:
             (lightcurve["time"] - time_reference + period / 2) % period
         ) / period - 0.5
 
-    @classmethod
-    def _plot_phase_zoomed(cls, lightcurve, time_reference, period, model_lcs):
+    def _plot_phase_zoomed(self, lightcurve, time_reference, period, model_lcs):
         """Create zoomed plot on primary on secondary eclipse per binary."""
 
-        phase = cls._get_phase(lightcurve, period, time_reference)
-        cls.plot_vs_phase(lightcurve, phase, model_lcs, xlabel=r"$\Delta$Phase")
+        phase = self._get_phase(lightcurve, period, time_reference)
+        self.plot_vs_phase(
+            lightcurve, phase, model_lcs, xlabel=r"$\Delta$Phase"
+        )
 
     # pylint: disable=too-many-arguments
     # pylint: disable=too-many-positional-arguments
-    @classmethod
-    def _plot_ooe_zoomed(cls, lightcurve, model_lcs, plot_x, ooe_mask, xlabel):
+    def _plot_ooe_zoomed(self, lightcurve, model_lcs, plot_x, ooe_mask, xlabel):
         """Create zoomed plot on out-of-eclipse per binary."""
 
         flux = lightcurve["flux"][ooe_mask]
@@ -201,7 +201,7 @@ class LightCurvePlotter:
             flux = y[ooe_mask]
             ymin = min(flux.min(), ymin)
             ymax = max(flux.max(), ymax)
-        cls.plot_vs_phase(lightcurve, plot_x, model_lcs, xlabel)
+        self.plot_vs_phase(lightcurve, plot_x, model_lcs, xlabel)
         pad = 0.05 * (ymax - ymin)
         pyplot.ylim(ymin - pad, ymax + pad)
 
@@ -217,8 +217,7 @@ class LightCurvePlotter:
 
         return "even" if zoom == "primary" else "odd"
 
-    @classmethod
-    def plot_zoomed_binary(cls, zoom, lightcurve, model_lcs, binaries):
+    def plot_zoomed_binary(self, zoom, lightcurve, model_lcs, binaries):
         """Create zoomed plot on primary or secondary eclipse per binary."""
 
         binary_ind = 0
@@ -257,7 +256,7 @@ class LightCurvePlotter:
             if half_xrange is None:
                 raise RuntimeError()
             if zoom.startswith("ooe"):
-                phase = cls._get_phase(lightcurve, period, time_reference)
+                phase = self._get_phase(lightcurve, period, time_reference)
                 ooe_mask = numpy.logical_and(
                     ooe_mask,
                     numpy.logical_or(phase < -half_xrange, phase > half_xrange),
@@ -265,8 +264,8 @@ class LightCurvePlotter:
 
         if zoom.startswith("ooe"):
             ooe_timeref /= 2
-            phase = cls._get_phase(lightcurve, period, ooe_timeref)
-            cls._plot_ooe_zoomed(
+            phase = self._get_phase(lightcurve, period, ooe_timeref)
+            self._plot_ooe_zoomed(
                 lightcurve,
                 model_lcs,
                 lightcurve["time"] if zoom == "ooe" else phase,
@@ -276,12 +275,11 @@ class LightCurvePlotter:
         else:
             half_xrange *= 1.5
             pyplot.xlim(-half_xrange, half_xrange)
-            cls._plot_phase_zoomed(
+            self._plot_phase_zoomed(
                 lightcurve, time_reference, period, model_lcs
             )
 
-    @classmethod
-    def plot_zoomed_bls(cls, zoom, lightcurve, model_lcs, bls):
+    def plot_zoomed_bls(self, zoom, lightcurve, model_lcs, bls):
         """Create zoomed plot on BLS detected eclipses."""
 
         print(f"Creating zoom {zoom} LC plot")
@@ -300,7 +298,7 @@ class LightCurvePlotter:
                     raise RuntimeError(f"Unrecognized BLS zoom label: {zoom}")
                 time_reference = bls["transit_time"] + bls["period"][0]
         mask = get_bls_eclipse_mask(bls, lightcurve, zoom)
-        cls._plot_phase_zoomed(
+        self._plot_phase_zoomed(
             lightcurve[mask],
             time_reference,
             period,
@@ -321,7 +319,7 @@ class LightCurvePlotter:
             yerr=tess_target.sed[1],
             **self.sed_plot_config,
         )
-        config_key = "first"
+        config_key = "first" if self._config.highlight_first_model else "others"
         for bnry in binaries or ():
             pyplot.plot(
                 plot_x, bnry.absmag, **self.model_sed_plot_config[config_key]
