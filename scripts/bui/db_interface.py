@@ -19,17 +19,22 @@ Session = sessionmaker(db_engine, expire_on_commit=False)
 
 if __name__ == "__main__":
     from os import path
+    from glob import glob
     from bui.select_ticids.data_model import (
         SelectTICIDBase,
         get_ticid_select_table,
     )
     from paths import prsa_ebs
     from astropy.io import fits
+    import re
 
-    SelectTICIDs = get_ticid_select_table("prsa_ebs")
+    samples_rex = re.compile("tess(?P<tic>[0-9]*)_samples.h5")
+    SelectTICIDs = get_ticid_select_table("attempted_sampling")
     SelectTICIDBase.metadata.create_all(db_engine)
     with Session.begin() as db_session:
-        with fits.open(prsa_ebs, 'readonly') as prsa:
-            data = prsa[1].data
-            for ticid in data['TIC'][data['m_TIC'] == 1]:
-                db_session.add(SelectTICIDs(id=int(ticid), flag=0, rendered=0))
+        for samples_fname in glob("/mnt/md2/TESS_EBs/samples/*.h5"):
+            parsed = samples_rex.match(path.basename(samples_fname))
+            assert parsed
+            db_session.add(
+                SelectTICIDs(id=int(parsed["tic"]), flag=0, rendered=0)
+            )

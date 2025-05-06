@@ -122,7 +122,7 @@ class LightCurvePlotter:
                 lightcurve["time"],
                 y,
                 linewidth=(
-                    3.0 / (1 if config_key == "first" else len(model_lcs))
+                    1.0 / (1 if config_key == "first" else len(model_lcs)**0.5)
                 ),
                 **self.model_lc_plot_config[config_key],
             )
@@ -156,7 +156,7 @@ class LightCurvePlotter:
             pyplot.plot(
                 ordered_phase,
                 y[phase_order],
-                linewidth=3.0 / (1 if first else len(model_lcs)),
+                linewidth=1.0 / (1 if first else len(model_lcs)**0.5),
                 **self.model_lc_plot_config["first" if first else "others"],
             )
             first = False

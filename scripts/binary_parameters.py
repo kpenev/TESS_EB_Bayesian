@@ -224,6 +224,16 @@ class BinaryParams(batman.TransitParams):
                 ("primary", mprimary),
                 ("secondary", mprimary * sample_params.mratio),
             ]:
+                _logger.debug(
+                    "Binary: interpolating %s to M*=%s. Mass range: %s",
+                    repr(interp_kwargs),
+                    repr(mass),
+                    repr(
+                        interpolator.get_mini_range(
+                            interp_kwargs["MH"], interp_kwargs["logAge"]
+                        )
+                    ),
+                )
                 if component not in interpolated:
                     interpolated[component] = interpolator(
                         ("Mass", "logL", "logTe") + self._passbands[photsys],

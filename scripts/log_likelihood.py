@@ -469,7 +469,7 @@ class LogLikelihood(TESSTarget):
             sys_err,
             outliers.sum(),
         )
-        return sys_err
+        return max(sys_err, 1e-10)
 
     def calc_lc_log_likelihood(self, binary, lc_sys_err, eclipse_only=False):
         """
@@ -501,6 +501,8 @@ class LogLikelihood(TESSTarget):
             return -numpy.inf
         result = 0.0
         for header, lightcurve in self._lcs:
+            if lightcurve["good"].sum() < 10:
+                continue
             lightcurve = lightcurve[lightcurve["good"]]
             if eclipse_only:
                 lightcurve = lightcurve[
