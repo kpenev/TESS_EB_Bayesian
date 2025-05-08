@@ -119,6 +119,8 @@ def parse_command_line():
     )
     parser.add_argument(
         "--plot-convergence",
+        nargs=2,
+        metavar=("FILENAME", "MOSAIC"),
         help="If specified, a figure is created showing comparison between the "
         "chain length to Raftery-Lewis burn-in estimate and/or quantile "
         "precision estimate for either the directly sampled quantities or those"
@@ -358,7 +360,7 @@ def create_convergence_plot(plot_data, config, num_walkers):
         ],
     )
     pyplot.yticks(0.5 + numpy.arange(len(plot_data.columns)), plot_data.columns)
-    pyplot.savefig(config.plot_convergence)
+    pyplot.savefig(config.plot_convergence[0])
 
 
 def create_expressions_plot(plot_data, config, num_walkers=None):

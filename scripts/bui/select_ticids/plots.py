@@ -12,6 +12,7 @@ from multiprocessing import Pool
 import matplotlib
 from sqlalchemy import select, update
 from configargparse import ArgumentParser, DefaultsFormatter
+import numpy
 from numpy.random import randint, seed
 import h5py
 
@@ -33,16 +34,21 @@ from bui.select_ticids.data_model import get_ticid_select_table
 matplotlib.use("Agg")
 
 
-def plot_lc(config, fname):
+def plot_tic(config, fname):
     """Plot or encode lightcurve (and possibly models) with given config."""
 
+    for plot_type in ["lightcurve", "convergence"]:
+        plot_attr = getattr(config, f"plot_{plot_type}", None)
+        if plot_attr is not None:
+            break
+    assert plot_attr is not None
     # False positive
     # pylint: disable=possibly-used-before-assignment
     if fname is None:
         png_stream = BytesIO()
-        config.plot_lightcurve[0] = (png_stream, "png")
+        plot_attr[0] = (png_stream, "png")
     else:
-        config.plot_lightcurve[0] = fname
+        plot_attr[0] = fname
         if not path.exists(path.dirname(fname)):
             makedirs(path.dirname(fname))
     # pylint: enable=possibly-used-before-assignment
@@ -62,7 +68,7 @@ def plot_lc(config, fname):
 def lightcurve(tic_id, fname=None):
     """Plot the lightcurves available for the given TIC."""
 
-    return plot_lc(
+    return plot_tic(
         Namespace(
             tic_id=tic_id,
             plot_lightcurve=[
@@ -83,15 +89,15 @@ def starting(tic_id, fname=None):
 
     samples_fname = samples_fname_template.format(tic_id=tic_id)
     chain_name = None
-    with h5py.File(samples_fname, 'r') as samples_file:
-        for candidate_name in 'prelim_mcmc', 'mcmc':
+    with h5py.File(samples_fname, "r") as samples_file:
+        for candidate_name in "prelim_mcmc", "mcmc":
             if candidate_name in samples_file:
                 chain_name = candidate_name
                 break
     if chain_name is None:
         return None
 
-    return plot_lc(
+    return plot_tic(
         Namespace(
             tic_id=tic_id,
             plot_lightcurve=[
@@ -116,7 +122,7 @@ def starting(tic_id, fname=None):
 def best(tic_id, fname=None):
     """Plot the best fit model on top of the lightcurve and SED."""
 
-    return plot_lc(
+    return plot_tic(
         Namespace(
             tic_id=tic_id,
             plot_lightcurve=[
@@ -134,6 +140,19 @@ def best(tic_id, fname=None):
             sample_condition=None,
         ),
         fname,
+    )
+
+
+def convergence(tic_id, fname=None):
+    """Create a plot to compare steps to burni-in."""
+
+    return plot_tic(
+        Namespace(tic_id=tic_id,
+                  plot_convergence=[None, "[burnin]"],
+                  diagnostic_quantiles=numpy.linspace(0.1, 0.9, 9),
+                  burnin_tolerance=1e-4,
+                  quantile_variance_realizations=5),
+        fname
     )
 
 
