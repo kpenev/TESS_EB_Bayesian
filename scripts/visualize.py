@@ -437,7 +437,7 @@ def get_param_binaries(sample_params, config, **extra_condition_vars):
     for params in sample_params:
         if (
             config.show_model_with_lc.strip().startswith("-1")
-            and getattr(config, 'sample_condition', None) is not None
+            and getattr(config, "sample_condition", None) is not None
             and not Interpreter(
                 user_symbols=(
                     dict(zip(SampleParams._fields, params))
@@ -617,7 +617,7 @@ def main(config):
         log_prob = None
         selected = None
 
-    if config.plot_lightcurve:
+    if getattr(config, "plot_lightcurve", False):
         if config.show_model_with_lc and plot_data is not None:
             binaries, num_skipped = get_model_binaries(
                 config,

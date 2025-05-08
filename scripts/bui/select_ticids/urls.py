@@ -68,7 +68,7 @@ urlpatterns = [
                 name=f"{plot_type}_decision",
             ),
         ]
-        for plot_type in ["starting", "best"]
+        for plot_type in ["starting", "best", "convergence"]
     ),
     [],
 )

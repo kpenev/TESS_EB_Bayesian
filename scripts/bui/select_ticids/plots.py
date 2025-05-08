@@ -147,12 +147,30 @@ def convergence(tic_id, fname=None):
     """Create a plot to compare steps to burni-in."""
 
     return plot_tic(
-        Namespace(tic_id=tic_id,
-                  plot_convergence=[None, "[burnin]"],
-                  diagnostic_quantiles=numpy.linspace(0.1, 0.9, 9),
-                  burnin_tolerance=1e-4,
-                  quantile_variance_realizations=5),
-        fname
+        Namespace(
+            tic_id=tic_id,
+            plot_convergence=[None, "[burnin]"],
+            diagnostic_quantiles=numpy.linspace(0.1, 0.9, 9),
+            burnin_tolerance=1e-4,
+            quantile_variance_realizations=5,
+            samples_fname=samples_fname_template.format(tic_id=tic_id),
+            chain_expression=[
+                "$M_1+M_2$=mtotal",
+                "$M_2/M_1$=mratio",
+                "Age=age_gyr",
+                "$[M/H]$=meh",
+                "$P_{orb}$=per",
+                "e=ecc",
+                "$\omega$=w",
+                "b=primary_impact_param",
+                "$T_0$=eclipse_time",
+            ],
+            chain_name="mcmc",
+            burn_in=0,
+            thin=1,
+            sample_condition=None,
+        ),
+        fname,
     )
 
 
