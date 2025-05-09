@@ -90,7 +90,7 @@ def starting(tic_id, fname=None):
     samples_fname = samples_fname_template.format(tic_id=tic_id)
     chain_name = None
     with h5py.File(samples_fname, "r") as samples_file:
-        for candidate_name in "prelim_mcmc", "mcmc":
+        for candidate_name in ("prelim_mcmc_0", "mcmc"):
             if candidate_name in samples_file:
                 chain_name = candidate_name
                 break
