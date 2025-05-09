@@ -566,6 +566,9 @@ def get_plot_data(config, backend, log_likelihood):
             columns=SampleParams._fields,
         )
         num_iterations = 1
+        selected = None
+        raw_data = None
+        log_prob = None
 
     if getattr(config, "sample_condition", None) is not None:
         print(
