@@ -452,6 +452,9 @@ class FindStartingPositions:
                 )
                 non_finite = numpy.logical_not(numpy.isfinite(mcmc_sample))
                 tiny = numpy.logical_and(non_finite, mcmc_sample < 0)
+                tiny[SampleParams._fields.index('lc_sys')] = True
+                tiny[SampleParams._fields.index('sed_sys')] = True
+
                 mcmc_sample[tiny] = norm.ppf(
                     uniform.rvs(size=tiny.sum(), scale=0.2)
                 )
