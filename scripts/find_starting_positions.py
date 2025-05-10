@@ -60,7 +60,11 @@ class FindStartingPositions:
     def _match_eclipse_times(self, params, randomize_e):
         """Set the eccentricity to match the eclipse phases."""
 
-        if self._bls_eclipses["shallower"] != "masked" and not randomize_e:
+        if (
+            self._bls_eclipses["shallower"] != "masked"
+            and self._bls_eclipses["deeper"] != "masked"
+            and not randomize_e
+        ):
             if params.w % 360 > 270:
                 params = params._replace(w=params.w - 360.0)
             return params._replace(ecc=0.0)
