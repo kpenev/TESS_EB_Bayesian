@@ -2,6 +2,9 @@
 
 #SBATCH -J TESS_EB_mcmc@@JOBID@@
 #SBATCH -N @@NODES_PER_JOB@@  #Number of nodes on which to distribute the tasks evenly
+#SBATCH -n 128 #Number of cores per node
+#SBATCH --ntasks-per-node=128
+#SBATCH --tasks-per-node=128
 #SBATCH -o /scratch/05392/kpenev/output/TESS_EBs/mcmc_output/@@JOBID@@_slurm.out
 #SBATCH --mail-user=kxp174430@utdallas.edu
 #SBATCH --mail-type=all
