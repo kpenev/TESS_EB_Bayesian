@@ -43,8 +43,10 @@ class FindStartingPositions:
 
         bls_info = self._log_likelihood.best_fit_bls
         if self._log_likelihood.masked_is_significant():
-            assert bls_info["depth"][0] > bls_info["masked_depth"][0]
-            return "both", "masked", False
+            if bls_info["depth"][0] > bls_info["masked_depth"][0]:
+                return "both", "masked", False
+            else:
+                return "masked", "both", False
         single = abs(
             bls_info["depth_even"][0] - bls_info["depth_odd"][0]
         ) < 5.0 * numpy.sqrt(
@@ -124,6 +126,8 @@ class FindStartingPositions:
         bls_info = self._log_likelihood.best_fit_bls
         if self._bls_eclipses["shallower"] == "maked":
             duration = max(bls_info["duration"], bls_info["masked_duration"])
+        if self._bls_eclipses["deeper"] == "maked":
+            duration = max(bls_info["masked_duration"], bls_info["duration"])
         else:
             duration = bls_info["duration"]
         faintest = None
@@ -401,7 +405,8 @@ class FindStartingPositions:
                         scenario["meh"],
                         scenario["w"],
                         scenario_ind > 0
-                        and self._bls_eclipses["shallower"] != "masked",
+                        and self._bls_eclipses["shallower"] != "masked"
+                        and self._bls_eclipses["deeper"] != "masked",
                     )
                 except ValueError:
                     _logger.warning(
@@ -452,8 +457,8 @@ class FindStartingPositions:
                 )
                 non_finite = numpy.logical_not(numpy.isfinite(mcmc_sample))
                 tiny = numpy.logical_and(non_finite, mcmc_sample < 0)
-                tiny[SampleParams._fields.index('lc_sys')] = True
-                tiny[SampleParams._fields.index('sed_sys')] = True
+                tiny[SampleParams._fields.index("lc_sys")] = True
+                tiny[SampleParams._fields.index("sed_sys")] = True
 
                 mcmc_sample[tiny] = norm.ppf(
                     uniform.rvs(size=tiny.sum(), scale=0.2)
@@ -503,6 +508,12 @@ class FindStartingPositions:
                 (bls_info["masked_transit_time"] - bls_info["transit_time"])
                 % bls_info["period"][0]
             ) / bls_info["period"][0]
+        elif self._bls_eclipses["deeper"] == "masked":
+            self._secondary_eclipse_phase = (
+                (bls_info["transit_time"] - bls_info["masked_transit_time"])
+                % bls_info["period"][0]
+            ) / bls_info["period"][0]
+
         else:
             self._secondary_eclipse_phase = 0.5
 
@@ -518,12 +529,21 @@ class FindStartingPositions:
             meh=meh,
             per=(
                 self._log_likelihood.best_fit_bls["period"][0]
-                * (1 if self._bls_eclipses["shallower"] == "masked" else 2)
+                * (
+                    1
+                    if self._bls_eclipses["shallower"] == "masked"
+                    or self._bls_eclipses["deeper"] == "masked"
+                    else 2
+                )
             ),
             ecc=0.0,
             w=w,
             primary_impact_param=0.0,
-            eclipse_time=self._log_likelihood.best_fit_bls["transit_time"],
+            eclipse_time=(
+                self._log_likelihood.best_fit_bls["masked_transit_time"]
+                if self._bls_eclipses["deeper"] == "masked"
+                else self._log_likelihood.best_fit_bls["transit_time"]
+            ),
         )
 
         _logger.debug("Starting params: %s", params)
