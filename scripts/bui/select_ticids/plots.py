@@ -22,7 +22,11 @@ from general_purpose_python_modules.multiprocessing_util import (
 
 from visualize import main as visualize
 from mcmc_sampling import default_logging_format
-from paths import results_dir, samples as samples_fname_template
+from paths import (
+    results_dir,
+    samples as samples_fname_template,
+    render_dir as default_render_dir,
+)
 
 # False positive
 # pylint: disable=import-error
@@ -102,7 +106,10 @@ def starting(tic_id, fname=None):
             tic_id=tic_id,
             plot_lightcurve=[
                 None,
-                "[[full, full], [folded, sed], [zoom_primary, zoom_secondary]]",
+                "[[full, full],"
+                " [folded, folded],"
+                " [zoom_odd, zoom_even],"
+                " [sed, zoom_masked]]",
             ],
             show_model_with_lc="-1",
             data_on_top=True,
@@ -161,7 +168,7 @@ def convergence(tic_id, fname=None):
                 "$[M/H]$=meh",
                 "$P_{orb}$=per",
                 "e=ecc",
-                "$\omega$=w",
+                r"$\omega$=w",
                 "b=primary_impact_param",
                 "$T_0$=eclipse_time",
             ],
@@ -217,50 +224,59 @@ def render_one(tic_id, tablename, plot_func, render_dir):
 def render_all_plots(config):
     """Render the lightcurves plots for a list of TIC IDs for faster review."""
 
-    # That's the whole point
-    # pylint: disable=no-member
-    # This is actually a class
-    # pylint: disable=invalid-name
-    SelectTICIDs = get_ticid_select_table(config.table_name)
-    # pylint: enable=no-member
-    # pylint: enable=invalid-name
+    # # That's the whole point
+    # # pylint: disable=no-member
+    # # This is actually a class
+    # # pylint: disable=invalid-name
+    # SelectTICIDs = get_ticid_select_table(config.table_name)
+    # # pylint: enable=no-member
+    # # pylint: enable=invalid-name
 
-    # False positive
-    # pylint: disable=no-member
-    with Session.begin() as db_session:
-        # pylint: enable=no-member
-        tic_id_list = list(
-            db_session.execute(
-                select(SelectTICIDs.id).order_by(SelectTICIDs.id)
-            ).scalars()
-        )[config.start :]
+    # # False positive
+    # # pylint: disable=no-member
+    # with Session.begin() as db_session:
+    #     # pylint: enable=no-member
+    #     tic_id_list = list(
+    #         db_session.execute(
+    #             select(SelectTICIDs.id).order_by(SelectTICIDs.id)
+    #         ).scalars()
+    #     )[config.start :]
 
-    if config.count is not None:
-        tic_id_list = tic_id_list[: config.count]
+    # if config.count is not None:
+    #     tic_id_list = tic_id_list[: config.count]
+
+    tic_id_list = [
+        158491288,
+        157999789,
+        157774304,
+        148914403,
+        146039664,
+        142865103,
+        142080812,
+        139188326,
+        132298139,
+        124350360,
+        122446960,
+        122375269,
+    ]
+
+    render_func = partial(
+        render_one,
+        tablename=config.table_name,
+        plot_func=globals()[config.plot_type],
+        render_dir=config.plot_dir.format(config=config),
+    )
 
     if config.num_parallel > 1:
         with Pool(
-            config.num_parallel,
+            min(config.num_parallel, len(tic_id_list)),
             initializer=setup_process_map,
             initargs=[vars(config)],
         ) as pool:
-            pool.map(
-                partial(
-                    render_one,
-                    tablename=config.table_name,
-                    plot_func=globals()[config.plot_type],
-                    render_dir=config.plot_dir,
-                ),
-                tic_id_list,
-            )
+            pool.map(render_func, tic_id_list)
     else:
         for tic_id in tic_id_list:
-            render_one(
-                tic_id,
-                tablename=config.table_name,
-                plot_func=globals()[config.plot_type],
-                render_dir=config.plot_dir,
-            )
+            render_func(tic_id)
 
 
 def parse_command_line():
@@ -297,7 +313,9 @@ def parse_command_line():
     )
     parser.add_argument(
         "--plot-dir",
-        default="/mnt/md2/TESS_EBs/prsa_ebs",
+        default=path.join(
+            default_render_dir, "{config.table_name}", "{config.plot_type}"
+        ),
         help="Directory where to save the plot files.",
     )
     parser.add_argument(

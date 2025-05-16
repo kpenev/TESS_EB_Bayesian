@@ -17,6 +17,7 @@ from db_interface import Session
 # pylint: enable=import-error
 
 from .data_model import get_ticid_select_table
+from paths import render_dir
 
 
 class TICIdSelectorView(View):
@@ -25,7 +26,6 @@ class TICIdSelectorView(View):
     reviewing = None
     tablename = None
     plot = None
-    render_root = "/mnt/md2/TESS_EBs/"
     rendered_only = False
 
     def get(self, request, displayed_ticid=None, decision=None):
@@ -97,7 +97,7 @@ class TICIdSelectorView(View):
         context["displayed_ticid"] = displayed_ticid
         context["review"] = self.reviewing
         plot_fname = path.join(
-            self.render_root,
+            render_dir,
             self.tablename,
             self.plot.__name__,
             f"tess{displayed_ticid}.png",
