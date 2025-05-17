@@ -60,7 +60,11 @@ class FindStartingPositions:
     def _match_eclipse_times(self, params, randomize_e):
         """Set the eccentricity to match the eclipse phases."""
 
-        if self._bls_eclipses["shallower"] != "masked" and not randomize_e:
+        if (
+            self._bls_eclipses["shallower"] != "masked"
+            and self._bls_eclipses["deeper"] != "masked"
+            and not randomize_e
+        ):
             if params.w % 360 > 270:
                 params = params._replace(w=params.w - 360.0)
             return params._replace(ecc=0.0)
@@ -159,6 +163,12 @@ class FindStartingPositions:
         """Tune the primary impact parameter to best fit deeper eclipses."""
 
         def to_minimize(impact, phase_matched_params):
+            _logger.debug(
+                "Impact: Trying b=%s to match %s eclipses for %s",
+                impact,
+                self._bls_eclipses["deeper"],
+                phase_matched_params,
+            )
             mod_params = phase_matched_params._replace(
                 primary_impact_param=impact
             )
@@ -173,9 +183,12 @@ class FindStartingPositions:
 
         params = self._match_deeper_eclipse_phase(params)
         temp_binary = Binary(from_mcmc=params)
-        max_impact = temp_binary.a
+        max_impact = min(temp_binary.a, 1.0 + temp_binary.rp)
         _logger.debug(
-            "Optimizing impact parameter for params:\n%s\nbinary:\n%s",
+            "Optimizing impact parameter in range (%s, %s) for params:\n%s\n"
+            "binary:\n%s",
+            0.0,
+            max_impact,
             params,
             temp_binary,
         )
@@ -185,7 +198,7 @@ class FindStartingPositions:
                 0.0,
                 min(
                     self._log_likelihood.get_range("primary_impact_param")[1],
-                    temp_binary.a,
+                    max_impact,
                 ),
             ),
             args=(params,),

@@ -206,7 +206,7 @@ def parse_command_line():
         "--diagnostic-quantiles",
         type=float,
         nargs="+",
-        default=numpy.linspace(0.1, 0.9, 9),
+        default=list(numpy.linspace(0.1, 0.9, 9)),
         help="The quantiles at which to use for the Raftery-Lewis diagnostic to"
         " determine convergence.",
     )
@@ -603,6 +603,7 @@ def get_plot_data(config, backend, log_likelihood):
 def main(config):
     """Avoid polluting global namespace."""
 
+    config.highlight_first_model = False
     logging.basicConfig(level=logging.DEBUG)
     log_likelihood = LogLikelihood(config.tic_id)
     if path.exists(config.samples_fname):
