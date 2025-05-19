@@ -606,7 +606,9 @@ def main(config):
     config.highlight_first_model = False
     logging.basicConfig(level=logging.DEBUG)
     log_likelihood = LogLikelihood(config.tic_id)
-    if path.exists(config.samples_fname):
+    if path.exists(config.samples_fname) and getattr(
+        config, "chain_name", False
+    ):
         backend = HDFBackend(
             config.samples_fname, name=config.chain_name, read_only=True
         )
@@ -622,7 +624,10 @@ def main(config):
         selected = None
 
     if getattr(config, "plot_lightcurve", False):
-        if config.show_model_with_lc and plot_data is not None:
+        if (
+            getattr(config, "show_model_with_lc", False)
+            and plot_data is not None
+        ):
             binaries, num_skipped = get_model_binaries(
                 config,
                 raw_data,

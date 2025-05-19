@@ -83,6 +83,7 @@ def lightcurve(tic_id, fname=None):
                 " [sed, zoom_masked]]",
             ],
             data_on_top=False,
+            samples_fname=samples_fname_template.format(tic_id=tic_id),
         ),
         fname,
     )
@@ -232,18 +233,25 @@ def render_all_plots(config):
     # pylint: enable=no-member
     # pylint: enable=invalid-name
 
+    selection = select(SelectTICIDs.id)
+    if config.selected_only:
+        selection = selection.where(SelectTICIDs.flag == 1)
+
     # False positive
     # pylint: disable=no-member
     with Session.begin() as db_session:
         # pylint: enable=no-member
         tic_id_list = list(
             db_session.execute(
-                select(SelectTICIDs.id).order_by(SelectTICIDs.id)
+                selection.order_by(SelectTICIDs.id)
             ).scalars()
         )[config.start :]
 
     if config.count is not None:
         tic_id_list = tic_id_list[: config.count]
+
+    print(f'Rendering {len(tic_id_list)} plots for {config.table_name}.')
+    return
 
     render_func = partial(
         render_one,
@@ -295,6 +303,12 @@ def parse_command_line():
         type=int,
         help="The number of parallel processes to use.",
         default=16,
+    )
+    parser.add_argument(
+        '--selected-only',
+        action='store_true',
+        default=False,
+        help="Only render objects that have been selected.",
     )
     parser.add_argument(
         "--plot-dir",
