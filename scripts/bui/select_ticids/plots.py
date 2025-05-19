@@ -224,41 +224,26 @@ def render_one(tic_id, tablename, plot_func, render_dir):
 def render_all_plots(config):
     """Render the lightcurves plots for a list of TIC IDs for faster review."""
 
-    # # That's the whole point
-    # # pylint: disable=no-member
-    # # This is actually a class
-    # # pylint: disable=invalid-name
-    # SelectTICIDs = get_ticid_select_table(config.table_name)
-    # # pylint: enable=no-member
-    # # pylint: enable=invalid-name
+    # That's the whole point
+    # pylint: disable=no-member
+    # This is actually a class
+    # pylint: disable=invalid-name
+    SelectTICIDs = get_ticid_select_table(config.table_name)
+    # pylint: enable=no-member
+    # pylint: enable=invalid-name
 
-    # # False positive
-    # # pylint: disable=no-member
-    # with Session.begin() as db_session:
-    #     # pylint: enable=no-member
-    #     tic_id_list = list(
-    #         db_session.execute(
-    #             select(SelectTICIDs.id).order_by(SelectTICIDs.id)
-    #         ).scalars()
-    #     )[config.start :]
+    # False positive
+    # pylint: disable=no-member
+    with Session.begin() as db_session:
+        # pylint: enable=no-member
+        tic_id_list = list(
+            db_session.execute(
+                select(SelectTICIDs.id).order_by(SelectTICIDs.id)
+            ).scalars()
+        )[config.start :]
 
-    # if config.count is not None:
-    #     tic_id_list = tic_id_list[: config.count]
-
-    tic_id_list = [
-        158491288,
-        157999789,
-        157774304,
-        148914403,
-        146039664,
-        142865103,
-        142080812,
-        139188326,
-        132298139,
-        124350360,
-        122446960,
-        122375269,
-    ]
+    if config.count is not None:
+        tic_id_list = tic_id_list[: config.count]
 
     render_func = partial(
         render_one,
