@@ -473,6 +473,11 @@ class LightCurvePlotter:
                             model_lcs,
                             tess_target.best_fit_bls,
                         )
+                        if (
+                            zoom_type == "masked"
+                            and not tess_target.masked_is_significant()
+                        ):
+                            axis.set_facecolor("lightgrey")
                     else:
                         try:
                             self.plot_zoomed_binary(
