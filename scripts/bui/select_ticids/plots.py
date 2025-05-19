@@ -251,7 +251,6 @@ def render_all_plots(config):
         tic_id_list = tic_id_list[: config.count]
 
     print(f'Rendering {len(tic_id_list)} plots for {config.table_name}.')
-    return
 
     render_func = partial(
         render_one,
