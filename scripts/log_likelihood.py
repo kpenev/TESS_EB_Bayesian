@@ -271,8 +271,10 @@ class LogLikelihood(TESSTarget):
 
         bls = self._best_fit_bls
         return (
-            bls["masked_depth"][0] > 5.0 * bls["masked_depth"][1]
+            bls["masked_depth"][0] > max(5.0 * bls["masked_depth"][1], 0.01)
             and bls["masked_harmonic_delta_log_likelihood"] < -5.0
+            and abs(bls["depth_even"][0] - bls["depth_odd"][0])
+            < 10.0 * (bls["depth_even"][1] + bls["depth_odd"][1])
         )
 
     @staticmethod
