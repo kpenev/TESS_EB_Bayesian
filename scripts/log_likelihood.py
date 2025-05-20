@@ -271,10 +271,13 @@ class LogLikelihood(TESSTarget):
 
         bls = self._best_fit_bls
         return (
-            abs(bls["masked_period"][0] - bls["period"][0])
-            < 5.0 * bls["period"][1]
-            and bls["masked_depth"][0] > 5.0 * bls["masked_depth"][1]
-            and bls["masked_harmonic_delta_log_likelihood"] < -5.0
+            bls["masked_depth"][0] > 10.0 * bls["masked_depth"][1]
+            and bls["masked_harmonic_delta_log_likelihood"] < -10.0
+            and abs(bls["depth_even"][0] - bls["depth_odd"][0])
+            < max(
+                10.0 * (bls["depth_even"][1] + bls["depth_odd"][1]),
+                bls["masked_depth"][0],
+            )
         )
 
     @staticmethod
@@ -510,6 +513,8 @@ class LogLikelihood(TESSTarget):
                         self._best_fit_bls, lightcurve, eclipse_only
                     )
                 ]
+            if lightcurve.size < 10:
+                continue
             model_lc, lc_sq_errors = self.get_model(
                 binary, header, lightcurve, lc_sys_err
             )

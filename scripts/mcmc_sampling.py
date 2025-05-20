@@ -293,6 +293,8 @@ def restart_sampling(backend, config):
                 "" if final else "not ",
                 repr(config.restart_log_likelihood_range),
             )
+            with h5py.File(backend.filename, "r+") as samples_f:
+                samples_f["mcmc"].attrs["final_run"] = final
 
             return backend, initial_state, final
         select_from += 1

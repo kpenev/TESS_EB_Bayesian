@@ -122,7 +122,8 @@ class LightCurvePlotter:
                 lightcurve["time"],
                 y,
                 linewidth=(
-                    1.0 / (1 if config_key == "first" else len(model_lcs)**0.5)
+                    1.0
+                    / (1 if config_key == "first" else len(model_lcs) ** 0.5)
                 ),
                 **self.model_lc_plot_config[config_key],
             )
@@ -156,7 +157,7 @@ class LightCurvePlotter:
             pyplot.plot(
                 ordered_phase,
                 y[phase_order],
-                linewidth=1.0 / (1 if first else len(model_lcs)**0.5),
+                linewidth=1.0 / (1 if first else len(model_lcs) ** 0.5),
                 **self.model_lc_plot_config["first" if first else "others"],
             )
             first = False
@@ -282,7 +283,7 @@ class LightCurvePlotter:
     def plot_zoomed_bls(self, zoom, lightcurve, model_lcs, bls):
         """Create zoomed plot on BLS detected eclipses."""
 
-        print(f"Creating zoom {zoom} LC plot")
+        print(f"Creating zoom {zoom} LC plot using BLS information: {bls}")
         if zoom == "default":
             period = bls["period"][0]
             time_reference = bls["transit_time"]
@@ -465,26 +466,32 @@ class LightCurvePlotter:
                 pyplot.sca(axis)
                 if plot_type.startswith("zoom_"):
                     zoom_type = plot_type[len("zoom_") :]
-                    try:
-                        getattr(
-                            self,
-                            "plot_zoomed_"
-                            + ("binary" if binaries is not None else "bls"),
-                        )(
-                            zoom_type,
-                            lightcurve,
-                            model_lcs,
-                            binaries or tess_target.best_fit_bls,
-                        )
-                    except RuntimeError:
+                    if zoom_type in ["odd", "even", "masked", "default"]:
                         self.plot_zoomed_bls(
-                            self._convert_binary_to_bsl_zoom(
-                                zoom_type, tess_target
-                            ),
+                            zoom_type,
                             lightcurve,
                             model_lcs,
                             tess_target.best_fit_bls,
                         )
+                        if (
+                            zoom_type == "masked"
+                            and not tess_target.masked_is_significant()
+                        ):
+                            axis.set_facecolor("lightgrey")
+                    else:
+                        try:
+                            self.plot_zoomed_binary(
+                                zoom_type, lightcurve, model_lcs, binaries
+                            )
+                        except RuntimeError:
+                            self.plot_zoomed_bls(
+                                self._convert_binary_to_bsl_zoom(
+                                    zoom_type, tess_target
+                                ),
+                                lightcurve,
+                                model_lcs,
+                                tess_target.best_fit_bls,
+                            )
                 elif plot_type.endswith("_diff"):
                     self.plot_diff(
                         plot_type[: -len("_diff")], lightcurve, model_lcs

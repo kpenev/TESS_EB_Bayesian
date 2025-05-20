@@ -43,8 +43,10 @@ class FindStartingPositions:
 
         bls_info = self._log_likelihood.best_fit_bls
         if self._log_likelihood.masked_is_significant():
-            assert bls_info["depth"][0] > bls_info["masked_depth"][0]
-            return "both", "masked", False
+            if bls_info["depth"][0] > bls_info["masked_depth"][0]:
+                return "both", "masked", False
+            else:
+                return "masked", "both", False
         single = abs(
             bls_info["depth_even"][0] - bls_info["depth_odd"][0]
         ) < 5.0 * numpy.sqrt(
@@ -58,7 +60,11 @@ class FindStartingPositions:
     def _match_eclipse_times(self, params, randomize_e):
         """Set the eccentricity to match the eclipse phases."""
 
-        if self._bls_eclipses["shallower"] != "masked" and not randomize_e:
+        if (
+            self._bls_eclipses["shallower"] != "masked"
+            and self._bls_eclipses["deeper"] != "masked"
+            and not randomize_e
+        ):
             if params.w % 360 > 270:
                 params = params._replace(w=params.w - 360.0)
             return params._replace(ecc=0.0)
@@ -124,6 +130,8 @@ class FindStartingPositions:
         bls_info = self._log_likelihood.best_fit_bls
         if self._bls_eclipses["shallower"] == "maked":
             duration = max(bls_info["duration"], bls_info["masked_duration"])
+        if self._bls_eclipses["deeper"] == "maked":
+            duration = max(bls_info["masked_duration"], bls_info["duration"])
         else:
             duration = bls_info["duration"]
         faintest = None
@@ -155,6 +163,12 @@ class FindStartingPositions:
         """Tune the primary impact parameter to best fit deeper eclipses."""
 
         def to_minimize(impact, phase_matched_params):
+            _logger.debug(
+                "Impact: Trying b=%s to match %s eclipses for %s",
+                impact,
+                self._bls_eclipses["deeper"],
+                phase_matched_params,
+            )
             mod_params = phase_matched_params._replace(
                 primary_impact_param=impact
             )
@@ -169,9 +183,12 @@ class FindStartingPositions:
 
         params = self._match_deeper_eclipse_phase(params)
         temp_binary = Binary(from_mcmc=params)
-        max_impact = temp_binary.a
+        max_impact = min(temp_binary.a, 1.0 + temp_binary.rp)
         _logger.debug(
-            "Optimizing impact parameter for params:\n%s\nbinary:\n%s",
+            "Optimizing impact parameter in range (%s, %s) for params:\n%s\n"
+            "binary:\n%s",
+            0.0,
+            max_impact,
             params,
             temp_binary,
         )
@@ -181,7 +198,7 @@ class FindStartingPositions:
                 0.0,
                 min(
                     self._log_likelihood.get_range("primary_impact_param")[1],
-                    temp_binary.a,
+                    max_impact,
                 ),
             ),
             args=(params,),
@@ -401,7 +418,8 @@ class FindStartingPositions:
                         scenario["meh"],
                         scenario["w"],
                         scenario_ind > 0
-                        and self._bls_eclipses["shallower"] != "masked",
+                        and self._bls_eclipses["shallower"] != "masked"
+                        and self._bls_eclipses["deeper"] != "masked",
                     )
                 except ValueError:
                     _logger.warning(
@@ -452,8 +470,8 @@ class FindStartingPositions:
                 )
                 non_finite = numpy.logical_not(numpy.isfinite(mcmc_sample))
                 tiny = numpy.logical_and(non_finite, mcmc_sample < 0)
-                tiny[SampleParams._fields.index('lc_sys')] = True
-                tiny[SampleParams._fields.index('sed_sys')] = True
+                tiny[SampleParams._fields.index("lc_sys")] = True
+                tiny[SampleParams._fields.index("sed_sys")] = True
 
                 mcmc_sample[tiny] = norm.ppf(
                     uniform.rvs(size=tiny.sum(), scale=0.2)
@@ -503,6 +521,12 @@ class FindStartingPositions:
                 (bls_info["masked_transit_time"] - bls_info["transit_time"])
                 % bls_info["period"][0]
             ) / bls_info["period"][0]
+        elif self._bls_eclipses["deeper"] == "masked":
+            self._secondary_eclipse_phase = (
+                (bls_info["transit_time"] - bls_info["masked_transit_time"])
+                % bls_info["period"][0]
+            ) / bls_info["period"][0]
+
         else:
             self._secondary_eclipse_phase = 0.5
 
@@ -518,12 +542,21 @@ class FindStartingPositions:
             meh=meh,
             per=(
                 self._log_likelihood.best_fit_bls["period"][0]
-                * (1 if self._bls_eclipses["shallower"] == "masked" else 2)
+                * (
+                    1
+                    if self._bls_eclipses["shallower"] == "masked"
+                    or self._bls_eclipses["deeper"] == "masked"
+                    else 2
+                )
             ),
             ecc=0.0,
             w=w,
             primary_impact_param=0.0,
-            eclipse_time=self._log_likelihood.best_fit_bls["transit_time"],
+            eclipse_time=(
+                self._log_likelihood.best_fit_bls["masked_transit_time"]
+                if self._bls_eclipses["deeper"] == "masked"
+                else self._log_likelihood.best_fit_bls["transit_time"]
+            ),
         )
 
         _logger.debug("Starting params: %s", params)

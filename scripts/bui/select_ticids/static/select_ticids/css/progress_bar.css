@@ -16,7 +16,8 @@ progress::-webkit-progress-bar {
 
 #progress-with-label {
     display: flex;
-    position: relative;
+    position: sticky;
+    top: 50px;
     width: 15.25rem;
     min-width: 100%;
     border: 1px solid black;

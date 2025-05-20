@@ -30,3 +30,4 @@ slurm_fname = path.join(
 launcher_fname = path.join(
     path.dirname(data_dir), "slurm", "{hpc}", "launcher_commands_{jobid}.txt"
 )
+render_dir = path.join(results_dir, "render")

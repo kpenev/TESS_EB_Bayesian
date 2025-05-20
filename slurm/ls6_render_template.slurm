@@ -1,9 +1,9 @@
 #!/bin/bash
 
-#SBATCH -J render_prsa_@@JOBIND@@
+#SBATCH -J render_prsa_@@JOBID@@
 #SBATCH -N 1  #Number of nodes on which to distribute the tasks evenly
 #SBATCH -n 1 #Total number of tasks to run at one time
-#SBATCH -o /scratch/05392/kpenev/output/TESS_EBs/render_output/@@JOBIND@@_slurm.out
+#SBATCH -o /scratch/05392/kpenev/output/TESS_EBs/render_output/@@JOBID@@_slurm.out
 #SBATCH --mail-user=kxp174430@utdallas.edu
 #SBATCH --mail-type=all
 #SBATCH -t 12:00:00
@@ -46,6 +46,6 @@ source ~/module_load_order.txt
 
 export PYTHONUNBUFFERED=1
 
-render $((@@JOBIND@@ * 256)) 256
+render $((@@JOBID@@ * 256)) 256
 
 wait

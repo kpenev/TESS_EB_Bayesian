@@ -9,6 +9,7 @@ from astropy.timeseries import BoxLeastSquares
 # from foldedleastsquares import transitleastsquares, transit_mask
 
 from download_lcs import get_astroquery as download_lcs
+from exclude_data import exclude_data
 
 
 class FalsePositiveError(Exception):
@@ -169,8 +170,18 @@ class TESSTarget:
 
         return self._time_span
 
-    @staticmethod
-    def _get_best_fit_bls(lightcurve):
+    def _get_bls_period_step(self):
+        """Return the period step for the BLS search."""
+
+        return 0.02 / (
+            30.0
+            * min(
+                (self._time_span[1] - self._time_span[0]),
+                300,
+            )
+        )
+
+    def _get_best_fit_bls(self, lightcurve, periods=None):
         """Return the best fit orbital period and time of primary transit."""
 
         model = BoxLeastSquares(
@@ -179,21 +190,19 @@ class TESSTarget:
             dy=lightcurve["flux_err"],
         )
 
-        periodogram = model.power(
-            1.0
-            / numpy.arange(
+        auto_period = periods is None
+        if auto_period:
+            periods = 1.0 / numpy.arange(
                 1.0 / 0.4,
                 1.0 / 30.0,
-                -0.02
-                / (
-                    30.0
-                    * min(
-                        (lightcurve["time"].max() - lightcurve["time"].min()),
-                        300,
-                    )
-                ),
-            ),
-            numpy.linspace(0.02, 0.2, 100),
+                -self._get_bls_period_step(),
+            )
+        self._logger.debug("Computing BLS for perieds:\n%s", repr(periods))
+
+        periodogram = model.power(periods, numpy.linspace(0.02, 0.2, 100))
+        self._logger.debug(
+            'Periodogram periods:\n%s',
+            repr(periodogram.period),
         )
         best_index = numpy.argmax(periodogram.power)
         stats = model.compute_stats(
@@ -208,31 +217,32 @@ class TESSTarget:
                 [f"{param}: {value}" for param, value in stats.items()]
             ),
         )
-        if periodogram.duration[best_index] > 0.15:
-            candidate = model.power(
-                1.0 / numpy.arange(1 / 2.0, 0.01, -0.1 / 30.0**2),
-                numpy.linspace(0.1, 1.0, 100),
-            )
-            candidate_best_index = numpy.argmax(candidate.power)
-        elif periodogram.duration[best_index] < 0.04:
-            candidate = model.power(
-                1.0 / numpy.arange(1 / 0.1, 0.01, -0.01 / 30.0**2),
-                numpy.linspace(0.01, 0.05, 100),
-            )
-            candidate_best_index = numpy.argmax(candidate.power)
-        else:
-            candidate = None
+        if auto_period:
+            if periodogram.duration[best_index] > 0.15:
+                candidate = model.power(
+                    1.0 / numpy.arange(1 / 2.0, 0.01, -0.1 / 30.0**2),
+                    numpy.linspace(0.1, 1.0, 100),
+                )
+                candidate_best_index = numpy.argmax(candidate.power)
+            elif periodogram.duration[best_index] < 0.04:
+                candidate = model.power(
+                    1.0 / numpy.arange(1 / 0.1, 0.01, -0.01 / 30.0**2),
+                    numpy.linspace(0.01, 0.05, 100),
+                )
+                candidate_best_index = numpy.argmax(candidate.power)
+            else:
+                candidate = None
 
-        if (
-            candidate is not None
-            # False positive
-            # pylint: disable=possibly-used-before-assignment
-            and candidate.depth[candidate_best_index]
-            > periodogram.depth[best_index]
-            # pylint: enable=possibly-used-before-assignment
-        ):
-            periodogram = candidate
-            best_index = candidate_best_index
+            if (
+                candidate is not None
+                # False positive
+                # pylint: disable=possibly-used-before-assignment
+                and candidate.depth[candidate_best_index]
+                > periodogram.depth[best_index]
+                # pylint: enable=possibly-used-before-assignment
+            ):
+                periodogram = candidate
+                best_index = candidate_best_index
 
         index_range = [0, periodogram.power.size - 1]
         cutoff = 0.3 * periodogram.power[best_index]
@@ -280,49 +290,31 @@ class TESSTarget:
             get_bls_eclipse_mask(bls_results, lightcurve, "both")
         )
         self._logger.debug("After masking, %d points remain", mask.sum())
-        masked_bls_result = self._get_best_fit_bls(lightcurve[mask])
+        num_periods = max(
+            10,
+            int(
+                (11.0 * bls_results["period"][1]) // self._get_bls_period_step()
+            ),
+        )
+        self._logger.debug(
+            "Covering period range %s < Porb < %s with %d points",
+            bls_results["period"][0] - 5 * bls_results["period"][1],
+            bls_results["period"][0] + 5 * bls_results["period"][1],
+            num_periods,
+        )
+
+        masked_bls_result = self._get_best_fit_bls(
+            lightcurve[mask],
+            periods=numpy.linspace(
+                bls_results["period"][0] - 5 * bls_results["period"][1],
+                bls_results["period"][0] + 5 * bls_results["period"][1],
+                num_periods,
+            ),
+        )
         return {
             f"masked_{param}": value
             for param, value in masked_bls_result.items()
         }
-
-    def _get_masked_best_fit_tls(
-        self, lightcurve, tls_results, leave_unmasked=None
-    ):
-        """Mask the eclipses detected by given TLS and fit BLS again."""
-
-        out_of_transit = numpy.logical_not(
-            transit_mask(
-                lightcurve["time"]
-                + (tls_results["period"] if leave_unmasked == "even" else 0),
-                tls_results["period"] * (1 if leave_unmasked is None else 2),
-                2 * tls_results["duration"],
-                tls_results["T0"],
-            )
-        )
-        masked_lc = lightcurve[out_of_transit]
-        kwargs = self._tls_power_kwargs
-        if leave_unmasked is not None:
-            kwargs = kwargs.copy()
-            kwargs["period_min"] = 2 * tls_results["period"]
-            kwargs["period_max"] = 2 * tls_results["period"]
-            num_periods = 1
-            while num_periods < 1000 or num_periods > 10000:
-                kwargs["period_min"] -= 10.0 * tls_results["period_uncertainty"]
-                kwargs["period_max"] += 10.0 * tls_results["period_uncertainty"]
-                num_periods = period_grid(
-                    R_star=1,
-                    M_star=1,
-                    period_min=kwargs["period_min"],
-                    period_max=kwargs["period_max"],
-                    time_span=masked_lc["time"][-1] - masked_lc["time"][0],
-                ).size
-        print(f"Masked search kwargs: {kwargs}")
-        return transitleastsquares(
-            masked_lc["time"],
-            masked_lc["flux"],
-            masked_lc["flux_err"],
-        ).power(**kwargs)
 
     @staticmethod
     def _get_bls_plot_x(lightcurve, best_fit_bls, label):
@@ -464,7 +456,11 @@ class TESSTarget:
         self._time_span = [numpy.inf, -numpy.inf]
 
         for provenance, lc_collection in lcs.items():
+            if provenance in exclude_data.get(tic_id, []):
+                continue
             for sector, (header, observed_lc) in lc_collection.items():
+                if sector in exclude_data.get(tic_id, []):
+                    continue
                 formatted_lc, formatted_header = self._format_lc(
                     sector, header, provenance, observed_lc
                 )
@@ -476,8 +472,6 @@ class TESSTarget:
                 self._time_span[1] = max(
                     formatted_lc["time"].max(), self._time_span[1]
                 )
-                if formatted_lc is None:
-                    continue
 
                 self._lcs.append((formatted_header, formatted_lc))
         self._lcs.sort(key=lambda x: x[0]["sector"])
@@ -529,92 +523,7 @@ class TESSTarget:
             self.plot_best_fit_bls(combined_lc, best_fit_bls, plot)
         return best_fit_bls
 
-    # def fit_tls(self, nthreads):
-    #    """
-    #    Use the Hippke & Heller (2019) TLS to find eclipses. Useless!!!
-
-    #    However TLS is implemnented, it screws miserably up if multiple sectors
-    #    are combined!
-    #    """
-
-    #    combined_lc = self.get_combined_lc()
-    #    tls_results = transitleastsquares(
-    #        combined_lc["time"],
-    #        combined_lc["flux"],
-    #        combined_lc["flux_err"],
-    #    ).power(**self._tls_power_kwargs, use_threads=nthreads)
-    #    if tls_results["FAP"] > 1e-3:
-    #        raise FalsePositiveError("FAP too high")
-    #    print(
-    #        "Main tls results: "
-    #        + "\n\t* ".join(
-    #            [f"{param}: {value}" for param, value in tls_results.items()]
-    #        )
-    #    )
-
-    #    return tls_results
-
-    #    if tls_results["odd_even_mismatch"] > 5:
-    #        for parity in ["even", "odd"]:
-    #            parity_tls_results = self._get_masked_best_fit_tls(
-    #                combined_lc, tls_results, leave_unmasked=parity
-    #            )
-    #            print(
-    #                "Parity tls results: "
-    #                + "\n\t* ".join(
-    #                    [
-    #                        f"{param}: {value}"
-    #                        for param, value in parity_tls_results.items()
-    #                    ]
-    #                )
-    #            )
-    #            if parity_tls_results["odd_even_mismatch"] > 5:
-    #                raise FalsePositiveError(
-    #                    f"{parity} depths mismatch > 5sigma"
-    #                )
-    #    masked_tls_results = self._get_masked_best_fit_tls(
-    #        combined_lc, tls_results
-    #    )
-    #    for param, value in masked_tls_results.items():
-    #        tls_results[f"masked_{param}"] = value
-
-    #    return tls_results
-
-
-def main():
-    """Avoid polluting global namespace."""
-
-    # logging.basicConfig(level=logging.DEBUG)
-    target = TESSTarget(33419790)
-    tls_results = target.fit_tls(14)
-    print(
-        "\n\t* ".join(
-            [f"{param}: {value}" for param, value in tls_results.items()]
-        )
-    )
-    pyplot.plot(tls_results["periods"], tls_results["power"])
-    pyplot.show()
-    pyplot.clf()
-    combined_lc = target.get_combined_lc()
-    pyplot.plot(combined_lc["time"], combined_lc["flux"], ".k", markersize=1)
-    pyplot.plot(
-        tls_results["model_lightcurve_time"],
-        tls_results["model_lightcurve_model"],
-        "-r",
-    )
-    pyplot.show()
-    pyplot.clf()
-    pyplot.plot(tls_results["folded_phase"], tls_results["folded_y"], ".k")
-    pyplot.plot(
-        tls_results["model_folded_phase"],
-        tls_results["model_folded_model"],
-        "-r",
-    )
-    pyplot.axvline(x=0.5 - tls_results["duration"] / 2)
-    pyplot.axvline(x=0.5 + tls_results["duration"] / 2)
-
-    pyplot.show()
-
 
 if __name__ == "__main__":
-    main()
+    # logging.basicConfig(level=logging.DEBUG)
+    TESSTarget(33419790)
