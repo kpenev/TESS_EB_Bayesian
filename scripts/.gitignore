@@ -17,3 +17,5 @@ mastDownload
 *.sqlite
 *.txt
 *.dat
+pylauncher*
+queuestate
