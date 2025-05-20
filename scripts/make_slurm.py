@@ -27,7 +27,7 @@ def parse_command_line():
     host = gethostname()
     this_hpc = None
     for candidate in _tic_per_node:
-        if host.startswith(candidate):
+        if candidate in host.split('.'):
             this_hpc = candidate
 
     parser = ArgumentParser(
