@@ -276,7 +276,7 @@ class LogLikelihood(TESSTarget):
             and abs(bls["depth_even"][0] - bls["depth_odd"][0])
             < max(
                 10.0 * (bls["depth_even"][1] + bls["depth_odd"][1]),
-                bls["masked_depth"][0] / 2,
+                bls["masked_depth"][0],
             )
         )
 
