@@ -201,7 +201,7 @@ class TESSTarget:
 
         periodogram = model.power(periods, numpy.linspace(0.02, 0.2, 100))
         self._logger.debug(
-            'Periodogram periods:\n%s',
+            "Periodogram periods:\n%s",
             repr(periodogram.period),
         )
         best_index = numpy.argmax(periodogram.power)
@@ -244,13 +244,18 @@ class TESSTarget:
                 periodogram = candidate
                 best_index = candidate_best_index
 
+            assert best_index > 0
+
         index_range = [0, periodogram.power.size - 1]
         cutoff = 0.3 * periodogram.power[best_index]
-        if periodogram.power[:best_index].min() < cutoff:
+        if best_index > 0 and periodogram.power[:best_index].min() < cutoff:
             index_range[0] = numpy.where(
                 periodogram.power[:best_index] < cutoff
             )[0][-1]
-        if periodogram.power[best_index:].min() < cutoff:
+        if (
+            best_index < periodogram.power.size - 1
+            and periodogram.power[best_index:].min() < cutoff
+        ):
             index_range[1] = (
                 numpy.where(periodogram.power[best_index:] < cutoff)[0][0]
                 + best_index,
@@ -262,8 +267,8 @@ class TESSTarget:
         #    pyplot.axvline(x=periodogram.period[i], color=color)
         # pyplot.show()
 
-        assert index_range[0] < best_index
-        assert index_range[1] > best_index
+        assert index_range[0] <= best_index
+        assert index_range[1] >= best_index
 
         result = {
             param: getattr(periodogram, param)[best_index]
