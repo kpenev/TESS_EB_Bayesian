@@ -9,6 +9,8 @@ from autowisp.iterative_rejection_util import iterative_rej_smoothing_spline
 
 from tess_target import get_bls_eclipse_mask
 
+_logger = logging.getLogger(__name__)
+
 
 def calc_moving_median(lightcurve, half_porb=None, mask=None, min_points=20):
     """Each point is divided by the median of all points within +-Porb/2."""
@@ -49,9 +51,56 @@ def calc_moving_median(lightcurve, half_porb=None, mask=None, min_points=20):
     return result
 
 
-def get_ooe_variability(lightcurve, half_porb=numpy.inf, mask=None):
+def get_ooe_spline_nodes(masked_time, half_porb):
+    """Return the nodes to use for the out-of-eclipse smoothing spline."""
+
+    timespan = masked_time[-1] - masked_time[0]
+    node_times = numpy.linspace(
+        masked_time[0],
+        masked_time[-1],
+        int(timespan // min(half_porb, 0.5)) + 2,
+    )
+    found_nodes = False
+    while not found_nodes:
+        found_nodes = True
+        for t0, t1 in zip(node_times[:-1], node_times[1:]):
+            if numpy.logical_and(masked_time > t0, masked_time < t1).sum() < 10:
+                node_times = numpy.linspace(
+                    masked_time[0],
+                    masked_time[-1],
+                    node_times.size - 1,
+                )
+                found_nodes = False
+                break
+    return node_times
+
+
+def ooe_ends_to_discard(mask, min_tail_points=10):
+    """Check if the ends of an LC segment are sufficient far from eclipses."""
+
+    if mask[:min_tail_points].all():
+        left = 0
+    else:
+        left = numpy.nonzero(mask[min_tail_points:])[0][0] + min_tail_points
+
+    if mask[-min_tail_points:].all():
+        right = mask.size
+    else:
+        right = numpy.nonzero(mask[:-min_tail_points])[0][-1]
+
+    return left, right
+
+
+def get_ooe_variability(
+    lightcurve,
+    half_porb=numpy.inf,
+    mask=None,
+    spline_rejection=(5.0, 3.0),
+    eclipse_rejection=2.0,
+):
     """Remove the out-of-eclipse variability from the lightcurve."""
 
+    _logger.debug("Extractiong OOE variability with mask %s", repr(mask))
     if mask is None:
         mask = numpy.ones(lightcurve.size, dtype=bool)
 
@@ -60,41 +109,34 @@ def get_ooe_variability(lightcurve, half_porb=numpy.inf, mask=None):
 
     ooe_mask = numpy.ones(masked_time.size, dtype=bool)
     while True:
-        timespan = masked_time[-1] - masked_time[0]
-        node_times = numpy.linspace(
-            masked_time[0],
-            masked_time[-1],
-            int(timespan // min(half_porb, 0.5)) + 2,
-        )
-        found_nodes = False
-        while not found_nodes:
-            found_nodes = True
-            for t0, t1 in zip(node_times[:-1], node_times[1:]):
-                if (
-                    numpy.logical_and(masked_time > t0, masked_time < t1).sum()
-                    < 10
-                ):
-                    node_times = numpy.linspace(
-                        masked_time[0],
-                        masked_time[-1],
-                        node_times.size - 1,
-                    )
-                    found_nodes = False
-                    break
-
         ooe_model = iterative_rej_smoothing_spline(
             masked_time[ooe_mask],
             masked_flux[ooe_mask],
-            (5.0, 3.0),
-            t=node_times[1:-1],
+            spline_rejection,
+            t=get_ooe_spline_nodes(masked_time, half_porb)[1:-1],
         )(lightcurve["time"])
         residuals = masked_flux - ooe_model[mask]
         new_ooe_mask = masked_flux > (
-            ooe_model[mask] - 2.0 * numpy.sqrt(numpy.mean(residuals**2))
+            ooe_model[mask]
+            - eclipse_rejection * numpy.sqrt(numpy.mean(residuals**2))
         )
         if not ooe_mask[numpy.logical_not(new_ooe_mask)].any():
             break
         ooe_mask = new_ooe_mask
+
+    discard_left, discard_right = ooe_ends_to_discard(mask)
+    ooe_model[:discard_left] = numpy.nan
+    ooe_model[discard_right:] = numpy.nan
+    _logger.debug(
+        "Discarding %s points (%s <= t < %s) at the left end and %s at right "
+        "end (%s < t <= %s)",
+        discard_left,
+        lightcurve["time"][0],
+        lightcurve["time"][discard_left],
+        lightcurve.size - discard_right,
+        lightcurve["time"][discard_right - 1],
+        lightcurve["time"][-1],
+    )
 
     return ooe_model
 
@@ -184,7 +226,7 @@ def detrend_with_gaps(
 
 
 def masked_detrend(
-    lightcurve, exptime, log_likelihood, get_trend, full_output=False
+    lightcurve, exptime, log_likelihood, get_trend, full_output=False, **kwargs
 ):
     """Return the given lightcurve detrended after masking eclipses."""
 
@@ -215,6 +257,7 @@ def masked_detrend(
         mask=mask,
         half_porb=half_porb,
         full_output=full_output,
+        **kwargs,
     )
 
 

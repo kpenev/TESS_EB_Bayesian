@@ -212,22 +212,26 @@ class LogLikelihood(TESSTarget):
             overwrite_cache = True
 
         if get_trend is not None:
-            detrended_lcs = []
-            while not detrended_lcs or self._best_fit_bls is None:
-                detrended_lcs = []
-                for header, lightcurve in self._lcs:
+            original_lcs = self._lcs
+            self._lcs = []
+            while (not self._lcs) or (self._best_fit_bls is None):
+                for header, lightcurve in original_lcs:
                     if self._best_fit_bls is None:
+                        self._logger.debug("Detrending without BLS information")
                         detrend = partial(
                             detrend_with_gaps,
                             min_gap=max(0.5, 30.0 * header["exptime"]),
                         )
                     else:
+                        self._logger.debug("Detrending with BLS information")
                         detrend = partial(
                             masked_detrend,
                             exptime=header["exptime"],
                             log_likelihood=self,
+                            spline_rejection=5.0,
+                            eclipse_rejection=numpy.inf,
                         )
-                    detrended_lcs.append(
+                    self._lcs.append(
                         (
                             header,
                             detrend(
@@ -237,8 +241,10 @@ class LogLikelihood(TESSTarget):
                             ),
                         )
                     )
-                self._lcs = detrended_lcs
-                self._best_fit_bls = self.fit_bls(plot_bls)
+                if self._best_fit_bls is None:
+                    self._best_fit_bls = self.fit_bls(plot_bls)
+                    self._lcs = []
+                    overwrite_cache = True
         elif self._best_fit_bls is None or overwrite_cache:
             self._best_fit_bls = self.fit_bls(plot_bls)
             overwrite_cache = True
