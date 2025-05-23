@@ -41,7 +41,7 @@ urlpatterns = [
                 plot_type,
                 TICIdSelectorView.as_view(
                     reviewing=plot_type,
-                    tablename="attempted_sampling",
+                    tablename=tablename,
                     plot=getattr(plots, plot_type),
                     rendered_only=False,
                 ),
@@ -51,7 +51,7 @@ urlpatterns = [
                 f"{plot_type}/<int:displayed_ticid>/",
                 TICIdSelectorView.as_view(
                     reviewing=plot_type,
-                    tablename="attempted_sampling",
+                    tablename=tablename,
                     plot=getattr(plots, plot_type),
                     rendered_only=False,
                 ),
@@ -61,14 +61,19 @@ urlpatterns = [
                 f"{plot_type}/<int:displayed_ticid>/<slug:decision>/",
                 TICIdSelectorView.as_view(
                     reviewing=plot_type,
-                    tablename="attempted_sampling",
+                    tablename=tablename,
                     plot=getattr(plots, plot_type),
                     rendered_only=False,
                 ),
                 name=f"{plot_type}_decision",
             ),
         ]
-        for plot_type in ["starting", "best", "convergence"]
+        for plot_type, tablename in [
+            ("starting", "attempted_sampling"),
+            ("best", "attempted_sampling"),
+            ("convergence", "attempted_sampling"),
+            ("ooe_var_removal", "prsa_ebs"),
+        ]
     ),
     [],
 )

@@ -12,7 +12,7 @@ from tess_target import get_bls_eclipse_mask
 _logger = logging.getLogger(__name__)
 
 
-def calc_moving_median(lightcurve, half_porb=None, mask=None, min_points=20):
+def get_moving_median(lightcurve, half_porb=None, mask=None, min_points=20):
     """Each point is divided by the median of all points within +-Porb/2."""
 
     if half_porb is None:
@@ -270,7 +270,7 @@ def test():
 
     # pylint: enable=import-outside-toplevel
 
-    for tic in [1045298, 1220444, 2020964, 22766107]:
+    for tic in [101462]:#[1045298, 1220444, 2020964, 22766107]:
         try:
             config = Namespace(
                 tic_id=tic,

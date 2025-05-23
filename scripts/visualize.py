@@ -26,6 +26,7 @@ from log_likelihood import LogLikelihood
 from paths import samples as samples_fname
 from binary import Binary
 from light_curve_plotter import LightCurvePlotter
+import detrending
 
 
 def parse_command_line():
@@ -116,6 +117,12 @@ def parse_command_line():
         "specification can be ommitted to show all samples for a given step.\n"
         "If ``--sample-condition`` is specified, the top and random points are "
         "selected only among surviving samples.",
+    )
+    parser.add_argument(
+        '--remove-lc-trend',
+        choices=['moving_median', 'ooe_variability', 'none'],
+        default='moving_median',
+        help='Specify the detrending method to use for the lightcurve.'
     )
     parser.add_argument(
         "--show-lc-detrending",
@@ -613,10 +620,12 @@ def main(config):
 
     config.highlight_first_model = False
     logging.basicConfig(level=logging.DEBUG)
-    log_likelihood = LogLikelihood(config.tic_id)
+    log_likelihood = None
     if path.exists(config.samples_fname) and getattr(
         config, "chain_name", False
     ):
+        if log_likelihood is None:
+            log_likelihood = LogLikelihood(config.tic_id)
         backend = HDFBackend(
             config.samples_fname, name=config.chain_name, read_only=True
         )
@@ -636,6 +645,8 @@ def main(config):
             getattr(config, "show_model_with_lc", False)
             and plot_data is not None
         ):
+            if log_likelihood is None:
+                log_likelihood = LogLikelihood(config.tic_id)
             binaries, num_skipped = get_model_binaries(
                 config,
                 raw_data,
@@ -653,6 +664,9 @@ def main(config):
         LightCurvePlotter(config)(
             config.tic_id,
             binaries,
+            get_trend=getattr(
+                detrending, "get_" + config.remove_lc_trend, None
+            ),
             title_info=(
                 f"{len(binaries)} shown, {num_skipped} skipped"
                 if num_skipped

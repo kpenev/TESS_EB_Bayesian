@@ -82,6 +82,7 @@ def lightcurve(tic_id, fname=None):
                 " [zoom_odd, zoom_even],"
                 " [sed, zoom_masked]]",
             ],
+            remove_lc_trend='moving_median',
             data_on_top=False,
             samples_fname=samples_fname_template.format(tic_id=tic_id),
         ),
@@ -112,6 +113,7 @@ def starting(tic_id, fname=None):
                 " [zoom_odd, zoom_even],"
                 " [sed, zoom_masked]]",
             ],
+            remove_lc_trend='moving_median',
             show_model_with_lc="-1",
             data_on_top=True,
             samples_fname=samples_fname,
@@ -157,6 +159,7 @@ def convergence(tic_id, fname=None):
     return plot_tic(
         Namespace(
             tic_id=tic_id,
+            remove_lc_trend='moving_median',
             plot_convergence=[None, "[burnin]"],
             diagnostic_quantiles=numpy.linspace(0.1, 0.9, 9),
             burnin_tolerance=1e-4,
@@ -181,6 +184,27 @@ def convergence(tic_id, fname=None):
         fname,
     )
 
+
+def ooe_var_removal(tic_id, fname=None):
+    """Create plot to show the detrending that removes all OOE variability."""
+
+    return plot_tic(
+        Namespace(
+            tic_id=tic_id,
+            plot_lightcurve=[
+                None,
+                "[[full, full, full],"
+                " [folded, folded, folded],"
+                " [zoom_odd, zoom_even, zoom_masked]]"
+            ],
+            remove_lc_trend='ooe_variability',
+            data_on_top=False,
+            show_lc_detrending=True,
+            highlight_first_model=False,
+            samples_fname='',
+        ),
+        fname,
+    )
 
 def render_one(tic_id, tablename, plot_func, render_dir):
     """Render the lightcurve for a single TIC ID."""

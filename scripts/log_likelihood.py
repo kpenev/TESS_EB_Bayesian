@@ -10,7 +10,8 @@ from sqlalchemy import select, delete
 from tess_target import TESSTarget, get_bls_eclipse_mask
 from detrending import (
     masked_detrend,
-    calc_moving_median,
+    get_moving_median,
+    get_ooe_variability,
     detrend_with_gaps,
 )
 from extinction_correction import Green19Correction
@@ -194,7 +195,7 @@ class LogLikelihood(TESSTarget):
         overwrite_cache=False,
         ignore_extinction_flags=True,
         plot_bls=False,
-        get_trend=calc_moving_median,
+        get_trend=get_moving_median,
         save_detrending=False,
     ):
         """Prepare to evaluate the log-likelihood for the given TIC ID."""
@@ -243,7 +244,11 @@ class LogLikelihood(TESSTarget):
                     )
                 if self._best_fit_bls is None:
                     self._best_fit_bls = self.fit_bls(plot_bls)
-                    self._lcs = []
+                    # That is the intent
+                    # pylint: disable=comparison-with-callable
+                    if get_trend == get_ooe_variability:
+                        # pylint: enable=comparison-with-callable
+                        self._lcs = []
                     overwrite_cache = True
         elif self._best_fit_bls is None or overwrite_cache:
             self._best_fit_bls = self.fit_bls(plot_bls)
