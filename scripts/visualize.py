@@ -118,6 +118,14 @@ def parse_command_line():
         "selected only among surviving samples.",
     )
     parser.add_argument(
+        "--show-lc-detrending",
+        action="store_true",
+        default=False,
+        help="If specified, ``full`` and ``zoom`` plots show the detrending "
+        "applied to the lightcurve and the undetrended lightcurve in addition "
+        "to the detrended one.",
+    )
+    parser.add_argument(
         "--plot-convergence",
         nargs=2,
         metavar=("FILENAME", "MOSAIC"),

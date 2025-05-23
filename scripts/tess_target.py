@@ -149,8 +149,9 @@ class TESSTarget:
             ],
         )
         formatted_lc["time"] = observed_lc["TIME"]
-        formatted_lc["flux"] = observed_lc[flux_columns[0]]
-        formatted_lc["flux_err"] = observed_lc[flux_columns[1]]
+        scaling = numpy.nanmedian(observed_lc[flux_columns[0]])
+        formatted_lc["flux"] = observed_lc[flux_columns[0]] / scaling
+        formatted_lc["flux_err"] = observed_lc[flux_columns[1]] / scaling
         formatted_lc["good"] = True
         return formatted_lc, {
             "exptime": exptime,

@@ -8,7 +8,11 @@ from scipy.stats import norm, truncnorm
 from sqlalchemy import select, delete
 
 from tess_target import TESSTarget, get_bls_eclipse_mask
-from detrending import masked_detrend, calc_moving_median
+from detrending import (
+    masked_detrend,
+    calc_moving_median,
+    detrend_with_gaps,
+)
 from extinction_correction import Green19Correction
 from binary import Binary
 from cache_interface import CacheSession, CachedSED, CachedBLS
@@ -190,7 +194,8 @@ class LogLikelihood(TESSTarget):
         overwrite_cache=False,
         ignore_extinction_flags=True,
         plot_bls=False,
-        detrend=partial(masked_detrend, get_trend=calc_moving_median),
+        get_trend=calc_moving_median,
+        save_detrending=False,
     ):
         """Prepare to evaluate the log-likelihood for the given TIC ID."""
 
@@ -206,7 +211,35 @@ class LogLikelihood(TESSTarget):
             ).get_absolute_magnitudes(tic_id)[0]
             overwrite_cache = True
 
-        if self._best_fit_bls is None or overwrite_cache:
+        if get_trend is not None:
+            detrended_lcs = []
+            while not detrended_lcs or self._best_fit_bls is None:
+                detrended_lcs = []
+                for header, lightcurve in self._lcs:
+                    if self._best_fit_bls is None:
+                        detrend = partial(
+                            detrend_with_gaps,
+                            min_gap=max(0.5, 30.0 * header["exptime"]),
+                        )
+                    else:
+                        detrend = partial(
+                            masked_detrend,
+                            exptime=header["exptime"],
+                            log_likelihood=self,
+                        )
+                    detrended_lcs.append(
+                        (
+                            header,
+                            detrend(
+                                lightcurve,
+                                get_trend=get_trend,
+                                full_output=save_detrending,
+                            ),
+                        )
+                    )
+                self._lcs = detrended_lcs
+                self._best_fit_bls = self.fit_bls(plot_bls)
+        elif self._best_fit_bls is None or overwrite_cache:
             self._best_fit_bls = self.fit_bls(plot_bls)
             overwrite_cache = True
 
@@ -243,12 +276,6 @@ class LogLikelihood(TESSTarget):
         )
 
         assert self._best_fit_bls["period"][0] > 2 * self._range.per[0]
-
-        if detrend is not None:
-            self._lcs = [
-                (header, detrend(lightcurve, header["exptime"], self))
-                for header, lightcurve in self._lcs
-            ]
 
         self._logger.debug("LCs: %s", repr(self._lcs))
         self._logger.debug("SED: %s", repr(self._sed))
