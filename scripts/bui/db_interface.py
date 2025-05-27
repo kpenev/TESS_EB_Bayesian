@@ -28,13 +28,22 @@ if __name__ == "__main__":
     from astropy.io import fits
     import re
 
-    samples_rex = re.compile("tess(?P<tic>[0-9]*)_samples.h5")
-    SelectTICIDs = get_ticid_select_table("attempted_sampling")
+    #samples_rex = re.compile("tess(?P<tic>[0-9]*)_samples.h5")
+    #SelectTICIDs = get_ticid_select_table("attempted_sampling")
+    #SelectTICIDBase.metadata.create_all(db_engine)
+    #with Session.begin() as db_session:
+    #    for samples_fname in glob("/mnt/md2/TESS_EBs/samples/*.h5"):
+    #        parsed = samples_rex.match(path.basename(samples_fname))
+    #        assert parsed
+    #        db_session.add(
+    #            SelectTICIDs(id=int(parsed["tic"]), flag=0, rendered=0)
+    #        )
+
+
+    SelectTICIDs = get_ticid_select_table("prsa_ebs")
     SelectTICIDBase.metadata.create_all(db_engine)
     with Session.begin() as db_session:
-        for samples_fname in glob("/mnt/md2/TESS_EBs/samples/*.h5"):
-            parsed = samples_rex.match(path.basename(samples_fname))
-            assert parsed
-            db_session.add(
-                SelectTICIDs(id=int(parsed["tic"]), flag=0, rendered=0)
-            )
+        with fits.open(prsa_ebs, 'readonly') as prsa:
+            data = prsa[1].data
+            for ticid in data['TIC'][data['m_TIC'] == 1]:
+                db_session.add(SelectTICIDs(id=int(ticid), flag=0, rendered=0))
