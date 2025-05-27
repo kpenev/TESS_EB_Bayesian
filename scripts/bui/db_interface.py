@@ -32,7 +32,7 @@ if __name__ == "__main__":
     SelectTICIDs = get_ticid_select_table("attempted_sampling")
     SelectTICIDBase.metadata.create_all(db_engine)
     with Session.begin() as db_session:
-        for samples_fname in glob("/mnt/md2/TESS_EBs/samples/*.h5"):
+        for samples_fname in glob("/scratch/juno/jas180011/TESS_EBs/restarted_samples/*.h5"):
             parsed = samples_rex.match(path.basename(samples_fname))
             assert parsed
             db_session.add(

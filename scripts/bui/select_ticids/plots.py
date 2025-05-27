@@ -1,5 +1,4 @@
 """Plots that can be used for selecting TESS objects."""
-
 from argparse import Namespace
 from base64 import b64encode
 from io import BytesIO
@@ -293,7 +292,6 @@ def render_all_plots(config):
     else:
         for tic_id in tic_id_list:
             render_func(tic_id)
-
 
 def parse_command_line():
     """Return th ecommand line configuration."""
