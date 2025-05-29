@@ -1,10 +1,11 @@
 """Plots that can be used for selecting TESS objects."""
+
 from argparse import Namespace
 from base64 import b64encode
 from io import BytesIO
 from os import path, makedirs
 from functools import partial
-from traceback import print_exc
+from traceback import print_exc, format_exc
 from time import sleep
 
 from multiprocessing import Pool
@@ -81,7 +82,7 @@ def lightcurve(tic_id, fname=None):
                 " [zoom_odd, zoom_even],"
                 " [sed, zoom_masked]]",
             ],
-            remove_lc_trend='moving_median',
+            remove_lc_trend="moving_median",
             data_on_top=False,
             samples_fname=samples_fname_template.format(tic_id=tic_id),
         ),
@@ -112,7 +113,7 @@ def starting(tic_id, fname=None):
                 " [zoom_odd, zoom_even],"
                 " [sed, zoom_masked]]",
             ],
-            remove_lc_trend='moving_median',
+            remove_lc_trend="moving_median",
             show_model_with_lc="-1",
             data_on_top=True,
             samples_fname=samples_fname,
@@ -158,7 +159,7 @@ def convergence(tic_id, fname=None):
     return plot_tic(
         Namespace(
             tic_id=tic_id,
-            remove_lc_trend='moving_median',
+            remove_lc_trend="moving_median",
             plot_convergence=[None, "[burnin]"],
             diagnostic_quantiles=numpy.linspace(0.1, 0.9, 9),
             burnin_tolerance=1e-4,
@@ -194,16 +195,17 @@ def ooe_var_removal(tic_id, fname=None):
                 None,
                 "[[full, full, full],"
                 " [folded, folded, folded],"
-                " [zoom_odd, zoom_even, zoom_masked]]"
+                " [zoom_odd, zoom_even, zoom_masked]]",
             ],
-            remove_lc_trend='ooe_variability',
+            remove_lc_trend="ooe_variability",
             data_on_top=False,
             show_lc_detrending=True,
             highlight_first_model=False,
-            samples_fname='',
+            samples_fname="",
         ),
         fname,
     )
+
 
 def render_one(tic_id, tablename, plot_func, render_dir):
     """Render the lightcurve for a single TIC ID."""
@@ -228,7 +230,13 @@ def render_one(tic_id, tablename, plot_func, render_dir):
                 break
             except (MemoryError, OSError):
                 wait = randint(60)
-                print(f"Memory error. Waiting {wait}s and retrying!")
+                print(
+                    "".join(
+                        ["Plotting error:"]
+                        + format_exc()
+                        + ["Waiting {wait}s and retrying!"]
+                    )
+                )
                 sleep(wait)
         # False positivie
         # pylint: disable=no-member
@@ -265,15 +273,13 @@ def render_all_plots(config):
     with Session.begin() as db_session:
         # pylint: enable=no-member
         tic_id_list = list(
-            db_session.execute(
-                selection.order_by(SelectTICIDs.id)
-            ).scalars()
+            db_session.execute(selection.order_by(SelectTICIDs.id)).scalars()
         )[config.start :]
 
     if config.count is not None:
         tic_id_list = tic_id_list[: config.count]
 
-    print(f'Rendering {len(tic_id_list)} plots for {config.table_name}.')
+    print(f"Rendering {len(tic_id_list)} plots for {config.table_name}.")
 
     render_func = partial(
         render_one,
@@ -292,6 +298,7 @@ def render_all_plots(config):
     else:
         for tic_id in tic_id_list:
             render_func(tic_id)
+
 
 def parse_command_line():
     """Return th ecommand line configuration."""
@@ -326,8 +333,8 @@ def parse_command_line():
         default=16,
     )
     parser.add_argument(
-        '--selected-only',
-        action='store_true',
+        "--selected-only",
+        action="store_true",
         default=False,
         help="Only render objects that have been selected.",
     )
