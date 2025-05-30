@@ -189,6 +189,7 @@ def parse_command_line():
         "--overwrite-cache",
         nargs='+',
         default=[],
+        type=str.upper,
         choices=["BLS", "SED"],
         help="If passed, the specified cache will be re-computed and "
         "overwritten.",
