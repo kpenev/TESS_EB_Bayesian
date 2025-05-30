@@ -135,6 +135,7 @@ def best(tic_id, fname=None):
     return plot_tic(
         Namespace(
             tic_id=tic_id,
+            remove_lc_trend="moving_median",
             plot_lightcurve=[
                 None,
                 "[[full,         full,        zoom_primary],"
