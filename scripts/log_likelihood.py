@@ -217,7 +217,13 @@ class LogLikelihood(TESSTarget):
             self._lcs = []
             while (not self._lcs) or (self._best_fit_bls is None):
                 for header, lightcurve in original_lcs:
-                    if self._best_fit_bls is None:
+                    if (
+                        self._best_fit_bls is None
+                        # That is the intent
+                        # pylint: disable=comparison-with-callable
+                        or detrend == get_moving_median
+                        # pylint: enable=comparison-with-callable
+                    ):
                         self._logger.debug("Detrending without BLS information")
                         detrend = partial(
                             detrend_with_gaps,
