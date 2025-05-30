@@ -192,7 +192,7 @@ class LogLikelihood(TESSTarget):
         self,
         tic_id,
         *,
-        overwrite_cache=False,
+        overwrite_cache=(),
         ignore_extinction_flags=True,
         plot_bls=False,
         get_trend=get_moving_median,
@@ -201,16 +201,20 @@ class LogLikelihood(TESSTarget):
         """Prepare to evaluate the log-likelihood for the given TIC ID."""
 
         super().__init__(tic_id)
+        overwrite_cache = [
+            item.upper() for item in overwrite_cache
+        ]
 
         # https://outerspace.stsci.edu/display/TESS/2.0+-+Data+Product+Overview#id-2.0-DataProductOverview-Table:CadenceQualityFlags
 
         self._sed, self._best_fit_bls = self.get_cached_sed_and_bls(tic_id)
 
-        if self._sed is None or overwrite_cache:
+        if self._sed is None or 'SED' in overwrite_cache:
             self._sed = Green19Correction(
                 ignore_extinction_flags
             ).get_absolute_magnitudes(tic_id)[0]
-            overwrite_cache = True
+        if 'BLS' in overwrite_cache:
+            self._best_fit_bls = None
 
         if get_trend is not None:
             original_lcs = self._lcs
@@ -221,7 +225,7 @@ class LogLikelihood(TESSTarget):
                         self._best_fit_bls is None
                         # That is the intent
                         # pylint: disable=comparison-with-callable
-                        or detrend == get_moving_median
+                        or get_trend == get_moving_median
                         # pylint: enable=comparison-with-callable
                     ):
                         self._logger.debug("Detrending without BLS information")
@@ -256,9 +260,8 @@ class LogLikelihood(TESSTarget):
                         # pylint: enable=comparison-with-callable
                         self._lcs = []
                     overwrite_cache = True
-        elif self._best_fit_bls is None or overwrite_cache:
+        elif self._best_fit_bls is None:
             self._best_fit_bls = self.fit_bls(plot_bls)
-            overwrite_cache = True
 
         if overwrite_cache:
             self._cache(tic_id)

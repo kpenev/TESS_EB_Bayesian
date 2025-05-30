@@ -185,6 +185,14 @@ def parse_command_line():
         help="If passed, no sampling is performed. Instead a samples files is "
         "created containing only the starting walker positions.",
     )
+    parser.add_argument(
+        "--overwrite-cache",
+        nargs='+',
+        default=[],
+        choices=["BLS", "SED"],
+        help="If passed, the specified cache will be re-computed and "
+        "overwritten.",
+    )
 
     return parser.parse_args()
 
@@ -315,7 +323,7 @@ def main(config):
     backend, final_run = get_backend(samples_fname, config)
     log_likelihood = (
         LogLikelihoodPriorsOnly if config.priors_only else LogLikelihood
-    )(config.tic_id)
+    )(config.tic_id, overwrite_cache=config.overwrite_cache)
 
     initial_state = None
     if backend.iteration == 0:
