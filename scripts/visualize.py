@@ -133,6 +133,13 @@ def parse_command_line():
         "to the detrended one.",
     )
     parser.add_argument(
+        '--eclipse-model-only',
+        action='store_true',
+        default=False,
+        help='If specified, only the eclipses in the lightcurve will be '
+        'modeled, along with simple near-eclipse baseline flux model.'
+    )
+    parser.add_argument(
         "--plot-convergence",
         nargs=2,
         metavar=("FILENAME", "MOSAIC"),

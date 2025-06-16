@@ -51,14 +51,14 @@ class LightCurvePlotter:
     }
     model_lc_plot_config = {
         "first": {
-            "marker": "none",
-            "linestyle": "-",
+            "marker": ".",
+            "linestyle": "none",
             "color": "red",
             "zorder": 100,
         },
         "others": {
-            "marker": "none",
-            "linestyle": "-",
+            "marker": ".",
+            "linestyle": "none",
             "color": "black",
             "zorder": 20,
         },
@@ -150,10 +150,12 @@ class LightCurvePlotter:
                 linewidth=(
                     min(
                         1.0,
-                        (30.0 if config_key == "first" else 1.0)
+                        (5.0 if config_key == "first" else 1.0)
                         / len(model_lcs) ** 0.5,
                     )
                 ),
+                markersize=1.0
+                / (1 if config_key == "first" else len(model_lcs) ** 0.5),
                 **self.model_lc_plot_config[config_key],
             )
             config_key = "others"
@@ -161,10 +163,15 @@ class LightCurvePlotter:
         pyplot.ylabel("Flux")
         pyplot.ylim(ylim)
 
-    def plot_vs_phase(self, lightcurve, phase, model_lcs=(), xlabel="Phase"):
+    def plot_vs_phase(
+        self, lightcurve, phase, model_lcs=(), xlabel="Phase", order=True
+    ):
         """Create a plot of the lightcurve vs the given phase."""
 
-        phase_order = numpy.argsort(phase)
+        if order:
+            phase_order = numpy.argsort(phase)
+        else:
+            phase_order = numpy.arange(len(phase))
         print(f"Phase order: {phase_order!r}")
         print(f"Phase: {phase!r}")
         ordered_phase = phase[phase_order]
@@ -199,6 +206,7 @@ class LightCurvePlotter:
                 ordered_phase,
                 y[phase_order],
                 linewidth=1.0 / (1 if first else len(model_lcs) ** 0.5),
+                markersize=1.0 / (1 if first else len(model_lcs) ** 0.5),
                 **self.model_lc_plot_config["first" if first else "others"],
             )
             first = False
@@ -383,8 +391,20 @@ class LightCurvePlotter:
     def _get_model_lcs(self, header, lightcurve, binaries):
         """Return the model lightcurves to add on top of the data."""
 
-        model_lcs = []
-        if binaries is not None:
+        if binaries is None or lightcurve.size <= 10:
+            return []
+
+        if self._config.eclipse_model_only:
+            model_lcs = []
+            for bnry in binaries:
+                masked_model, _, mask = LogLikelihood.get_eclipse_model(
+                    bnry, header, lightcurve, bnry.lc_sys_err
+                )
+                assert mask.size == lightcurve.size
+                model = numpy.full(mask.size, numpy.nan)
+                model[mask] = masked_model
+                model_lcs.append(model)
+        else:
             model_lcs = [
                 LogLikelihood.get_model(
                     bnry, header, lightcurve, bnry.lc_sys_err
