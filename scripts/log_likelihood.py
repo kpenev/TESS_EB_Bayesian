@@ -226,24 +226,19 @@ class LogLikelihood(TESSTarget):
             self._lcs = []
             while (not self._lcs) or (self._best_fit_bls is None):
                 for header, lightcurve in original_lcs:
-                    if (
-                        self._best_fit_bls is None
-                        # That is the intent
-                        # pylint: disable=comparison-with-callable
-                        or get_trend == get_moving_median
-                        # pylint: enable=comparison-with-callable
-                    ):
+                    # That is the intent
+                    # pylint: disable=comparison-with-callable
+                    if self._best_fit_bls is None:
                         self._logger.debug("Detrending without BLS information")
-                        if self._best_fit_bls is None:
-                            half_porb = None
-                        elif self.masked_is_significant():
-                            half_porb = self._best_fit_bls["period"][0] / 2
-                        else:
-                            half_porb = self._best_fit_bls["period"][0]
                         detrend = partial(
                             detrend_with_gaps,
                             min_gap=max(0.5, 30.0 * header["exptime"]),
-                            half_porb=half_porb,
+                        )
+                    elif get_trend == get_moving_median:
+                        detrend = partial(
+                            masked_detrend,
+                            exptime=header["exptime"],
+                            log_likelihood=self,
                         )
                     else:
                         self._logger.debug("Detrending with BLS information")
@@ -254,6 +249,7 @@ class LogLikelihood(TESSTarget):
                             spline_rejection=5.0,
                             eclipse_rejection=numpy.inf,
                         )
+                    # pylint: enable=comparison-with-callable
                     self._lcs.append(
                         (
                             header,

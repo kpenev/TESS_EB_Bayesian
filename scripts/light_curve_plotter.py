@@ -406,7 +406,7 @@ class LightCurvePlotter:
                 model_lcs.append(model)
         else:
             model_lcs = [
-                LogLikelihood.get_model(
+                LogLikelihood.get_full_model(
                     bnry, header, lightcurve, bnry.lc_sys_err
                 )[0]
                 for bnry in binaries
