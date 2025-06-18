@@ -352,14 +352,14 @@ def main(config):
             backend, initial_state, final_run = restart_sampling(
                 backend, config
             )
-    if initial_state is not None:
-        for pos_ind, pos in enumerate(initial_state):
-            save_initial_position(
-                pos,
-                backend.filename,
-                nwalkers=backend.shape[0],
-                index=pos_ind,
-            )
+        if initial_state is not None:
+            for pos_ind, pos in enumerate(initial_state):
+                save_initial_position(
+                    pos,
+                    backend.filename,
+                    nwalkers=backend.shape[0],
+                    index=pos_ind,
+                )
 
     if config.starting_positions_only:
         return
