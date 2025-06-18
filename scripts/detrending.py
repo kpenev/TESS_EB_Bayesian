@@ -1,21 +1,31 @@
 """Function implementing LC detrending."""
 
-from collections import namedtuple
-from functools import partial
+from argparse import Namespace
 import logging
 
 import numpy
+from numpy.lib.recfunctions import append_fields
+from autowisp.iterative_rejection_util import iterative_rej_smoothing_spline
 
 from tess_target import get_bls_eclipse_mask
 
-def calc_moving_median(lightcurve, half_porb, mask, min_points=20):
+_logger = logging.getLogger(__name__)
+
+
+def get_moving_median(lightcurve, half_porb=None, mask=None, min_points=20):
     """Each point is divided by the median of all points within +-Porb/2."""
 
+    if half_porb is None:
+        return numpy.full(
+            lightcurve.shape, numpy.nanmedian(lightcurve["flux"]), dtype=float
+        )
     print(
         f"Detrending time range: {lightcurve['time'][0]}, "
         f"{lightcurve['time'][-1]}"
     )
     result = numpy.empty(lightcurve.shape)
+    if mask is None:
+        mask = numpy.ones(lightcurve.size, dtype=bool)
     masked_time = lightcurve["time"][mask]
     masked_flux = lightcurve["flux"][mask]
     for i, time in enumerate(lightcurve["time"]):
@@ -41,19 +51,186 @@ def calc_moving_median(lightcurve, half_porb, mask, min_points=20):
     return result
 
 
-def masked_detrend(lightcurve, exptime, log_likelihood, get_trend):
-    """Return the given lightcurve detrended after masking eclipses."""
+def get_ooe_spline_nodes(masked_time, half_porb):
+    """Return the nodes to use for the out-of-eclipse smoothing spline."""
 
-    half_porb = log_likelihood.best_fit_bls["period"][0]
+    timespan = masked_time[-1] - masked_time[0]
+    node_times = numpy.linspace(
+        masked_time[0],
+        masked_time[-1],
+        int(timespan // min(half_porb, 0.5)) + 2,
+    )
+    found_nodes = False
+    while not found_nodes:
+        found_nodes = True
+        for t0, t1 in zip(node_times[:-1], node_times[1:]):
+            if numpy.logical_and(masked_time > t0, masked_time < t1).sum() < 10:
+                node_times = numpy.linspace(
+                    masked_time[0],
+                    masked_time[-1],
+                    node_times.size - 1,
+                )
+                found_nodes = False
+                break
+    return node_times
+
+
+def ooe_ends_to_discard(mask, min_tail_points=10):
+    """Check if the ends of an LC segment are sufficient far from eclipses."""
+
+    if mask[:min_tail_points].all():
+        left = 0
+    else:
+        left = numpy.nonzero(mask[min_tail_points:])[0][0] + min_tail_points
+
+    if mask[-min_tail_points:].all():
+        right = mask.size
+    else:
+        right = numpy.nonzero(mask[:-min_tail_points])[0][-1]
+
+    return left, right
+
+
+def get_ooe_variability(
+    lightcurve,
+    half_porb=numpy.inf,
+    mask=None,
+    spline_rejection=(5.0, 3.0),
+    eclipse_rejection=2.0,
+):
+    """Remove the out-of-eclipse variability from the lightcurve."""
+
+    _logger.debug("Extractiong OOE variability with mask %s", repr(mask))
+    if mask is None:
+        mask = numpy.ones(lightcurve.size, dtype=bool)
+
+    masked_time = lightcurve["time"][mask]
+    masked_flux = lightcurve["flux"][mask]
+
+    ooe_mask = numpy.ones(masked_time.size, dtype=bool)
+    while True:
+        ooe_model = iterative_rej_smoothing_spline(
+            masked_time[ooe_mask],
+            masked_flux[ooe_mask],
+            spline_rejection,
+            t=get_ooe_spline_nodes(masked_time, half_porb)[1:-1],
+        )(lightcurve["time"])
+        residuals = masked_flux - ooe_model[mask]
+        new_ooe_mask = masked_flux > (
+            ooe_model[mask]
+            - eclipse_rejection * numpy.sqrt(numpy.mean(residuals**2))
+        )
+        if not ooe_mask[numpy.logical_not(new_ooe_mask)].any():
+            break
+        ooe_mask = new_ooe_mask
+
+    discard_left, discard_right = ooe_ends_to_discard(mask)
+    ooe_model[:discard_left] = numpy.nan
+    ooe_model[discard_right:] = numpy.nan
+    _logger.debug(
+        "Discarding %s points (%s <= t < %s) at the left end and %s at right "
+        "end (%s < t <= %s)",
+        discard_left,
+        lightcurve["time"][0],
+        lightcurve["time"][discard_left],
+        lightcurve.size - discard_right,
+        lightcurve["time"][discard_right - 1],
+        lightcurve["time"][-1],
+    )
+
+    return ooe_model
+
+
+def detrend_with_gaps(
+    lightcurve, min_gap, get_trend, full_output=False, **kwargs
+):
+    """
+    Detrend each lightcurve segment between gaps.
+
+    Args:
+        lightcurve: The lightcurve to detrend.
+
+        min_gap: The smallest time without observations to count as a gap.
+
+        get_trend: Function to calculate the trend.
+
+        full_output: If true, the returned lightcurve will also include fields
+            ``"original"`` (the original, un-detrended lightcurve) and
+            ``"trend"`` (the trend that was removed).
+
+        kwargs: Additional arguments for get_trend. If any are arrays matching
+            the length of the lightcurve, they will also be split at the LC gaps
+            before passing to ``get_trend``.
+
+    Returns:
+        The detrended lightcurve.
+    """
+
+    print("Detrending with gaps" + ", saving detrending" if full_output else "")
     gap_indices = (
         numpy.nonzero(
-            lightcurve["time"][1:] - lightcurve["time"][:-1]
-            > max(2 * log_likelihood.best_fit_bls["duration"],
-                  30 * exptime)
+            lightcurve["time"][1:] - lightcurve["time"][:-1] > min_gap
         )[0]
         + 1
     )
     gap_indices = numpy.append(gap_indices, lightcurve["time"].size)
+
+    fixed_kwargs = {}
+    segment_kwargs = {}
+    for key, value in kwargs.items():
+        try:
+            if len(value) == lightcurve.size:
+                segment_kwargs[key] = value
+                continue
+        except TypeError:
+            pass
+        fixed_kwargs[key] = value
+
+    detrended = numpy.copy(lightcurve)
+    if full_output:
+        detrended = append_fields(
+            detrended,
+            ["original", "trend"],
+            [
+                lightcurve["flux"],
+                numpy.full(detrended.size, numpy.nan, dtype=float),
+            ],
+            usemask=False,
+        )
+    start_index = 0
+    good_mask = numpy.ones(detrended.size, dtype=bool)
+    for end_index in gap_indices:
+        if end_index - start_index < 20:
+            good_mask[start_index:end_index] = False
+            continue
+        scaling = get_trend(
+            lightcurve[start_index:end_index],
+            **fixed_kwargs,
+            **{
+                key: value[start_index:end_index]
+                for key, value in segment_kwargs.items()
+            },
+        )
+        good_mask[start_index:end_index] = numpy.isfinite(scaling)
+        print(
+            f"Scaling ({lightcurve['time'][start_index]} < t < "
+            f"{lightcurve['time'][end_index-1]}): {scaling!r}"
+        )
+        detrended[start_index:end_index]["flux"] /= scaling
+        detrended[start_index:end_index]["flux_err"] /= scaling
+        if full_output:
+            detrended[start_index:end_index]["trend"] = scaling
+        start_index = end_index
+
+    return detrended[good_mask]
+
+
+def masked_detrend(
+    lightcurve, exptime, log_likelihood, get_trend, full_output=False, **kwargs
+):
+    """Return the given lightcurve detrended after masking eclipses."""
+
+    half_porb = log_likelihood.best_fit_bls["period"][0]
     if log_likelihood.masked_is_significant():
         mask = numpy.logical_not(
             numpy.logical_or(
@@ -73,58 +250,42 @@ def masked_detrend(lightcurve, exptime, log_likelihood, get_trend):
             )
         )
 
-    detrended = numpy.copy(lightcurve)
-    start_index = 0
-    good_mask = numpy.ones(detrended.size, dtype=bool)
-    for end_index in gap_indices:
-        if end_index - start_index < 20:
-            good_mask[start_index:end_index] = False
-            continue
-        scaling = get_trend(
-            lightcurve[start_index:end_index],
-            half_porb,
-            mask[start_index:end_index],
-        )
-        good_mask[start_index:end_index] = numpy.isfinite(scaling)
-        print(
-            f"Scaling ({lightcurve['time'][start_index]} < t < "
-            f"{lightcurve['time'][end_index-1]}): {scaling!r}"
-        )
-        detrended[start_index:end_index]["flux"] /= scaling
-        detrended[start_index:end_index]["flux_err"] /= scaling
-        start_index = end_index
-
-    return detrended[good_mask]
+    return detrend_with_gaps(
+        lightcurve,
+        max(2 * log_likelihood.best_fit_bls["duration"], 30 * exptime),
+        get_trend,
+        mask=mask,
+        half_porb=half_porb,
+        full_output=full_output,
+        **kwargs,
+    )
 
 
 def test():
     """Avoid polluting global namespace."""
 
-    #That is the idea
-    #pylint: disable=import-outside-toplevel
-    from log_likelihood import LogLikelihood
-    from visualize import create_lightcurve_plot
-    #pylint: enable=import-outside-toplevel
+    # That is the idea
+    # pylint: disable=import-outside-toplevel
+    from light_curve_plotter import LightCurvePlotter
 
-    for tic in [1045298, 1129033, 1220444, 2020964]:
+    # pylint: enable=import-outside-toplevel
+
+    for tic in [101462]:#[1045298, 1220444, 2020964, 22766107]:
         try:
-            log_likelihood = LogLikelihood(tic, detrend=None)
-            if log_likelihood.masked_is_significant():
-                zoom = "[zoom_default, zoom_masked]"
-            else:
-                zoom = "[zoom_even, zoom_odd]"
-            config = namedtuple("ConfigType", ["tic_id", "plot_lightcurve"])(
-                tic,
-                (
+            config = Namespace(
+                tic_id=tic,
+                plot_lightcurve=(
                     f"tess{tic}_detrending.pdf",
-                    f"[[full, full], [folded, folded], {zoom}]",
+                    "[[full, full, full],"
+                    " [folded, folded, folded],"
+                    " [zoom_even, zoom_odd, zoom_masked]]",
                 ),
+                data_on_top=False,
+                show_lc_detrending=True,
+                highlight_first_model=False,
             )
-            print(f'Plotting with configuration:\n {config}')
-            create_lightcurve_plot(
-                config,
-                detrend=partial(masked_detrend, get_trend=calc_moving_median),
-            )
+            print(f"Plotting with configuration:\n {config}")
+            LightCurvePlotter(config)(tic, get_trend=get_ooe_variability)
         except RuntimeError:
             continue
 

@@ -111,7 +111,7 @@ def parse_command_line():
     parser.add_argument(
         "--restart-steps",
         type=int,
-        default=300,
+        default=3000,
         help="To avoid samples being stuck in local minima which under the "
         "emcee algorithm may never be drained, every this many steps the "
         "sampling stars from scratch, initialized with the top distinct samples"
@@ -126,6 +126,14 @@ def parse_command_line():
         help="If the log-likelihood spread between most and least likely "
         "walker at the end of ``--restart-steps`` is less than this, the true "
         "sampling begins.",
+    )
+    parser.add_argument(
+        '--changed-likelihood',
+        action='store_true',
+        default=False,
+        help="If passed, the log-likelihood function is assumed to have changed"
+        " since the last sampling run. This will cause the sampling to restart"
+        " from the last step of the existing chain, rather than continuing."
     )
 
     parser.add_argument(
@@ -184,6 +192,15 @@ def parse_command_line():
         action="store_true",
         help="If passed, no sampling is performed. Instead a samples files is "
         "created containing only the starting walker positions.",
+    )
+    parser.add_argument(
+        "--overwrite-cache",
+        nargs="+",
+        default=[],
+        type=str.upper,
+        choices=["BLS", "SED"],
+        help="If passed, the specified cache will be re-computed and "
+        "overwritten.",
     )
 
     return parser.parse_args()
@@ -272,13 +289,6 @@ def restart_sampling(backend, config):
         top_indices = numpy.unravel_index(top_indices, log_prob.shape)
         initial_state = samples[top_indices]
         if walkers_independent(initial_state):
-            for pos_ind, pos in enumerate(initial_state):
-                save_initial_position(
-                    pos,
-                    backend.filename,
-                    nwalkers=backend_shape[0],
-                    index=pos_ind,
-                )
             top_log_likelihood = log_prob[top_indices]
             log_likelihood_spread = (
                 top_log_likelihood.max() - top_log_likelihood.min()
@@ -306,6 +316,20 @@ def restart_sampling(backend, config):
     return backend, None, False
 
 
+def reinitialize_sampling(backend, final_run):
+    """Restart sampling with the last step of an existing chain."""
+
+    _logger.info("Starting sampling from the last step of the existing chain.")
+    backend_shape = backend.shape
+    initial_state = prepare_restart(backend)[1][-1]
+    backend.reset(*backend_shape)
+    assert walkers_independent(initial_state)
+    with h5py.File(backend.filename, "r+") as samples_f:
+        samples_f["mcmc"].attrs["final_run"] = final_run
+
+    return backend, initial_state
+
+
 def main(config):
     """Avoid polluting global namespace."""
 
@@ -315,14 +339,27 @@ def main(config):
     backend, final_run = get_backend(samples_fname, config)
     log_likelihood = (
         LogLikelihoodPriorsOnly if config.priors_only else LogLikelihood
-    )(config.tic_id)
+    )(config.tic_id, overwrite_cache=config.overwrite_cache)
 
     initial_state = None
     if backend.iteration == 0:
         initial_state = FindStartingPositions(log_likelihood)(config)
         _logger.info("Full set of initial positions found. Starting sampling.")
-    elif not final_run and backend.iteration >= config.restart_steps:
-        backend, initial_state, final_run = restart_sampling(backend, config)
+    else:
+        if config.changed_likelihood:
+            backend, initial_state = reinitialize_sampling(backend, final_run)
+        elif not final_run and backend.iteration >= config.restart_steps:
+            backend, initial_state, final_run = restart_sampling(
+                backend, config
+            )
+        if initial_state is not None:
+            for pos_ind, pos in enumerate(initial_state):
+                save_initial_position(
+                    pos,
+                    backend.filename,
+                    nwalkers=backend.shape[0],
+                    index=pos_ind,
+                )
 
     if config.starting_positions_only:
         return

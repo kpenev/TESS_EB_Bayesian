@@ -8,11 +8,17 @@ from scipy.stats import norm, truncnorm
 from sqlalchemy import select, delete
 
 from tess_target import TESSTarget, get_bls_eclipse_mask
-from detrending import masked_detrend, calc_moving_median
+from detrending import (
+    masked_detrend,
+    get_moving_median,
+    get_ooe_variability,
+    detrend_with_gaps,
+)
 from extinction_correction import Green19Correction
 from binary import Binary
 from cache_interface import CacheSession, CachedSED, CachedBLS
 from sample_params import SampleParams
+from exclude_data import exclude_data
 
 
 class LogLikelihood(TESSTarget):
@@ -187,28 +193,83 @@ class LogLikelihood(TESSTarget):
         self,
         tic_id,
         *,
-        overwrite_cache=False,
+        overwrite_cache=(),
         ignore_extinction_flags=True,
         plot_bls=False,
-        detrend=partial(masked_detrend, get_trend=calc_moving_median),
+        get_trend=get_moving_median,
+        save_detrending=False,
     ):
         """Prepare to evaluate the log-likelihood for the given TIC ID."""
 
         super().__init__(tic_id)
+        overwrite_cache = [item.upper() for item in overwrite_cache]
+
+        self.get_model = (
+            self.get_eclipse_model
+            if "OOE" in exclude_data.get(tic_id, [])
+            else self.get_full_model
+        )
 
         # https://outerspace.stsci.edu/display/TESS/2.0+-+Data+Product+Overview#id-2.0-DataProductOverview-Table:CadenceQualityFlags
 
         self._sed, self._best_fit_bls = self.get_cached_sed_and_bls(tic_id)
 
-        if self._sed is None or overwrite_cache:
+        if self._sed is None or "SED" in overwrite_cache:
             self._sed = Green19Correction(
                 ignore_extinction_flags
             ).get_absolute_magnitudes(tic_id)[0]
-            overwrite_cache = True
+        if "BLS" in overwrite_cache:
+            self._best_fit_bls = None
 
-        if self._best_fit_bls is None or overwrite_cache:
+        if get_trend is not None:
+            original_lcs = self._lcs
+            self._lcs = []
+            while (not self._lcs) or (self._best_fit_bls is None):
+                for header, lightcurve in original_lcs:
+                    # That is the intent
+                    # pylint: disable=comparison-with-callable
+                    if self._best_fit_bls is None:
+                        self._logger.debug("Detrending without BLS information")
+                        detrend = partial(
+                            detrend_with_gaps,
+                            min_gap=max(0.5, 30.0 * header["exptime"]),
+                        )
+                    elif get_trend == get_moving_median:
+                        detrend = partial(
+                            masked_detrend,
+                            exptime=header["exptime"],
+                            log_likelihood=self,
+                        )
+                    else:
+                        self._logger.debug("Detrending with BLS information")
+                        detrend = partial(
+                            masked_detrend,
+                            exptime=header["exptime"],
+                            log_likelihood=self,
+                            spline_rejection=5.0,
+                            eclipse_rejection=numpy.inf,
+                        )
+                    # pylint: enable=comparison-with-callable
+                    self._lcs.append(
+                        (
+                            header,
+                            detrend(
+                                lightcurve,
+                                get_trend=get_trend,
+                                full_output=save_detrending,
+                            ),
+                        )
+                    )
+                if self._best_fit_bls is None:
+                    self._best_fit_bls = self.fit_bls(plot_bls)
+                    # That is the intent
+                    # pylint: disable=comparison-with-callable
+                    if get_trend == get_ooe_variability:
+                        # pylint: enable=comparison-with-callable
+                        self._lcs = []
+                    overwrite_cache = True
+        elif self._best_fit_bls is None:
             self._best_fit_bls = self.fit_bls(plot_bls)
-            overwrite_cache = True
 
         if overwrite_cache:
             self._cache(tic_id)
@@ -244,12 +305,6 @@ class LogLikelihood(TESSTarget):
 
         assert self._best_fit_bls["period"][0] > 2 * self._range.per[0]
 
-        if detrend is not None:
-            self._lcs = [
-                (header, detrend(lightcurve, header["exptime"], self))
-                for header, lightcurve in self._lcs
-            ]
-
         self._logger.debug("LCs: %s", repr(self._lcs))
         self._logger.debug("SED: %s", repr(self._sed))
 
@@ -281,7 +336,7 @@ class LogLikelihood(TESSTarget):
         )
 
     @staticmethod
-    def get_model(binary, header, lightcurve, lc_sys_err):
+    def get_full_model(binary, header, lightcurve, lc_sys_err):
         """Fit the model scaling to match that of the lightcurve."""
 
         lc_sq_errors = lightcurve["flux_err"] ** 2 + lc_sys_err**2
@@ -295,7 +350,145 @@ class LogLikelihood(TESSTarget):
         model_lc *= (model_lc * lightcurve["flux"] / lc_sq_errors).sum() / (
             model_lc**2 / lc_sq_errors
         ).sum()
-        return model_lc, lc_sq_errors
+        return model_lc, lc_sq_errors, None
+
+    @staticmethod
+    def get_near_eclipse_flags(lc_time, binary, duration_factor):
+        """Return flags selecting only and all points near eclipses."""
+
+        eval_ntimes = int(10 * binary.per / (lc_time[1:] - lc_time[:-1]).min())
+        eval_time = numpy.linspace(0, binary.per, eval_ntimes)
+        in_eclipse = binary.eclipse(eval_time) < 1
+
+        if in_eclipse[0]:
+            if in_eclipse.all():
+                eclipse_start = eclipse_end = 0.0
+            else:
+                eclipse_start, eclipse_end = eval_time[
+                    numpy.nonzero(numpy.logical_not(in_eclipse))[0][[-1, 0]]
+                ]
+            eclipse_duration = eclipse_end - eclipse_start + binary.per
+        else:
+            if not in_eclipse.any():
+                eclipse_start = eclipse_end = 0.0
+            else:
+                eclipse_start, eclipse_end = numpy.nonzero(in_eclipse)[0][
+                    [0, -1]
+                ]
+                eclipse_start -= 1
+                eclipse_end += 1
+                assert not in_eclipse[eclipse_start]
+                assert not in_eclipse[eclipse_end]
+                eclipse_start = eval_time[eclipse_start]
+                eclipse_end = eval_time[eclipse_end]
+            eclipse_duration = eclipse_end - eclipse_start
+
+        mask_expand = eclipse_duration * (duration_factor - 1) / 2
+
+        flag_time = lc_time - eclipse_start + mask_expand
+
+        flags = (flag_time // binary.per).astype(int)
+        flags -= flags.min()
+        flags[flag_time % binary.per > eclipse_duration + 2 * mask_expand] = -1
+        return flags
+
+    @staticmethod
+    def fit_baseline(
+        binary, header, lightcurve, lc_sys_err, duration_factor=1.8
+    ):
+        """
+        Fit a second order polynomial to near-eclipse points.
+
+        This is used to estimate the baseline flux in the lightcurve.
+        """
+
+        eclipse_flags = LogLikelihood.get_near_eclipse_flags(
+            lightcurve["time"], binary, duration_factor
+        )
+        model_mask = eclipse_flags >= 0
+        if model_mask.sum() < 10:
+            return (
+                numpy.array([]),
+                numpy.array([]),
+                numpy.zeros(model_mask.size, dtype=bool),
+            )
+        lightcurve = lightcurve[model_mask]
+
+        lc_sq_errors = lightcurve["flux_err"] ** 2 + lc_sys_err**2
+
+        eclipse_model = binary.get_lightcurve(
+            lightcurve["time"],
+            exclude=["beaming", "reflection", "ellipticity"],
+            supersample_factor=100,
+            exp_time=header["exptime"],
+        )
+        eclipse_flags = eclipse_flags[model_mask]
+        for eclipse_ind in range(0, eclipse_flags.max() + 1):
+            eclipse_mask = eclipse_flags == eclipse_ind
+            fit_mask = numpy.logical_and(
+                eclipse_mask, numpy.abs(eclipse_model - 1) < 1e-10
+            )
+            if fit_mask.sum() < 10 or not fit_mask[eclipse_mask][[0, -1]].all():
+                LogLikelihood._logger.debug(
+                    "Discarding eclipse %d", eclipse_ind
+                )
+                dont_discard = numpy.logical_not(eclipse_mask)
+                model_mask[model_mask] = numpy.logical_and(
+                    model_mask[model_mask], dont_discard
+                )
+                eclipse_model = eclipse_model[dont_discard]
+                lc_sq_errors = lc_sq_errors[dont_discard]
+                eclipse_flags = eclipse_flags[dont_discard]
+                lightcurve = lightcurve[dont_discard]
+                continue
+            LogLikelihood._logger.debug("Keeping eclipse %d", eclipse_ind)
+
+            ooe_poly = numpy.poly1d(
+                numpy.polyfit(
+                    lightcurve["time"][fit_mask],
+                    lightcurve["flux"][fit_mask],
+                    2,
+                    w=1 / lc_sq_errors[fit_mask] ** 0.5,
+                )
+            )
+            eclipse_model[eclipse_mask] *= ooe_poly(
+                lightcurve["time"][eclipse_mask]
+            )
+
+        return eclipse_model, lc_sq_errors, model_mask
+
+    @staticmethod
+    def get_eclipse_model(binary, header, lightcurve, lc_sys_err):
+        """
+        Same as `get_model()` but ignoring OOE variability.
+
+        This method allows handling cases where there is significant non-binary
+        related variability in the lightcurve (astrophysical or instrumental).
+
+        The timind and duration of eclipses is determined from the given model,
+        and a second order polynomial is fit to the out-of-eclipse points near
+        each eclipse to estimate the background flux.
+        """
+
+        primary_eclipse_model, primary_lc_sq_errors, primary_mask = (
+            LogLikelihood.fit_baseline(binary, header, lightcurve, lc_sys_err)
+        )
+        binary.swap_components()
+        secondary_eclipse_model, secondary_lc_sq_errors, secondary_mask = (
+            LogLikelihood.fit_baseline(binary, header, lightcurve, lc_sys_err)
+        )
+        binary.swap_components()
+
+        mask = numpy.logical_or(primary_mask, secondary_mask)
+        primary_mask = primary_mask[mask]
+        secondary_mask = secondary_mask[mask]
+        eclipse_model = numpy.empty(mask.sum(), dtype=float)
+        lc_sq_errors = numpy.empty(mask.sum(), dtype=float)
+        eclipse_model[primary_mask] = primary_eclipse_model
+        eclipse_model[secondary_mask] = secondary_eclipse_model
+        lc_sq_errors[primary_mask] = primary_lc_sq_errors
+        lc_sq_errors[secondary_mask] = secondary_lc_sq_errors
+        return eclipse_model, lc_sq_errors, mask
 
     def prior_transform(self, param, sample_entry):
         """
@@ -474,7 +667,9 @@ class LogLikelihood(TESSTarget):
         )
         return max(sys_err, 1e-10)
 
-    def calc_lc_log_likelihood(self, binary, lc_sys_err, eclipse_only=False):
+    def calc_lc_log_likelihood(
+        self, binary, lc_sys_err, bls_eclipse_only=False
+    ):
         """
         Return log-likelihood of observing the TESS LCs for given binary.
 
@@ -485,8 +680,8 @@ class LogLikelihood(TESSTarget):
             lc_sys_err(float):    The systematic error to assume for
                 lightcurves. (added in quadrature to formal errors).
 
-            eclipse_only(str or False):    If not False, only lightcurve points
-            near eclipse are considered:
+            bls_eclipse_only(str or False):    If not False, only lightcurve
+                points near eclipse (per BLS) are considered:
 
                 * even: Only the points in the vicinity of even eclipses (per
                   best fit BLS) are included.
@@ -507,19 +702,25 @@ class LogLikelihood(TESSTarget):
             if lightcurve["good"].sum() < 10:
                 continue
             lightcurve = lightcurve[lightcurve["good"]]
-            if eclipse_only:
+            if bls_eclipse_only:
                 lightcurve = lightcurve[
                     get_bls_eclipse_mask(
-                        self._best_fit_bls, lightcurve, eclipse_only
+                        self._best_fit_bls, lightcurve, bls_eclipse_only
                     )
                 ]
             if lightcurve.size < 10:
                 continue
-            model_lc, lc_sq_errors = self.get_model(
+            model_lc, lc_sq_errors, mask = self.get_model(
                 binary, header, lightcurve, lc_sys_err
             )
+            if mask is None:
+                observed_lc = lightcurve["flux"]
+            elif mask.sum() < 10:
+                continue
+            else:
+                observed_lc = lightcurve["flux"][mask]
             result -= (
-                (lightcurve["flux"] - model_lc) ** 2 / lc_sq_errors
+                (observed_lc - model_lc) ** 2 / lc_sq_errors
                 + numpy.log(lc_sq_errors)
             ).sum()
             self._logger.debug("Log likelihood now: %s", repr(result / 2))

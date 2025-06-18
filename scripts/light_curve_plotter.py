@@ -30,17 +30,35 @@ class LightCurvePlotter:
             "markeredgewidth": 0,
             "zorder": 10,
         },
+        "trend": {
+            "marker": ".",
+            "markersize": 5,
+            "linestyle": "none",
+            "markerfacecolor": "blue",
+            "markeredgecolor": "none",
+            "markeredgewidth": 0,
+            "zorder": 15,
+        },
+        "original": {
+            "marker": ".",
+            "markersize": 5,
+            "linestyle": "none",
+            "markerfacecolor": "black",
+            "markeredgecolor": "none",
+            "markeredgewidth": 0,
+            "zorder": 5,
+        },
     }
     model_lc_plot_config = {
         "first": {
-            "marker": "none",
-            "linestyle": "-",
+            "marker": ".",
+            "linestyle": "none",
             "color": "red",
             "zorder": 100,
         },
         "others": {
-            "marker": "none",
-            "linestyle": "-",
+            "marker": ".",
+            "linestyle": "none",
             "color": "black",
             "zorder": 20,
         },
@@ -115,6 +133,14 @@ class LightCurvePlotter:
                 lightcurve["flux"][mask],
                 **plot_config,
             )
+        if getattr(self._config, "show_lc_detrending", False):
+            for column in ["original", "trend"]:
+                pyplot.plot(
+                    lightcurve["time"],
+                    lightcurve[column],
+                    **self.lc_plot_config[column],
+                )
+
         ylim = pyplot.ylim()
         config_key = "first" if self._config.highlight_first_model else "others"
         for y in model_lcs:
@@ -122,9 +148,14 @@ class LightCurvePlotter:
                 lightcurve["time"],
                 y,
                 linewidth=(
-                    1.0
-                    / (1 if config_key == "first" else len(model_lcs) ** 0.5)
+                    min(
+                        1.0,
+                        (5.0 if config_key == "first" else 1.0)
+                        / len(model_lcs) ** 0.5,
+                    )
                 ),
+                markersize=1.0
+                / (1 if config_key == "first" else len(model_lcs) ** 0.5),
                 **self.model_lc_plot_config[config_key],
             )
             config_key = "others"
@@ -132,10 +163,15 @@ class LightCurvePlotter:
         pyplot.ylabel("Flux")
         pyplot.ylim(ylim)
 
-    def plot_vs_phase(self, lightcurve, phase, model_lcs=(), xlabel="Phase"):
+    def plot_vs_phase(
+        self, lightcurve, phase, model_lcs=(), xlabel="Phase", order=True
+    ):
         """Create a plot of the lightcurve vs the given phase."""
 
-        phase_order = numpy.argsort(phase)
+        if order:
+            phase_order = numpy.argsort(phase)
+        else:
+            phase_order = numpy.arange(len(phase))
         print(f"Phase order: {phase_order!r}")
         print(f"Phase: {phase!r}")
         ordered_phase = phase[phase_order]
@@ -151,6 +187,18 @@ class LightCurvePlotter:
                 lightcurve["flux"][phase_order][mask],
                 **plot_config,
             )
+
+        if getattr(self._config, "show_lc_detrending", False):
+            for column, plot_config in [
+                ("original", self.lc_plot_config["original"]),
+                ("trend", self.lc_plot_config["trend"]),
+            ]:
+                pyplot.plot(
+                    ordered_phase[mask],
+                    lightcurve[column][phase_order][mask],
+                    **plot_config,
+                )
+
         ylim = pyplot.ylim()
         first = self._config.highlight_first_model
         for y in model_lcs:
@@ -158,6 +206,7 @@ class LightCurvePlotter:
                 ordered_phase,
                 y[phase_order],
                 linewidth=1.0 / (1 if first else len(model_lcs) ** 0.5),
+                markersize=1.0 / (1 if first else len(model_lcs) ** 0.5),
                 **self.model_lc_plot_config["first" if first else "others"],
             )
             first = False
@@ -339,21 +388,29 @@ class LightCurvePlotter:
         )
         pyplot.ylabel("Flux diff.")
 
-    def _get_model_lcs(self, header, lightcurve, binaries, detrend):
+    def _get_model_lcs(self, header, lightcurve, binaries):
         """Return the model lightcurves to add on top of the data."""
 
-        model_lcs = []
-        if binaries is not None:
+        if binaries is None or lightcurve.size <= 10:
+            return []
+
+        if self._config.eclipse_model_only:
+            model_lcs = []
+            for bnry in binaries:
+                masked_model, _, mask = LogLikelihood.get_eclipse_model(
+                    bnry, header, lightcurve, bnry.lc_sys_err
+                )
+                assert mask.size == lightcurve.size
+                model = numpy.full(mask.size, numpy.nan)
+                model[mask] = masked_model
+                model_lcs.append(model)
+        else:
             model_lcs = [
-                LogLikelihood.get_model(
+                LogLikelihood.get_full_model(
                     bnry, header, lightcurve, bnry.lc_sys_err
                 )[0]
                 for bnry in binaries
             ]
-        if detrend is not None:
-            if log_likelihood is None:
-                log_likelihood = LogLikelihood(self._config.tic_id)
-            model_lcs.append(detrend(lightcurve, log_likelihood)["flux"])
         return model_lcs
 
     def _setup_figure(self, num_lcs):
@@ -405,7 +462,9 @@ class LightCurvePlotter:
             )
         plot_types = numpy.unique(numpy.array(self._mosaic_spec).flatten())
         self._full_log_likelihood = (
-            plot_types.size != 1 or plot_types[0] != "full"
+            plot_types.size != 1
+            or plot_types[0] != "full"
+            or config.show_lc_detrending
         )
         self._folding_period = getattr(config, "folding_period", None)
         if config.data_on_top:
@@ -413,7 +472,7 @@ class LightCurvePlotter:
                 cfg["zorder"] = 30
             self.sed_plot_config["zorder"] = 30
 
-    def __call__(self, tic_id, binaries=None, detrend=None, title_info=None):
+    def __call__(self, tic_id, binaries=None, get_trend=None, title_info=None):
         """
         Plot lightcurves of TESS target together with detrending and model(s).
 
@@ -431,8 +490,14 @@ class LightCurvePlotter:
         """
 
         title_pre = f"TIC {tic_id}\n"
-        if self._full_log_likelihood:
-            tess_target = LogLikelihood(tic_id)
+        if self._full_log_likelihood or get_trend is not None:
+            tess_target = LogLikelihood(
+                tic_id,
+                save_detrending=getattr(
+                    self._config, "show_lc_detrending", False
+                ),
+                get_trend=get_trend,
+            )
             if self._folding_period is None:
                 self._folding_period = tess_target.bls_porb
 
@@ -454,9 +519,7 @@ class LightCurvePlotter:
             lightcurve = numpy.copy(lightcurve)
             lightcurve["flux"] /= numpy.median(lightcurve["flux"])
 
-            model_lcs = self._get_model_lcs(
-                header, lightcurve, binaries, detrend
-            )
+            model_lcs = self._get_model_lcs(header, lightcurve, binaries)
             print("Mosaic spec: " + repr(self._mosaic_spec))
             for plot_type, axis in subfig.subplot_mosaic(
                 self._mosaic_spec,

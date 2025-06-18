@@ -27,7 +27,7 @@ def parse_command_line():
     host = gethostname()
     this_hpc = None
     for candidate in _tic_per_node:
-        if candidate in host.split('.'):
+        if candidate in host.split("."):
             this_hpc = candidate
 
     parser = ArgumentParser(
@@ -65,9 +65,7 @@ def parse_command_line():
         help="The SLURM partition to set up the script for.",
     )
     parser.add_argument(
-        '--time-limit',
-        default='48:00:00',
-        help='The time limit for the jobs.'
+        "--time-limit", default="48:00:00", help="The time limit for the jobs."
     )
     parser.add_argument(
         "--num-parallel",
@@ -84,6 +82,14 @@ def parse_command_line():
         " of jobs the list should be split into. If not specified, a "
         "non-launcher slurm file is created.",
     )
+    parser.add_argument(
+        "--launcher-commands-fname",
+        "--launcher-fname",
+        "--launcher-commands",
+        default=launcher_fname,
+        help="The template for the launcher commands file. Should include "
+        "``{hpc}`` and ``{jobid}`` substitutions.",
+    )
     return parser.parse_args()
 
 
@@ -99,12 +105,12 @@ def get_ticid_list(tablename):
     with Session.begin() as db_session:
         # pylint: enable=no-member
         return list(
-            db_session.scalars(
-                select(SelectTICIDs.id).filter_by(flag=1)
-            ).all()
+            db_session.scalars(select(SelectTICIDs.id).filter_by(flag=1)).all()
         )
 
 
+# Meant to function as callable
+# pylint: disable=too-few-public-methods
 class FileFromTemplate:
     """Create a file from a template given substitutions."""
 
@@ -146,6 +152,9 @@ class FileFromTemplate:
         return fname
 
 
+# pylint: enable=too-few-public-methods
+
+
 def make_slurm(config):
     """Create the slurm scripts per the given configuration."""
 
@@ -174,10 +183,12 @@ def make_slurm(config):
             )
         ),
         "num_parallel": config.num_parallel,
-        'time_limit': config.time_limit
+        "time_limit": config.time_limit,
     }
     make_slurm_file = FileFromTemplate(slurm_fname, substitutions)
-    make_launchercmd_file = FileFromTemplate(launcher_fname, substitutions)
+    make_launchercmd_file = FileFromTemplate(
+        config.launcher_commands_fname, substitutions
+    )
 
     first_tic = 0
     while first_tic < len(ticid_list):
@@ -200,7 +211,7 @@ def make_slurm(config):
                     for tic in ticid_list[first_tic : first_tic + ntics_per_job]
                 ]
             )
-            make_slurm_file([{"jobid": jobid, 'launcher_cmd': cmdfname}])
+            make_slurm_file([{"jobid": jobid, "launcher_cmd": cmdfname}])
 
         first_tic += ntics_per_job
 

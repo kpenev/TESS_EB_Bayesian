@@ -149,8 +149,9 @@ class TESSTarget:
             ],
         )
         formatted_lc["time"] = observed_lc["TIME"]
-        formatted_lc["flux"] = observed_lc[flux_columns[0]]
-        formatted_lc["flux_err"] = observed_lc[flux_columns[1]]
+        scaling = numpy.nanmedian(observed_lc[flux_columns[0]])
+        formatted_lc["flux"] = observed_lc[flux_columns[0]] / scaling
+        formatted_lc["flux_err"] = observed_lc[flux_columns[1]] / scaling
         formatted_lc["good"] = True
         return formatted_lc, {
             "exptime": exptime,
@@ -199,7 +200,12 @@ class TESSTarget:
             )
         self._logger.debug("Computing BLS for perieds:\n%s", repr(periods))
 
-        periodogram = model.power(periods, numpy.linspace(0.02, 0.2, 100))
+        periodogram = model.power(
+            periods,
+            numpy.linspace(
+                min(periods[0] / 10, 0.02), min(periods[0] / 2, 0.2), 100
+            ),
+        )
         self._logger.debug(
             "Periodogram periods:\n%s",
             repr(periodogram.period),
@@ -301,18 +307,20 @@ class TESSTarget:
                 (11.0 * bls_results["period"][1]) // self._get_bls_period_step()
             ),
         )
+        period_range = (
+            max(bls_results["period"][0] - 5 * bls_results["period"][1], 0.1),
+            min(bls_results["period"][0] + 5 * bls_results["period"][1], 100),
+        )
         self._logger.debug(
             "Covering period range %s < Porb < %s with %d points",
-            bls_results["period"][0] - 5 * bls_results["period"][1],
-            bls_results["period"][0] + 5 * bls_results["period"][1],
+            *period_range,
             num_periods,
         )
 
         masked_bls_result = self._get_best_fit_bls(
             lightcurve[mask],
             periods=numpy.linspace(
-                bls_results["period"][0] - 5 * bls_results["period"][1],
-                bls_results["period"][0] + 5 * bls_results["period"][1],
+                *period_range,
                 num_periods,
             ),
         )
