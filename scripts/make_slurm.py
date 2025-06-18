@@ -150,7 +150,10 @@ def make_slurm(config):
     """Create the slurm scripts per the given configuration."""
 
     ticid_list = get_ticid_list(config.tic_table)
-
+    if config.tic_range:
+        ticid_list = ticid_list[
+            config.tic_range[0] : config.tic_range[0] + config.tic_range[1]
+        ]
     if config.launcher_njobs is None:
         ntics_per_job = _tic_per_node[config.hpc]
     else:
