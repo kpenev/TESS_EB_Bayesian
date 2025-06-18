@@ -111,7 +111,7 @@ def parse_command_line():
     parser.add_argument(
         "--restart-steps",
         type=int,
-        default=300,
+        default=3000,
         help="To avoid samples being stuck in local minima which under the "
         "emcee algorithm may never be drained, every this many steps the "
         "sampling stars from scratch, initialized with the top distinct samples"
