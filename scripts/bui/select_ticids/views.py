@@ -2,6 +2,7 @@
 
 import sys
 from os import path
+from base64 import b64encode
 
 sys.path.append(path.dirname(path.dirname(__file__)))
 
@@ -9,6 +10,7 @@ sys.path.append(path.dirname(path.dirname(__file__)))
 from sqlalchemy import select, update, func
 from django.shortcuts import render
 from django.views import View
+from django.template.defaultfilters import slugify
 
 # False positive
 # pylint: disable=import-error
@@ -16,8 +18,8 @@ from db_interface import Session
 
 # pylint: enable=import-error
 
-from .data_model import get_ticid_select_table
 from paths import render_dir
+from .data_model import get_ticid_select_table
 
 
 class TICIdSelectorView(View):
@@ -25,8 +27,10 @@ class TICIdSelectorView(View):
 
     reviewing = None
     tablename = None
-    plot = None
+    plot_dirs = ()
     rendered_only = False
+    states = ("selected", "discarded")
+    grid = {"columns": "1fr", "rows": "1fr"}
 
     def get(self, request, displayed_ticid=None, decision=None):
         """Allow user to review LCs from Villanova catalog and select some."""
@@ -35,7 +39,9 @@ class TICIdSelectorView(View):
         # pylint: disable=no-member
         # This is actually a class
         # pylint: disable=invalid-name
-        SelectTICIDs = get_ticid_select_table(self.tablename)
+        SelectTICIDs = get_ticid_select_table(
+            self.tablename, tuple(e[0] for e in self.plot_dirs)
+        )
         # pylint: enable=no-member
         # pylint: enable=invalid-name
 
@@ -44,13 +50,12 @@ class TICIdSelectorView(View):
         with Session.begin() as db_session:
             if decision is not None:
                 assert displayed_ticid is not None
-                if decision == "select":
-                    flag = 1
-                elif decision == "discard":
-                    flag = -1
-                else:
-                    assert decision == "skip"
+                if decision == "skip":
                     flag = 0
+                else:
+                    flag = [slugify(state) for state in self.states].index(
+                        decision
+                    ) + 1
                 if flag:
                     db_session.execute(
                         update(SelectTICIDs)
@@ -74,56 +79,49 @@ class TICIdSelectorView(View):
                     ).group_by(SelectTICIDs.rendered)
                 ).all()
             )
-            if 1 not in rendered_progress:
-                rendered_progress[1] = 0
 
             select_expr = select(SelectTICIDs.id, SelectTICIDs.rendered)
             if self.rendered_only:
                 select_expr = select_expr.filter_by(rendered=1)
             # pylint: enable=no-member
             context = {
-                state: db_session.execute(
-                    select_expr.filter_by(flag=flag).order_by(SelectTICIDs.id)
-                ).all()
-                for state, flag in [
-                    ("selected", "1"),
-                    ("pending", "0"),
-                    ("discarded", "-1"),
+                "by_state": [
+                    (
+                        state,
+                        db_session.execute(
+                            select_expr.filter_by(flag=flag).order_by(
+                                SelectTICIDs.id
+                            )
+                        ).all(),
+                    )
+                    for flag, state in enumerate(("pending",) + self.states)
                 ]
             }
 
         if displayed_ticid is None:
+            print("No TIC ID selected. Diplaying the first one.")
             displayed_ticid = context["pending"][0][0]
         context["displayed_ticid"] = displayed_ticid
+        context["decisions"] = self.states + ("skip",)
         context["review"] = self.reviewing
-        plot_fname = path.join(
-            render_dir,
-            self.tablename,
-            self.plot.__name__,
-            f"tess{displayed_ticid}.png",
-        )
-        new_plot = not path.exists(plot_fname)
-        # False positive
-        # pylint: disable=not-callable
-        context["image"] = self.plot(displayed_ticid, fname=plot_fname)
-        # pylint: enable=not-callable
-
-        if new_plot:
-            # False positivie
-            # pylint: disable=no-member
-            with Session.begin() as db_session:
-                # pylint: enable=no-member
-                db_session.execute(
-                    update(SelectTICIDs)
-                    .filter_by(id=displayed_ticid)
-                    .values(rendered=1)
-                )
-                rendered_progress[1] += 1
-                rendered_progress[0] -= 1
+        context["grid"] = self.grid
+        context["images"] = []
+        for dirname, area in self.plot_dirs:
+            plot_fname = path.join(dirname, f"tess{displayed_ticid}.png")
+            if path.exists(plot_fname):
+                print(f"Loading {plot_fname}")
+                with open(plot_fname, "rb") as plotf:
+                    context["images"].append(
+                        (
+                            dirname,
+                            b64encode(plotf.read()).decode("utf-8"),
+                            area,
+                        )
+                    )
 
         context["render_progress"] = (
-            rendered_progress[1],
-            rendered_progress[0] + rendered_progress[1],
+            rendered_progress.get(1, 0),
+            rendered_progress.get(0, 0) + rendered_progress.get(1, 0),
         )
 
         return render(request, "select_ticids/index.html", context)

@@ -10,14 +10,17 @@
     overflow: scroll;
 }
 
-.pending {
+.list-container {
+    flex: 1 1 100px;
+    overflow: scroll;
+}
+
+#pending {
     flex: 3 3 100px;
     overflow: scroll;
 }
 
 .discarded {
-    flex: 1 1 100px;
-    overflow: scroll;
 }
 
 .displayed {

@@ -5,75 +5,24 @@ from bui.select_ticids import plots
 
 urlpatterns = [
     path(
-        "",
+        "sampling/" + urltail,
         TICIdSelectorView.as_view(
-            reviewing="prsa",
-            tablename="prsa_ebs",
-            plot=plots.lightcurve,
-            rendered_only=True,
-        ),
-        name="prsa_index",
-    ),
-    path(
-        "<int:displayed_ticid>/",
-        TICIdSelectorView.as_view(
-            reviewing="prsa",
-            tablename="prsa_ebs",
-            plot=plots.lightcurve,
-            rendered_only=True,
-        ),
-        name="prsa_jump",
-    ),
-    path(
-        "<int:displayed_ticid>/<slug:decision>/",
-        TICIdSelectorView.as_view(
-            reviewing="prsa",
-            tablename="prsa_ebs",
-            plot=plots.lightcurve,
-            rendered_only=True,
-        ),
-        name="prsa_decision",
-    ),
-] + sum(
-    (
-        [
-            path(
-                plot_type,
-                TICIdSelectorView.as_view(
-                    reviewing=plot_type,
-                    tablename=tablename,
-                    plot=getattr(plots, plot_type),
-                    rendered_only=False,
-                ),
-                name=f"{plot_type}_index",
+            reviewing="sampling",
+            tablename="sampling",
+            plot_dirs=(
+                ("best", "1 / 1 / 3 / 2"),
+                ("convergence", "1 / 2 / 2 / 3"),
+                ("starting", "2 / 2 / 3 / 3"),
             ),
-            path(
-                f"{plot_type}/<int:displayed_ticid>/",
-                TICIdSelectorView.as_view(
-                    reviewing=plot_type,
-                    tablename=tablename,
-                    plot=getattr(plots, plot_type),
-                    rendered_only=False,
-                ),
-                name=f"{plot_type}_jump",
-            ),
-            path(
-                f"{plot_type}/<int:displayed_ticid>/<slug:decision>/",
-                TICIdSelectorView.as_view(
-                    reviewing=plot_type,
-                    tablename=tablename,
-                    plot=getattr(plots, plot_type),
-                    rendered_only=False,
-                ),
-                name=f"{plot_type}_decision",
-            ),
-        ]
-        for plot_type, tablename in [
-            ("starting", "attempted_sampling"),
-            ("best", "attempted_sampling"),
-            ("convergence", "attempted_sampling"),
-            ("ooe_var_removal", "prsa_ebs"),
-        ]
-    ),
-    [],
-)
+            rendered_only=True,
+            states=("finished", "continue", "bad period", "bad minimum"),
+            grid={"columns": "1fr 1fr", "rows": "1fr 1fr"},
+        ),
+        name=urlname,
+    )
+    for urltail, urlname in [
+        ("", "sampling_index"),
+        ("<int:displayed_ticid>/", "sampling_jump"),
+        ("<int:displayed_ticid>/<slug:decision>/", "sampling_decision"),
+    ]
+]

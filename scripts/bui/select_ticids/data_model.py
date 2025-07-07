@@ -1,36 +1,76 @@
-from sqlalchemy import Column, Integer, TIMESTAMP, text
+"""On-the-fly creation of tables to track TIC selection."""
 
+import re
+from glob import glob
+from os import path
+
+from sqlalchemy import Table, Column, Integer, TIMESTAMP, text, inspect
 from sqlalchemy.orm import DeclarativeBase
 
+from db_interface import db_engine, Session
 
+
+# pylint: disable=too-few-public-methods
 class SelectTICIDBase(DeclarativeBase):
-    """Model for keeping track of user selection of TIC IDs."""
-
-    id = Column(Integer, primary_key=True, doc="The TIC ID to consider.")
-
-    flag = Column(Integer, doc="-1 - rejected, 0 - pending, 1 - selected")
-    rendered = Column(Integer, doc="1 - rendered, 0 - not")
-
-    timestamp = Column(
-        TIMESTAMP,
-        nullable=False,
-        server_default=text("CURRENT_TIMESTAMP"),
-        doc="When record was last changed",
-    )
+    """Base class for tables that track TIC ID selection."""
 
 
-def get_ticid_select_table(tablename):
+# pylint: enable=too-few-public-methods
+
+
+def get_ticids(plot_dir):
+    """Return the TIC IDs with corresponding plots in the given directory."""
+
+    plot_name_rex = re.compile(r"tess(?P<tic>[0-9]*)\.(?P<ext>[a-zA-Z]+)$")
+    for plot_fname in glob(path.join(plot_dir, "*")):
+        parsed = plot_name_rex.match(path.basename(plot_fname))
+        if parsed and parsed["ext"] in ("png", "jpg", "jpeg", "pdf"):
+            yield int(parsed["tic"]), plot_fname
+
+
+def get_ticid_select_table(tablename, plot_dirs=(), require_all=False):
     """Create a table for tracking TIC ID selection with given name."""
 
-    for mapper in SelectTICIDBase.registry.mappers:
-        candidate = mapper.class_
-        if (
-            not candidate.__name__.startswith("_")
-            and getattr(candidate, "__tablename__", "") == tablename
-        ):
-            return candidate
+    class Result(SelectTICIDBase):
+        """The table for tracking TIC ID selection."""
 
-    class SelectTICIDs(SelectTICIDBase):
-        __tablename__ = tablename
+        __table__ = Table(
+            tablename,
+            SelectTICIDBase.metadata,
+            Column(
+                "id", Integer, primary_key=True, doc="The TIC ID to consider."
+            ),
+            Column(
+                "flag",
+                Integer,
+                doc="Status assigned to the TIC ID (selection dependent).",
+            ),
+            Column("rendered", Integer, doc="1 - rendered, 0 - not"),
+            Column(
+                "timestamp",
+                TIMESTAMP,
+                SelectTICIDBase.metadata,
+                nullable=False,
+                server_default=text("CURRENT_TIMESTAMP"),
+                doc="When record was last changed",
+            ),
+            keep_existing=True,
+        )
 
-    return SelectTICIDs
+    if not inspect(db_engine).has_table(tablename):
+        assert plot_dirs is not None
+        Result.__table__.create(db_engine)
+        plot_tic_ids = None
+        for plot_dir in plot_dirs:
+            if plot_tic_ids is None:
+                plot_tic_ids = set(tic_id for tic_id, _ in get_ticids(plot_dir))
+            else:
+                getattr(
+                    plot_tic_ids,
+                    "intersection_update" if require_all else "update",
+                )(set(tic_id for tic_id, _ in get_ticids(plot_dir)))
+        with Session.begin() as db_session:
+            for tic_id in plot_tic_ids:
+                db_session.add(Result(id=tic_id, flag=0, rendered=1))
+
+    return Result

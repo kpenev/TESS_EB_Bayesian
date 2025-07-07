@@ -39,6 +39,14 @@ ul.navbar  {
 
 .img-parent {
     flex-grow: 1;
+    display: grid;
+    height: calc(100vh - 50px - 1.2rem);
+    background-color: #f0f0f0;
+    justify-content: start;
+}
+
+.img-area {
+    overflow: scroll;
 }
 
 .ticid_lists {

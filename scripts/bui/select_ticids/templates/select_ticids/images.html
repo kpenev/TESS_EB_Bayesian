@@ -1,0 +1,5 @@
+{% for entry in images %}
+    <div class="img-area" style="grid-area: {{ entry.2 }}">
+        <img src="data:image/png;base64,{{ entry.1 }}">
+    </div>
+{% endfor %}

@@ -15,9 +15,9 @@
     </head>
     <body>
         <ul class="navbar">
-            <li><a href="{% url review|add:'_decision' decision="select" displayed_ticid=displayed_ticid %}">Select</a></li>
-            <li><a href="{% url review|add:'_decision' decision="discard" displayed_ticid=displayed_ticid %}">Discard</a></li>
-            <li><a href="{% url review|add:'_decision' decision="skip" displayed_ticid=displayed_ticid %}">Skip</a></li>
+            {% for choice in decisions %}
+            <li><a href="{% url review|add:'_decision' decision=choice|slugify displayed_ticid=displayed_ticid %}">{{ choice|title }}</a></li>
+            {% endfor %}
         </ul>
         <div id="progress-with-label">
             <span style="width: {% widthratio render_progress.0 render_progress.1 100 %}%;">
@@ -28,13 +28,14 @@
             </div>
         </div>
         <div class="main">
-            <div class="img-parent"> 
-                <img id="main-image" src="data:image/png;base64,{{image}}"></img>
+            <div class="img-parent" style="grid-template-columns: {{ grid.columns }}; grid-template-rows: {{ grid.rows }};">
+                {% include "./images.html" with images=images%}
+
             </div>
             <div class="ticid_lists">
-                {% include "select_ticids/tic_list.html" with list_name="selected" list=selected %}
-                {% include "select_ticids/tic_list.html" with list_name="pending" list=pending %}
-                {% include "select_ticids/tic_list.html" with list_name="discarded" list=discarded %}
+                {% for state_images in by_state %}
+                {% include "select_ticids/tic_list.html" with list_name=state_images.0 list=state_images.1 %}
+                {% endfor %}
             </div>
         </div>
     </body>
