@@ -99,8 +99,7 @@ class TICIdSelectorView(View):
             }
 
         if displayed_ticid is None:
-            print("No TIC ID selected. Diplaying the first one.")
-            displayed_ticid = context["pending"][0][0]
+            displayed_ticid = dict(context['by_state'])["pending"][0][0]
         context["displayed_ticid"] = displayed_ticid
         context["decisions"] = self.states + ("skip",)
         context["review"] = self.reviewing

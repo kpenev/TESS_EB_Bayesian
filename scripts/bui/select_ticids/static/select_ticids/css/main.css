@@ -31,6 +31,13 @@ ul.navbar  {
     background: green;
 }
 
+#TICId {
+    float: right;
+    text-align: center;
+    font-size: 1.5em;
+    padding: 7px 8px;
+}
+
 .main {
     display: flex;
     flex-direction: row;

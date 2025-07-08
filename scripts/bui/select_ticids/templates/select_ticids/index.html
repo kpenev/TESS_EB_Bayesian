@@ -18,6 +18,7 @@
             {% for choice in decisions %}
             <li><a href="{% url review|add:'_decision' decision=choice|slugify displayed_ticid=displayed_ticid %}">{{ choice|title }}</a></li>
             {% endfor %}
+            <input id="TICId" type="text" value="{{ displayed_ticid }}">
         </ul>
         <div id="progress-with-label">
             <span style="width: {% widthratio render_progress.0 render_progress.1 100 %}%;">
