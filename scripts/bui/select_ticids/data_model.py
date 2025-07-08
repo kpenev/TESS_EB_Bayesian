@@ -7,7 +7,7 @@ from os import path
 from sqlalchemy import Table, Column, Integer, TIMESTAMP, text, inspect
 from sqlalchemy.orm import DeclarativeBase
 
-from db_interface import db_engine, Session
+from bui.db_interface import db_engine, Session
 
 
 # pylint: disable=too-few-public-methods

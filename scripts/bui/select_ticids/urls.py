@@ -1,7 +1,8 @@
+"""Define the URL patterns for the sampling TICId selector."""
+
 from django.urls import path
 
 from bui.select_ticids.views import TICIdSelectorView
-from bui.select_ticids import plots
 
 urlpatterns = [
     path(

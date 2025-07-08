@@ -90,10 +90,24 @@ def parse_command_line():
         help="The template for the launcher commands file. Should include "
         "``{hpc}`` and ``{jobid}`` substitutions.",
     )
+    parser.add_argument(
+        "--continue-flag",
+        type=int,
+        default=None,
+        help="The flag assigned to the tics for which sampling should continue."
+        " If not specified, all positive flags will be continued.",
+    )
+    parser.add_argument(
+        "--changed-likelihood-flag",
+        type=int,
+        default=None,
+        help="The flag assigned to the tics for which likelihood has changed "
+        "and need the ``--changed-likelihood`` argument.",
+    )
     return parser.parse_args()
 
 
-def get_ticid_list(tablename):
+def get_ticid_list(tablename, acceptable_flags=None):
     """Return the list of TIC IDs to sample."""
 
     # pylint: disable=no-member
@@ -102,11 +116,14 @@ def get_ticid_list(tablename):
     SelectTICIDs = get_ticid_select_table(tablename)
     # pylint: enable=invalid-name
 
+    query = select(SelectTICIDs.id, SelectTICIDs.flag)
+    if acceptable_flags is None:
+        query = query.where(SelectTICIDs.flag > 0)
+    else:
+        query = query.where(SelectTICIDs.flag.in_(acceptable_flags))
     with Session.begin() as db_session:
         # pylint: enable=no-member
-        return list(
-            db_session.scalars(select(SelectTICIDs.id).filter_by(flag=1)).all()
-        )
+        return list(db_session.execute(query).all())
 
 
 # Meant to function as callable
@@ -158,7 +175,21 @@ class FileFromTemplate:
 def make_slurm(config):
     """Create the slurm scripts per the given configuration."""
 
-    ticid_list = get_ticid_list(config.tic_table)
+    ticid_list = get_ticid_list(
+        config.tic_table,
+        (
+            None
+            if config.continue_flag is None
+            else (
+                [config.continue_flag]
+                + (
+                    []
+                    if config.changed_likelihood_flag is None
+                    else [config.changed_likelihood_flag]
+                )
+            )
+        ),
+    )
     if config.tic_range:
         ticid_list = ticid_list[
             config.tic_range[0] : config.tic_range[0] + config.tic_range[1]
@@ -207,8 +238,18 @@ def make_slurm(config):
             jobid = f"{first_tic:03d}_{ntics_per_job:03d}"
             cmdfname = make_launchercmd_file(
                 [
-                    {"jobid": jobid, "ticid": tic}
-                    for tic in ticid_list[first_tic : first_tic + ntics_per_job]
+                    {
+                        "jobid": jobid,
+                        "ticid": tic,
+                        "extra_cmdline": (
+                            "--changed-likelihood"
+                            if flag == config.changed_likelihood_flag
+                            else ""
+                        ),
+                    }
+                    for tic, flag in ticid_list[
+                        first_tic : first_tic + ntics_per_job
+                    ]
                 ]
             )
             make_slurm_file([{"jobid": jobid, "launcher_cmd": cmdfname}])
