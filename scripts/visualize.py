@@ -677,7 +677,7 @@ def main(config):
     log_likelihood = None
     print(
         f"Reading plot data from {config.samples_fname}/"
-        f'{getattr(config, "chain_name", '')}'
+        f"{getattr(config, 'chain_name', '')}"
     )
     if path.exists(config.samples_fname) and getattr(
         config, "chain_name", False

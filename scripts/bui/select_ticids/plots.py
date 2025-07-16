@@ -162,7 +162,7 @@ def convergence(tic_id, fname=None):
             tic_id=tic_id,
             remove_lc_trend="moving_median",
             plot_convergence=[None, "[[burnin], [stdev]]"],
-            diagnostic_quantiles=numpy.linspace(0.3, 0.9, 9),
+            diagnostic_quantiles=numpy.linspace(0.1, 0.9, 9),
             burnin_tolerance=1e-3,
             quantile_variance_realizations=100,
             samples_fname=samples_fname_template.format(tic_id=tic_id),
