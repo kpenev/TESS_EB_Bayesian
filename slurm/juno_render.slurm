@@ -27,8 +27,10 @@ render() {
 
     cd ${source_dir}
 
-    conda run -n py311 python3 \
-        ${source_dir}/bui/select_ticids/plots.py "${plot_mode}"\
+    conda run -n py311 python3 -u \
+        ${source_dir}/bui/select_ticids/plots.py "${plot_mode}" \
+	--limit-to-flags 2 5 \
+	--samples-fname-template /scratch/juno/kxp174430/TESS_EBs/samples/tess{tic_id:d}_samples.h5 \
         --num-parallel 64 \
         --table-name "${table}" \
         --plot-dir ${plot_dir} \
@@ -45,6 +47,6 @@ render() {
 source ~/module_load_order.sh
 source ~/set_environment.sh
 
-render attempted_sampling best
+render sampling convergence
 
 wait
