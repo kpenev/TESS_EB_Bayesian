@@ -359,7 +359,7 @@ def get_convergence_data(plot_data, config, num_walkers):
             )
             print(f"Quantile info: {quantile_info}")
             convergence_data["stdev"][result_ind] = quantile_info[2]
-            convergence_data["thin"][result_ind] = quantile_info[3]
+            convergence_data["thin"][result_ind] = quantile_info[3] or 0
             convergence_data["burnin"][result_ind] = quantile_info[4]
 
             result_ind += 1
