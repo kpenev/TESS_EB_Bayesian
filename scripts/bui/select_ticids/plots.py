@@ -27,6 +27,7 @@ from paths import (
     samples as samples_fname_template,
     render_dir as default_render_dir,
 )
+from exclude_data import exclude_data
 
 # False positive
 # pylint: disable=import-error
@@ -149,6 +150,7 @@ def best(tic_id, fname=None):
             burn_in=0,
             thin=1,
             sample_condition=None,
+            eclipse_model_only='OOE' in exclude_data.get(tic_id, []),
         ),
         fname,
     )
