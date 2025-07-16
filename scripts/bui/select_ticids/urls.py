@@ -11,9 +11,9 @@ urlpatterns = [
             reviewing="sampling",
             tablename="sampling",
             plot_dirs=(
-                ("best", "1 / 1 / 3 / 2"),
+                ("best", "1 / 1 / 2 / 2"),
                 ("convergence", "1 / 2 / 2 / 3"),
-                ("starting", "2 / 2 / 3 / 3"),
+                # ("starting", "2 / 2 / 3 / 3"),
             ),
             rendered_only=True,
             states=(
@@ -23,13 +23,16 @@ urlpatterns = [
                 "bad minimum",
                 "changed likelihood",
             ),
-            grid={"columns": "1fr 1fr", "rows": "1fr 1fr"},
+            grid={"columns": "1fr 1fr", "rows": "1fr"},
         ),
         name=urlname,
     )
     for urltail, urlname in [
-        ("", "sampling_index"),
-        ("<int:displayed_ticid>/", "sampling_jump"),
-        ("<int:displayed_ticid>/<slug:decision>/", "sampling_decision"),
+        ("<slug:sort_state>/", "sampling_index"),
+        ("<slug:sort_state>/<int:displayed_ticid>/", "sampling_jump"),
+        (
+            "<slug:sort_state>/<int:displayed_ticid>/<slug:decision>/",
+            "sampling_decision",
+        ),
     ]
 ]

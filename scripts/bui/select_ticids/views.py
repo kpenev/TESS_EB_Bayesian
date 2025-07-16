@@ -32,9 +32,11 @@ class TICIdSelectorView(View):
     states = ("selected", "discarded")
     grid = {"columns": "1fr", "rows": "1fr"}
 
-    def get(self, request, displayed_ticid=None, decision=None):
+    def get(self, request, sort_state, displayed_ticid=None, decision=None):
         """Allow user to review LCs from Villanova catalog and select some."""
 
+        state_slugs = ["pending"] + [slugify(state) for state in self.states]
+        sort_flag = state_slugs.index(sort_state)
         # That's the whole point
         # pylint: disable=no-member
         # This is actually a class
@@ -51,11 +53,9 @@ class TICIdSelectorView(View):
             if decision is not None:
                 assert displayed_ticid is not None
                 if decision == "skip":
-                    flag = 0
+                    flag = sort_flag
                 else:
-                    flag = [slugify(state) for state in self.states].index(
-                        decision
-                    ) + 1
+                    flag = state_slugs.index(decision)
                 if flag:
                     db_session.execute(
                         update(SelectTICIDs)
@@ -64,7 +64,7 @@ class TICIdSelectorView(View):
                     )
                 displayed_ticid = db_session.scalar(
                     select(SelectTICIDs.id)
-                    .filter_by(flag=0, rendered=1)
+                    .filter_by(flag=sort_flag, rendered=1)
                     .where(SelectTICIDs.id > displayed_ticid)
                     .order_by(SelectTICIDs.id)
                 )
@@ -83,8 +83,8 @@ class TICIdSelectorView(View):
             select_expr = select(SelectTICIDs.id, SelectTICIDs.rendered)
             if self.rendered_only:
                 select_expr = select_expr.filter_by(rendered=1)
-            # pylint: enable=no-member
             context = {
+                "sort_state": sort_state,
                 "by_state": [
                     (
                         state,
@@ -95,16 +95,19 @@ class TICIdSelectorView(View):
                         ).all(),
                     )
                     for flag, state in enumerate(("pending",) + self.states)
-                ]
+                ],
+                "decisions": self.states + ("skip",),
+                "review": self.reviewing,
+                "grid": self.grid,
+                "images": [],
             }
+            # pylint: enable=no-member
 
         if displayed_ticid is None:
-            displayed_ticid = dict(context['by_state'])["pending"][0][0]
+            displayed_ticid = dict(context["by_state"])[
+                self.states[sort_flag - 1] if sort_flag else "pending"
+            ][0][0]
         context["displayed_ticid"] = displayed_ticid
-        context["decisions"] = self.states + ("skip",)
-        context["review"] = self.reviewing
-        context["grid"] = self.grid
-        context["images"] = []
         for dirname, area in self.plot_dirs:
             plot_fname = path.join(dirname, f"tess{displayed_ticid}.png")
             if path.exists(plot_fname):

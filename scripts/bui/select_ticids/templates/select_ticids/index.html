@@ -16,7 +16,7 @@
     <body>
         <ul class="navbar">
             {% for choice in decisions %}
-            <li><a href="{% url review|add:'_decision' decision=choice|slugify displayed_ticid=displayed_ticid %}">{{ choice|title }}</a></li>
+            <li><a href="{% url review|add:'_decision' sort_state=sort_state decision=choice|slugify displayed_ticid=displayed_ticid %}">{{ choice|title }}</a></li>
             {% endfor %}
             <input id="TICId" type="text" value="{{ displayed_ticid }}">
         </ul>
