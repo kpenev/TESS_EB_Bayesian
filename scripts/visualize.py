@@ -357,6 +357,7 @@ def get_convergence_data(plot_data, config, num_walkers):
                 config.quantile_variance_realizations,
                 max(1, num_steps // 10),
             )
+            print(f"Quantile info: {quantile_info}")
             convergence_data["stdev"][result_ind] = quantile_info[2]
             convergence_data["thin"][result_ind] = quantile_info[3]
             convergence_data["burnin"][result_ind] = quantile_info[4]
