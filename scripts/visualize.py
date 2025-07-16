@@ -8,7 +8,7 @@ from glob import glob
 import logging
 from itertools import repeat
 
-from matplotlib import pyplot, colormaps
+from matplotlib import pyplot, colormaps, rcParams
 import numpy
 from configargparse import ArgumentParser, DefaultsFormatter
 import pandas
@@ -119,10 +119,10 @@ def parse_command_line():
         "selected only among surviving samples.",
     )
     parser.add_argument(
-        '--remove-lc-trend',
-        choices=['moving_median', 'ooe_variability', 'none'],
-        default='moving_median',
-        help='Specify the detrending method to use for the lightcurve.'
+        "--remove-lc-trend",
+        choices=["moving_median", "ooe_variability", "none"],
+        default="moving_median",
+        help="Specify the detrending method to use for the lightcurve.",
     )
     parser.add_argument(
         "--show-lc-detrending",
@@ -133,11 +133,11 @@ def parse_command_line():
         "to the detrended one.",
     )
     parser.add_argument(
-        '--eclipse-model-only',
-        action='store_true',
+        "--eclipse-model-only",
+        action="store_true",
         default=False,
-        help='If specified, only the eclipses in the lightcurve will be '
-        'modeled, along with simple near-eclipse baseline flux model.'
+        help="If specified, only the eclipses in the lightcurve will be "
+        "modeled, along with simple near-eclipse baseline flux model.",
     )
     parser.add_argument(
         "--plot-convergence",
@@ -332,20 +332,49 @@ def create_corner_plot(plot_data, config):
     pyplot.clf()
 
 
+def get_convergence_data(plot_data, config, num_walkers):
+    """Prepare the data needed for the convergence plot."""
+
+    num_steps = plot_data.shape[0] // num_walkers
+    assert num_walkers * num_steps == plot_data.shape[0]
+
+    num_entries = len(plot_data.columns) * len(config.diagnostic_quantiles)
+    print(f"Initializing convergence data with {num_entries} entries")
+    convergence_data = {
+        "burnin": numpy.empty(num_entries, dtype=float),
+        "stdev": numpy.empty(num_entries, dtype=float),
+        "thin": numpy.empty(num_entries, dtype=int),
+        "num_steps": num_steps,
+    }
+    result_ind = 0
+    for column in plot_data.columns:
+        for cdf_value in config.diagnostic_quantiles:
+            print(f"Processing quantile {cdf_value} for column {column}")
+            quantile_info = find_emcee_quantiles(
+                plot_data[column].values.reshape(num_steps, num_walkers),
+                cdf_value,
+                config.burnin_tolerance,
+                config.quantile_variance_realizations,
+                max(1, num_steps // 10),
+            )
+            convergence_data["stdev"][result_ind] = quantile_info[2]
+            convergence_data["thin"][result_ind] = quantile_info[3]
+            convergence_data["burnin"][result_ind] = quantile_info[4]
+
+            result_ind += 1
+
+    return convergence_data
+
+
 def create_convergence_plot(plot_data, config, num_walkers):
     """Create a figure to gauge convergence of the chain per Raftery-Lewis."""
 
     plot_data = get_chain_expressions(plot_data, config.chain_expression)
-    num_steps = plot_data.shape[0] // num_walkers
-    assert num_walkers * num_steps == plot_data.shape[0]
 
-    if len(config.diagnostic_quantiles) <= 10:
-        cmap = colormaps["tab10"]
-    else:
-        cmap = colormaps["tab20"]
-
+    print("Creating convergence plot")
     quantile_height = 2 / 3 / len(config.diagnostic_quantiles)
     quantile_offset = 1 / 6
+
     y_pos = numpy.array(
         [
             quantile_ind + quantile_offset + quantile_height * sub_quantile_ind
@@ -353,35 +382,53 @@ def create_convergence_plot(plot_data, config, num_walkers):
             for sub_quantile_ind in range(len(config.diagnostic_quantiles))
         ]
     )
-    burnin = numpy.empty(y_pos.size, dtype=float)
-    burnin_ind = 0
-    for column in plot_data.columns:
-        for cdf_value in config.diagnostic_quantiles:
-            quantile_info = find_emcee_quantiles(
-                plot_data[column].values.reshape(num_steps, num_walkers),
-                cdf_value,
-                config.burnin_tolerance,
-                config.quantile_variance_realizations,
-                min(100, num_steps),
-            )
-            burnin[burnin_ind] = quantile_info[-1]
-            burnin_ind += 1
+    convergence_data = get_convergence_data(plot_data, config, num_walkers)
 
-    pyplot.xscale("log")
-    pyplot.axvspan(0, num_steps, zorder=10, color="black")
-    pyplot.barh(
-        y_pos,
-        burnin,
-        height=quantile_height,
-        align="edge",
-        zorder=20,
-        color=[
-            cmap(quantile_ind)
-            for _ in plot_data.columns
-            for quantile_ind in config.diagnostic_quantiles
-        ],
-    )
-    pyplot.yticks(0.5 + numpy.arange(len(plot_data.columns)), plot_data.columns)
+    if len(config.diagnostic_quantiles) <= 10:
+        cmap = colormaps["tab10"]
+    else:
+        cmap = colormaps["tab20"]
+
+    mosaic_spec = Interpreter(
+        user_symbols={"burnin": "burnin", "stdev": "stdev"}
+    )(config.plot_convergence[1])
+    for plot_type, axis in pyplot.subplot_mosaic(
+        mosaic_spec,
+        empty_sentinel="empty",
+        gridspec_kw={"right": 0.95, "top": 0.95},
+        figsize=(
+            rcParams["figure.figsize"][0],
+            rcParams["figure.figsize"][1]
+            * len(mosaic_spec)
+            / len(mosaic_spec[0]),
+        ),
+    )[1].items():
+        pyplot.sca(axis)
+        pyplot.xscale("log")
+        if plot_type == "burnin":
+            pyplot.axvspan(
+                0, convergence_data["num_steps"], zorder=10, color="black"
+            )
+        print(
+            f"Plotting bars with y_pos={y_pos!r}, "
+            f"length={convergence_data[plot_type]}, "
+            f"height={quantile_height}"
+        )
+        pyplot.barh(
+            y_pos,
+            convergence_data[plot_type],
+            height=quantile_height,
+            align="edge",
+            zorder=20,
+            color=[
+                cmap(quantile_ind)
+                for _ in plot_data.columns
+                for quantile_ind in config.diagnostic_quantiles
+            ],
+        )
+        pyplot.yticks(
+            0.5 + numpy.arange(len(plot_data.columns)), plot_data.columns
+        )
     pyplot.savefig(config.plot_convergence[0])
 
 
@@ -628,14 +675,21 @@ def main(config):
     config.highlight_first_model = False
     logging.basicConfig(level=logging.DEBUG)
     log_likelihood = None
+    print(
+        f"Reading plot data from {config.samples_fname}/"
+        f'{getattr(config, "chain_name", '')}'
+    )
     if path.exists(config.samples_fname) and getattr(
         config, "chain_name", False
     ):
+        print("Print found samples file. Loading data ...")
         if log_likelihood is None:
             log_likelihood = LogLikelihood(config.tic_id)
+        print("Initializing HDF5 backend")
         backend = HDFBackend(
             config.samples_fname, name=config.chain_name, read_only=True
         )
+        print("Extracting data from HDF5 backend")
         plot_data, raw_data, log_prob, selected = get_plot_data(
             config,
             backend,
@@ -647,7 +701,10 @@ def main(config):
         log_prob = None
         selected = None
 
+    print("Creating plots")
+
     if getattr(config, "plot_lightcurve", False):
+        print("Plotting lightcurve")
         if (
             getattr(config, "show_model_with_lc", False)
             and plot_data is not None
@@ -682,15 +739,19 @@ def main(config):
         )
 
     if getattr(config, "corner_plot_fname", False):
+        print("Creating corner plot")
         create_corner_plot(plot_data, config)
 
     if getattr(config, "plot_expressions", False):
+        print("Creating expressions plot")
         create_expressions_plot(plot_data, config, backend.shape[0])
 
     if getattr(config, "histogram_movie", False):
+        print("Creating histogram movie")
         create_histogram_movie(plot_data, config, backend.shape[0])
 
     if getattr(config, "plot_convergence", False):
+        print("Creating convergence plot")
         create_convergence_plot(plot_data, config, backend.shape[0])
 
 

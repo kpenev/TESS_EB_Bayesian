@@ -161,10 +161,10 @@ def convergence(tic_id, fname=None):
         Namespace(
             tic_id=tic_id,
             remove_lc_trend="moving_median",
-            plot_convergence=[None, "[burnin]"],
-            diagnostic_quantiles=numpy.linspace(0.1, 0.9, 9),
-            burnin_tolerance=1e-4,
-            quantile_variance_realizations=5,
+            plot_convergence=[None, "[[burnin], [stdev]]"],
+            diagnostic_quantiles=numpy.linspace(0.3, 0.9, 9),
+            burnin_tolerance=1e-3,
+            quantile_variance_realizations=100,
             samples_fname=samples_fname_template.format(tic_id=tic_id),
             chain_expression=[
                 "$M_1+M_2$=mtotal",
@@ -208,9 +208,12 @@ def ooe_var_removal(tic_id, fname=None):
     )
 
 
-def render_one(tic_id, tablename, plot_func, render_dir):
+def render_one(
+    tic_id, tablename, plot_func, render_dir, samples_template
+):
     """Render the lightcurve for a single TIC ID."""
 
+    globals()["samples_fname_template"] = samples_template
     print(
         f"Rendering {plot_func.__name__} for {tic_id} from {tablename} "
         f"to {render_dir}"
@@ -266,8 +269,10 @@ def render_all_plots(config):
     # pylint: enable=invalid-name
 
     selection = select(SelectTICIDs.id)
-    if config.selected_only:
-        selection = selection.where(SelectTICIDs.flag == 1)
+    if config.limit_to_flags:
+        selection = selection.where(
+            SelectTICIDs.flag.in_(config.limit_to_flags)
+        )
 
     # False positive
     # pylint: disable=no-member
@@ -287,6 +292,7 @@ def render_all_plots(config):
         tablename=config.table_name,
         plot_func=globals()[config.plot_type],
         render_dir=config.plot_dir.format(config=config),
+        samples_template=config.samples_fname_template,
     )
 
     if config.num_parallel > 1:
@@ -314,6 +320,11 @@ def parse_command_line():
     )
     parser.add_argument("plot_type", help="The type of plot to render")
     parser.add_argument(
+        "--samples-fname-template",
+        default=samples_fname_template,
+        help="The template for the samples file name.",
+    )
+    parser.add_argument(
         "--start",
         type=int,
         default=0,
@@ -334,10 +345,10 @@ def parse_command_line():
         default=16,
     )
     parser.add_argument(
-        "--selected-only",
-        action="store_true",
+        "--limit-to-flags",
+        nargs="+",
         default=False,
-        help="Only render objects that have been selected.",
+        help="Only render objects that have one of the specified flags.",
     )
     parser.add_argument(
         "--plot-dir",

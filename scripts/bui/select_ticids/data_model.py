@@ -31,6 +31,7 @@ def get_ticids(plot_dir):
 def get_ticid_select_table(tablename, plot_dirs=(), require_all=False):
     """Create a table for tracking TIC ID selection with given name."""
 
+    # pylint: disable=too-few-public-methods
     class Result(SelectTICIDBase):
         """The table for tracking TIC ID selection."""
 
@@ -56,6 +57,7 @@ def get_ticid_select_table(tablename, plot_dirs=(), require_all=False):
             ),
             keep_existing=True,
         )
+    # pylint: enable=too-few-public-methods
 
     if not inspect(db_engine).has_table(tablename):
         assert plot_dirs is not None
@@ -69,7 +71,10 @@ def get_ticid_select_table(tablename, plot_dirs=(), require_all=False):
                     plot_tic_ids,
                     "intersection_update" if require_all else "update",
                 )(set(tic_id for tic_id, _ in get_ticids(plot_dir)))
+        # False positive
+        # pylint: disable=no-member
         with Session.begin() as db_session:
+            # pylint: enable=no-member
             for tic_id in plot_tic_ids:
                 db_session.add(Result(id=tic_id, flag=0, rendered=1))
 
