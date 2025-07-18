@@ -4,7 +4,7 @@ from matplotlib import pyplot, rcParams
 import numpy
 from asteval import Interpreter
 
-from tess_target import TESSTarget, get_bls_eclipse_mask
+from tess_target import get_bls_eclipse_mask
 from log_likelihood import LogLikelihood
 
 
@@ -121,7 +121,7 @@ class LightCurvePlotter:
         },
     }
 
-    def plot_full(self, lightcurve, model_lcs):
+    def plot_full(self, lightcurve, model_lcs, log_likelihood):
         """Plot the full unfolded lightcurve for a sector."""
 
         for mask, plot_config in [
@@ -142,7 +142,11 @@ class LightCurvePlotter:
                 )
 
         ylim = pyplot.ylim()
-        config_key = "first" if self._config.highlight_first_model else "others"
+        config_key = (
+            "first"
+            if getattr(self._config, "highlight_first_model", False)
+            else "others"
+        )
         for y in model_lcs:
             pyplot.plot(
                 lightcurve["time"],
@@ -159,6 +163,33 @@ class LightCurvePlotter:
                 **self.model_lc_plot_config[config_key],
             )
             config_key = "others"
+        if log_likelihood.best_fit_bls is not None:
+            xlim = pyplot.xlim()
+            if xlim[0] < log_likelihood.best_fit_bls["transit_time"] < xlim[1]:
+                pyplot.axvline(
+                    log_likelihood.best_fit_bls["transit_time"], color="red"
+                )
+            if log_likelihood.masked_is_significant():
+                if (
+                    xlim[0]
+                    < log_likelihood.best_fit_bls["masked_transit_time"]
+                    < xlim[1]
+                ):
+                    pyplot.axvline(
+                        log_likelihood.best_fit_bls["masked_transit_time"],
+                        color="blue",
+                    )
+            elif (
+                xlim[0]
+                < log_likelihood.best_fit_bls["transit_time"]
+                + log_likelihood.best_fit_bls["period"][0]
+                < xlim[1]
+            ):
+                pyplot.axvline(
+                    log_likelihood.best_fit_bls["transit_time"]
+                    + log_likelihood.best_fit_bls["period"][0],
+                    color="green",
+                )
         pyplot.xlabel("Time [d]")
         pyplot.ylabel("Flux")
         pyplot.ylim(ylim)
@@ -200,7 +231,7 @@ class LightCurvePlotter:
                 )
 
         ylim = pyplot.ylim()
-        first = self._config.highlight_first_model
+        first = getattr(self._config, "highlight_first_model", False)
         for y in model_lcs:
             pyplot.plot(
                 ordered_phase,
@@ -214,7 +245,7 @@ class LightCurvePlotter:
         pyplot.ylabel("Flux [ppm]")
         pyplot.ylim(ylim)
 
-    def plot_folded(self, lightcurve, model_lcs=()):
+    def plot_folded(self, lightcurve, model_lcs=(), _=None):
         """Show sector lightcurve folded by the best fit BLS period."""
 
         phase = (
@@ -369,7 +400,11 @@ class LightCurvePlotter:
             yerr=tess_target.sed[1],
             **self.sed_plot_config,
         )
-        config_key = "first" if self._config.highlight_first_model else "others"
+        config_key = (
+            "first"
+            if getattr(self._config, "highlight_first_model", False)
+            else "others"
+        )
         for bnry in binaries or ():
             pyplot.plot(
                 plot_x, bnry.absmag, **self.model_sed_plot_config[config_key]
@@ -388,16 +423,16 @@ class LightCurvePlotter:
         )
         pyplot.ylabel("Flux diff.")
 
-    def _get_model_lcs(self, header, lightcurve, binaries):
+    def _get_model_lcs(self, header, lightcurve, binaries, log_likelihood):
         """Return the model lightcurves to add on top of the data."""
 
         if binaries is None or lightcurve.size <= 10:
             return []
 
-        if self._config.eclipse_model_only:
+        if getattr(self._config, "eclipse_model_only", False):
             model_lcs = []
             for bnry in binaries:
-                masked_model, _, mask = LogLikelihood.get_eclipse_model(
+                masked_model, _, mask = log_likelihood.get_eclipse_model(
                     bnry, header, lightcurve, bnry.lc_sys_err
                 )
                 assert mask.size == lightcurve.size
@@ -406,7 +441,7 @@ class LightCurvePlotter:
                 model_lcs.append(model)
         else:
             model_lcs = [
-                LogLikelihood.get_full_model(
+                log_likelihood.get_full_model(
                     bnry, header, lightcurve, bnry.lc_sys_err
                 )[0]
                 for bnry in binaries
@@ -461,13 +496,8 @@ class LightCurvePlotter:
                 + repr(self._config.plot_lightcurve[1])
             )
         plot_types = numpy.unique(numpy.array(self._mosaic_spec).flatten())
-        self._full_log_likelihood = (
-            plot_types.size != 1
-            or plot_types[0] != "full"
-            or config.show_lc_detrending
-        )
         self._folding_period = getattr(config, "folding_period", None)
-        if config.data_on_top:
+        if getattr(config, "data_on_top", False):
             for cfg in self.lc_plot_config.values():
                 cfg["zorder"] = 30
             self.sed_plot_config["zorder"] = 30
@@ -490,36 +520,34 @@ class LightCurvePlotter:
         """
 
         title_pre = f"TIC {tic_id}\n"
-        if self._full_log_likelihood or get_trend is not None:
-            tess_target = LogLikelihood(
-                tic_id,
-                save_detrending=getattr(
-                    self._config, "show_lc_detrending", False
-                ),
-                get_trend=get_trend,
-            )
-            if self._folding_period is None:
-                self._folding_period = tess_target.bls_porb
+        log_likelihood = LogLikelihood(
+            tic_id,
+            save_detrending=getattr(
+                self._config, "show_lc_detrending", False
+            ),
+            get_trend=get_trend,
+        )
+        if self._folding_period is None:
+            self._folding_period = log_likelihood.bls_porb
 
-                if binaries and numpy.allclose(
-                    binaries[0].per, self._folding_period, rtol=1e-3
-                ):
-                    self._folding_period = binaries[0].per
-            title_pre = (
-                title_pre.strip()
-                + f": $P_{{orb}}$ = {self._folding_period:.5f}\n"
-            )
-        else:
-            tess_target = TESSTarget(tic_id)
+            if binaries and numpy.allclose(
+                binaries[0].per, self._folding_period, rtol=1e-3
+            ):
+                self._folding_period = binaries[0].per
+        title_pre = (
+            title_pre.strip()
+            + f": $P_{{orb}}$ = {self._folding_period:.5f}\n"
+        )
 
         title_pre += f"({title_info})"
 
-        subfigures = self._setup_figure(len(tess_target.lcs))
-        for (header, lightcurve), subfig in zip(tess_target.lcs, subfigures):
+        subfigures = self._setup_figure(len(log_likelihood.lcs))
+        for (header, lightcurve), subfig in zip(log_likelihood.lcs, subfigures):
             lightcurve = numpy.copy(lightcurve)
             lightcurve["flux"] /= numpy.median(lightcurve["flux"])
 
-            model_lcs = self._get_model_lcs(header, lightcurve, binaries)
+            model_lcs = self._get_model_lcs(header, lightcurve, binaries,
+                                            log_likelihood)
             print("Mosaic spec: " + repr(self._mosaic_spec))
             for plot_type, axis in subfig.subplot_mosaic(
                 self._mosaic_spec,
@@ -534,11 +562,11 @@ class LightCurvePlotter:
                             zoom_type,
                             lightcurve,
                             model_lcs,
-                            tess_target.best_fit_bls,
+                            log_likelihood.best_fit_bls,
                         )
                         if (
                             zoom_type == "masked"
-                            and not tess_target.masked_is_significant()
+                            and not log_likelihood.masked_is_significant()
                         ):
                             axis.set_facecolor("lightgrey")
                     else:
@@ -549,20 +577,22 @@ class LightCurvePlotter:
                         except RuntimeError:
                             self.plot_zoomed_bls(
                                 self._convert_binary_to_bsl_zoom(
-                                    zoom_type, tess_target
+                                    zoom_type, log_likelihood
                                 ),
                                 lightcurve,
                                 model_lcs,
-                                tess_target.best_fit_bls,
+                                log_likelihood.best_fit_bls,
                             )
                 elif plot_type.endswith("_diff"):
                     self.plot_diff(
                         plot_type[: -len("_diff")], lightcurve, model_lcs
                     )
                 elif plot_type == "sed":
-                    self.plot_sed(tess_target, binaries)
+                    self.plot_sed(log_likelihood, binaries)
                 else:
-                    getattr(self, f"plot_{plot_type}")(lightcurve, model_lcs)
+                    getattr(self, f"plot_{plot_type}")(
+                        lightcurve, model_lcs, log_likelihood
+                    )
 
             subfig.suptitle(
                 title_pre

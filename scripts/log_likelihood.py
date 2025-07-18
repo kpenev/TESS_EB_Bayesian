@@ -279,7 +279,12 @@ class LogLikelihood(TESSTarget):
             mratio=(0.01, 2),
             age_gyr=(-3, 1.1),
             meh=Binary.meh_range,
-            per=(0.1, 300),
+            per=(
+                self._best_fit_bls["period"][0]
+                - 3.0 * self._best_fit_bls["period"][1],
+                self._best_fit_bls["period"][0]
+                + 3.0 * self._best_fit_bls["period"][1],
+            ),
             ecc=(0, self.max_ecc),
             w=(-360, 360),
             primary_impact_param=(-10, 10),
@@ -302,8 +307,6 @@ class LogLikelihood(TESSTarget):
             lc_sys=(min(numpy.log10(self._find_syserr_and_outliers()), -1), 0),
             sed_sys=(-10, -1.5),
         )
-
-        assert self._best_fit_bls["period"][0] > 2 * self._range.per[0]
 
         self._logger.debug("LCs: %s", repr(self._lcs))
         self._logger.debug("SED: %s", repr(self._sed))
@@ -352,14 +355,32 @@ class LogLikelihood(TESSTarget):
         ).sum()
         return model_lc, lc_sq_errors, None
 
-    @staticmethod
-    def get_near_eclipse_flags(lc_time, binary, duration_factor):
+    def get_near_eclipse_flags(self, lc_time, binary, duration_factor):
         """Return flags selecting only and all points near eclipses."""
 
         eval_ntimes = int(10 * binary.per / (lc_time[1:] - lc_time[:-1]).min())
-        eval_time = numpy.linspace(0, binary.per, eval_ntimes)
+        if self.masked_is_significant():
+            bls_times = [
+                self._best_fit_bls["transit_time"],
+                self._best_fit_bls["masked_transit_time"],
+            ]
+        else:
+            bls_times = [
+                self._best_fit_bls["transit_time"],
+                self._best_fit_bls["transit_time"]
+                + self._best_fit_bls["period"][0],
+            ]
+        eval_time = numpy.concatenate(
+            (numpy.linspace(0, binary.per, eval_ntimes), bls_times)
+        )
         in_eclipse = binary.eclipse(eval_time) < 1
+        if not in_eclipse[-2:].any():
+            raise ValueError(
+                f"BLS eclipse centers ({bls_times[-2:]!r}) not covered by "
+                f"eclipse mask: {in_eclipse[-2:]!r}."
+            )
 
+        in_eclipse = in_eclipse[:-2]  # Remove the BLS check points
         if in_eclipse[0]:
             if in_eclipse.all():
                 eclipse_start = eclipse_end = 0.0
@@ -392,9 +413,10 @@ class LogLikelihood(TESSTarget):
         flags[flag_time % binary.per > eclipse_duration + 2 * mask_expand] = -1
         return flags
 
-    @staticmethod
+    # pylint: disable=too-many-arguments
+    # pylint: disable=too-many-positional-arguments
     def fit_baseline(
-        binary, header, lightcurve, lc_sys_err, duration_factor=1.8
+        self, binary, header, lightcurve, lc_sys_err, duration_factor=1.8
     ):
         """
         Fit a second order polynomial to near-eclipse points.
@@ -402,7 +424,7 @@ class LogLikelihood(TESSTarget):
         This is used to estimate the baseline flux in the lightcurve.
         """
 
-        eclipse_flags = LogLikelihood.get_near_eclipse_flags(
+        eclipse_flags = self.get_near_eclipse_flags(
             lightcurve["time"], binary, duration_factor
         )
         model_mask = eclipse_flags >= 0
@@ -457,8 +479,10 @@ class LogLikelihood(TESSTarget):
 
         return eclipse_model, lc_sq_errors, model_mask
 
-    @staticmethod
-    def get_eclipse_model(binary, header, lightcurve, lc_sys_err):
+    # pylint: enable=too-many-arguments
+    # pylint: enable=too-many-positional-arguments
+
+    def get_eclipse_model(self, binary, header, lightcurve, lc_sys_err):
         """
         Same as `get_model()` but ignoring OOE variability.
 
@@ -471,11 +495,11 @@ class LogLikelihood(TESSTarget):
         """
 
         primary_eclipse_model, primary_lc_sq_errors, primary_mask = (
-            LogLikelihood.fit_baseline(binary, header, lightcurve, lc_sys_err)
+            self.fit_baseline(binary, header, lightcurve, lc_sys_err)
         )
         binary.swap_components()
         secondary_eclipse_model, secondary_lc_sq_errors, secondary_mask = (
-            LogLikelihood.fit_baseline(binary, header, lightcurve, lc_sys_err)
+            self.fit_baseline(binary, header, lightcurve, lc_sys_err)
         )
         binary.swap_components()
 
@@ -710,9 +734,18 @@ class LogLikelihood(TESSTarget):
                 ]
             if lightcurve.size < 10:
                 continue
-            model_lc, lc_sq_errors, mask = self.get_model(
-                binary, header, lightcurve, lc_sys_err
-            )
+            try:
+                model_lc, lc_sq_errors, mask = self.get_model(
+                    binary, header, lightcurve, lc_sys_err
+                )
+            except ValueError as error:
+                self._logger.warning(
+                    "Error while calculating model for TIC %d (assuming zero "
+                    "likelihood): %s",
+                    self.tic_id,
+                    error.args[0],
+                )
+                return -numpy.inf
             if mask is None:
                 observed_lc = lightcurve["flux"]
             elif mask.sum() < 10:
@@ -857,14 +890,48 @@ class LogLikelihoodUnitCubePriors(LogLikelihood):
         return 0.0
 
 
+# This function is meant as a test
+# pylint: disable=import-outside-toplevel
 def experiment():
     """Manually experiment with things."""
 
-    test_tic = 189639080
-    logging.basicConfig(level=logging.DEBUG)
+    from argparse import Namespace
 
+    from paths import samples
+    from hacked_emcee_hdf5_backend import HDFBackend
+    from light_curve_plotter import LightCurvePlotter
+
+    test_tic = 242799145# 5205367
+    # logging.basicConfig(level=logging.DEBUG)
+    backend = HDFBackend(samples.format(tic_id=test_tic),
+                         name='prelim_mcmc_4', read_only=True)
     log_likelihood = LogLikelihood(test_tic)
-    log_likelihood.save_jktebob_lc(f"tess{test_tic}_jktebob.dat")
+    log_prob = backend.get_log_prob()
+    best_index = numpy.unravel_index(numpy.argmax(log_prob), log_prob.shape)
+    best_params = SampleParams(*backend.get_blobs()[best_index])
+    # best_params = best_params._replace(
+    #    eclipse_time=best_params.eclipse_time - 0.1
+    # )
+    best_binary = Binary(from_mcmc=best_params)
+    print(f"Best binary: {best_binary!s}")
+    print(
+        f"Max log-likelihood: {log_likelihood.calc_lc_log_likelihood(best_binary, best_params.lc_sys)!r}"
+    )
+    LightCurvePlotter(
+        Namespace(
+            tic_id=test_tic,
+            plot_lightcurve=[
+                "test.pdf",
+                "[[full, full],"
+                " [folded, folded],"
+                " [zoom_primary, zoom_secondary]]",
+            ],
+            # highlight_first_model=True,
+        )
+    )(tic_id=test_tic, binaries=[best_binary])
+
+
+# pylint: enable=import-outside-toplevel
 
 
 if __name__ == "__main__":
