@@ -1,6 +1,5 @@
 """Methods for finding initial walker positions for MCMC."""
 
-from sys import argv
 from collections import namedtuple
 from multiprocessing import Process, Queue
 import logging
@@ -45,8 +44,7 @@ class FindStartingPositions:
         if self._log_likelihood.masked_is_significant():
             if bls_info["depth"][0] > bls_info["masked_depth"][0]:
                 return "both", "masked", False
-            else:
-                return "masked", "both", False
+            return "masked", "both", False
         single = abs(
             bls_info["depth_even"][0] - bls_info["depth_odd"][0]
         ) < 5.0 * numpy.sqrt(
@@ -119,7 +117,10 @@ class FindStartingPositions:
         result = optimize.root_scalar(
             to_solve, bracket=(0.0, LogLikelihood.max_ecc)
         )
-        assert result.converged
+        assert (
+            result.converged
+        ), f"Optimization of eclipse times failed!: {result!r}"
+
         return params._replace(ecc=result.root)
 
     def _match_deeper_eclipse_phase(self, params):
@@ -157,7 +158,7 @@ class FindStartingPositions:
                 return params
             faintest = binary.get_lightcurve(time).min()
             binary.swap_components()
-        assert False
+        assert False, "Neither even nor odd eclipse flagged as deeper!"
 
     def _match_deeper_eclipse_depth(self, params):
         """Tune the primary impact parameter to best fit deeper eclipses."""
@@ -204,7 +205,9 @@ class FindStartingPositions:
             args=(params,),
             options={"disp": 3, "xatol": 1e-3},
         )
-        assert result.success
+        assert (
+            result.success
+        ), f"Failed to optimize impact parameter: {result!r}!"
         return params._replace(primary_impact_param=min(result.x, max_impact))
 
     def _match_both_depths(self, params, mass_range):
@@ -244,7 +247,7 @@ class FindStartingPositions:
         result = optimize.minimize_scalar(
             to_minimize, bounds=(min_mratio, 1.0), options={"xatol": 1e-3}
         )
-        assert result.success
+        assert result.success, f"Failed to optimize mass ratio: {result!r}!"
         _logger.debug("Matching both depths solution: %s", repr(result))
         return self._match_deeper_eclipse_depth(
             params._replace(mratio=min(max(result.x, min_mratio), 1.0))
@@ -280,7 +283,7 @@ class FindStartingPositions:
                 args=(lc_tuned_params,),
                 options={"xatol": 1e-3 * max(mtotal, 1)},
             )
-            assert result.success
+            assert result.success, f"Failed to optimize total mass: {result!r}!"
             _logger.debug(
                 "Starting from Mtotal = %s, found b = %s, m2/m1 = %s, "
                 "Motal = %s",
@@ -307,15 +310,55 @@ class FindStartingPositions:
                 bracket=mtotal_range,
                 rtol=1e-3,
             )
-            assert result.converged
+            assert result.converged, f"Failed to solve for mtotal: {result!r}!"
             result = result.root
         except GoodEnough as stopped:
-            assert stopped.args[0] == "eclipses_and_sed"
+            assert (
+                stopped.args[0] == "eclipses_and_sed"
+            ), f"Unexpected good enough caller: {stopped.args[0]!r}"
             result = stopped.args[1]
         result = min(max(result, mtotal_range[0]), mtotal_range[1])
         params = to_solve(result, True)
         _logger.info("Optimized parameters: %s", params)
         return params
+
+    def _fit_limbdark(self, params):
+        """Fit for the limb darkening coefficients."""
+
+        def get_params(x):
+            """Return the parameters with LC coef set per optimization x."""
+
+            return (
+                params._replace(primary_limb_dark_1=x[0] * x[1])
+                ._replace(primary_limb_dark_2=x[0] * (1.0 - x[1]))
+                ._replace(secondary_limb_dark_1=x[2] * x[3])
+                ._replace(secondary_limb_dark_2=x[2] * (1.0 - x[3]))
+            )
+
+        def to_minimize(x):
+            """Set the limb darkening coefficients and return -LL."""
+
+            binary = Binary(from_mcmc=get_params(x))
+            return -self._log_likelihood.calc_lc_log_likelihood(
+                binary, 0.0, "both"
+            )
+
+        result = optimize.minimize(
+            to_minimize,
+            [0.0, 0.0, 0.0, 0.0],
+            bounds=optimize.Bounds(
+                lb=[0.0, 0.0, 0.0, 0.0],
+                ub=[1.0, 1.0, 1.0, 1.0],
+                keep_feasible=True,
+            ),
+        )
+        if not result.success:
+            _logger.warning(
+                "Failed to optimize limb darkening coefficients: %s",
+                repr(result),
+            )
+            return params
+        return get_params(result.x)
 
     def _get_init_scenarios(self, config):
         """Return log10(age), [M/H] and w values to base initial positions on"""
@@ -403,6 +446,40 @@ class FindStartingPositions:
         )
         return result
 
+    def _params_to_sample(self, params):
+        """Initialize non-optimized parameters and return MCMC sample."""
+
+        mcmc_sample = numpy.array(
+            [
+                self._log_likelihood.inverse_prior(param, value)[1]
+                for param, value in zip(params._fields, params)
+            ]
+        )
+        non_finite = numpy.logical_not(numpy.isfinite(mcmc_sample))
+        tiny = numpy.logical_and(non_finite, mcmc_sample < 0)
+        tiny[SampleParams._fields.index("lc_sys")] = True
+        tiny[SampleParams._fields.index("sed_sys")] = True
+
+        mcmc_sample[tiny] = norm.ppf(uniform.rvs(size=tiny.sum(), scale=0.2))
+        huge = numpy.logical_and(non_finite, mcmc_sample > 0)
+        mcmc_sample[huge] = norm.ppf(
+            uniform.rvs(size=huge.sum(), loc=0.8, scale=0.2)
+        )
+        _logger.info(
+            "Generated optimized sample:\n%s",
+            mcmc_sample,
+        )
+        params = self._log_likelihood.get_sample_params(mcmc_sample)
+        _logger.info("Above sample corresponds to parameters:\n%s", params)
+        _logger.info(
+            "Above corresponds to binary:\n%s", Binary(from_mcmc=params)
+        )
+        assert numpy.isfinite(
+            mcmc_sample
+        ).all(), f"Non-finite sample entries found: {mcmc_sample!r}"
+
+        return mcmc_sample
+
     def _find_initial_samples(self, scenario_queue, optimized_queue, config):
         """Executed in worker threads to find optimal initial positions."""
 
@@ -462,37 +539,9 @@ class FindStartingPositions:
                     per=params.per + period_tweak,
                 )
 
-                mcmc_sample = numpy.array(
-                    [
-                        self._log_likelihood.inverse_prior(param, value)[1]
-                        for param, value in zip(params._fields, params)
-                    ]
+                optimized_queue.put(
+                    (scenario_ind, self._params_to_sample(params))
                 )
-                non_finite = numpy.logical_not(numpy.isfinite(mcmc_sample))
-                tiny = numpy.logical_and(non_finite, mcmc_sample < 0)
-                tiny[SampleParams._fields.index("lc_sys")] = True
-                tiny[SampleParams._fields.index("sed_sys")] = True
-
-                mcmc_sample[tiny] = norm.ppf(
-                    uniform.rvs(size=tiny.sum(), scale=0.2)
-                )
-                huge = numpy.logical_and(non_finite, mcmc_sample > 0)
-                mcmc_sample[huge] = norm.ppf(
-                    uniform.rvs(size=huge.sum(), loc=0.8, scale=0.2)
-                )
-                _logger.info(
-                    "Generated optimized sample:\n%s",
-                    mcmc_sample,
-                )
-                params = self._log_likelihood.get_sample_params(mcmc_sample)
-                _logger.info(
-                    "Above sample corresponds to parameters:\n%s", params
-                )
-                _logger.info(
-                    "Above corresponds to binary:\n%s", Binary(from_mcmc=params)
-                )
-                assert numpy.isfinite(mcmc_sample).all()
-                optimized_queue.put((scenario_ind, mcmc_sample))
             _logger.info("Position optimization process finished.")
         # pylint: disable=bare-except
         except:
@@ -563,6 +612,8 @@ class FindStartingPositions:
         params = self._match_eclipse_times(params, randomize_e)
         _logger.debug("Eclipse timing matched params: %s", params)
         params = self._match_eclipses_and_sed(params)
+        _logger.debug("Eclipse and SED matched params: %s", params)
+        params = self._fit_limbdark(params)
         _logger.debug("Suggested starting params: %s", params)
 
         return params
@@ -572,7 +623,10 @@ class FindStartingPositions:
     def __call__(self, config):
         """Generate the specified scenario per command line."""
 
-        assert config.tic_id == self._log_likelihood.tic_id
+        assert config.tic_id == self._log_likelihood.tic_id, (
+            f"Log-likelihood TIC ID ({self._log_likelihood.tic_id}) does not "
+            f"match config TIC ID ({config.tic_id})!"
+        )
         initial_scenarios = self._get_init_scenarios(config)
         num_params = len(SampleParams._fields)
         num_walkers = initial_scenarios.size + config.num_random_walkers
