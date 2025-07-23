@@ -732,9 +732,6 @@ def main(config):
         LightCurvePlotter(config)(
             config.tic_id,
             binaries,
-            get_trend=getattr(
-                detrending, "get_" + config.remove_lc_trend, None
-            ),
             title_info=(
                 f"{len(binaries)} shown, {num_skipped} skipped"
                 if num_skipped

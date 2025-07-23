@@ -495,7 +495,6 @@ class LightCurvePlotter:
                 "Unable to parse mosaic specification: "
                 + repr(self._config.plot_lightcurve[1])
             )
-        plot_types = numpy.unique(numpy.array(self._mosaic_spec).flatten())
         self._folding_period = getattr(config, "folding_period", None)
         if getattr(config, "data_on_top", False):
             for cfg in self.lc_plot_config.values():
@@ -553,6 +552,7 @@ class LightCurvePlotter:
                 empty_sentinel="empty",
                 gridspec_kw={"hspace": 0.0},
             ).items():
+                print(f'Plot type: {plot_type!r}.')
                 pyplot.sca(axis)
                 if plot_type.startswith("zoom_"):
                     zoom_type = plot_type[len("zoom_") :]

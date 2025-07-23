@@ -310,39 +310,6 @@ class LogLikelihood(TESSTarget):
                 )
             self._lcs[lc_ind] = (header, lightcurve)
 
-#            from matplotlib import pyplot
-#
-#            for eclipse_flag in numpy.unique(lightcurve["eclipse_flags"]):
-#                pyplot.plot(
-#                    lightcurve["time"][
-#                        lightcurve["eclipse_flags"] == eclipse_flag
-#                    ],
-#                    lightcurve["flux"][
-#                        lightcurve["eclipse_flags"] == eclipse_flag
-#                    ],
-#                    "o" + ('r' if eclipse_flag < 0 else ('k' if eclipse_flag ==0
-#                                                         else 'b')),
-#                    zorder=abs(eclipse_flag),
-#                )
-#            pyplot.show()
-#
-#            for eclipse_flag in numpy.unique(lightcurve["eclipse_flags"]):
-#                if eclipse_flag == 0:
-#                    continue
-#                pyplot.plot(
-#                    lightcurve["time"][
-#                        lightcurve["eclipse_flags"] == eclipse_flag
-#                    ]
-#                    % porb
-#                    / porb,
-#                    lightcurve["flux"][
-#                        lightcurve["eclipse_flags"] == eclipse_flag
-#                    ],
-#                    "o",
-#                    zorder=abs(eclipse_flag),
-#                )
-#                pyplot.show()
-
     def _prepare_lightcurves(self, tic_exclude, save_detrending):
         """Prepare the lightcurves for sampling."""
 
@@ -611,11 +578,7 @@ class LogLikelihood(TESSTarget):
             eclipse_order = numpy.flip(eclipse_order)
         return (eclipse_model[:-2], eclipse_order)  # Remove BLS check points
 
-    # pylint: disable=too-many-arguments
-    # pylint: disable=too-many-positional-arguments
-    def get_eclipse_model(
-        self, binary, header, lightcurve, lc_sys_err
-    ):
+    def get_eclipse_model(self, binary, header, lightcurve, lc_sys_err):
         """
         Same as `get_model()` but ignoring OOE variability.
 
@@ -675,43 +638,7 @@ class LogLikelihood(TESSTarget):
                 lightcurve["time"][eclipse_mask]
             )
 
-#        from matplotlib import pyplot
-#
-#        for eclipse_flag in numpy.unique(lightcurve["eclipse_flags"]):
-#            pyplot.plot(
-#                lightcurve["time"][lightcurve["eclipse_flags"] == eclipse_flag],
-#                lightcurve["flux"][lightcurve["eclipse_flags"] == eclipse_flag],
-#                "o",
-#                zorder=abs(eclipse_flag),
-#            )
-#        pyplot.show()
-#
-#        for eclipse_flag in numpy.unique(lightcurve["eclipse_flags"]):
-#            if eclipse_flag == 0:
-#                continue
-#            eclipse_mask = lightcurve["eclipse_flags"] == eclipse_flag
-#            pyplot.plot(
-#                lightcurve["time"][eclipse_mask]
-#                % header["bls_period"]
-#                / header["bls_period"],
-#                lightcurve["flux"][eclipse_mask],
-#                "o",
-#                zorder=10,
-#            )
-#            pyplot.plot(
-#                lightcurve["time"][eclipse_mask]
-#                % header["bls_period"]
-#                / header["bls_period"],
-#                eclipse_model[eclipse_mask],
-#                "-k",
-#                zorder=20,
-#            )
-#            pyplot.show()
-
         return eclipse_model, lc_sq_errors, model_mask
-
-    # pylint: enable=too-many-arguments
-    # pylint: enable=too-many-positional-arguments
 
     def prior_transform(self, param, sample_entry):
         """
@@ -1037,108 +964,3 @@ class LogLikelihood(TESSTarget):
             "Final log likelihood(%s): %s", repr(mcmc_sample), repr(result)
         )
         return (result,) + sample_params
-
-
-class LogLikelihoodPriorsOnly(LogLikelihood):
-    """Allows MCMC sampling using just the priors for testing."""
-
-    def __call__(self, mcmc_sample, exclude_priors=False):
-        """Return the log-likelihood of the given MCMC sample."""
-
-        return (
-            self.calc_prior_loglikelihood(
-                mcmc_sample[numpy.logical_not(exclude_priors)]
-            ),
-        ) + self.get_sample_params(mcmc_sample)
-
-
-class LogLikelihoodUnitCubePriors(LogLikelihood):
-    """Overwrite the prior transform to be from U(0,1) instead of normal."""
-
-    def prior_transform(self, param, sample_entry):
-        """
-        Return the value of the given parameter given a sample entry.
-
-        Apply a transformation to go from identical random variables with Normal
-        priors to the paramaters needed to evaluate the likelihood.
-        """
-
-        if param == "meh":
-            return truncnorm.ppf(sample_entry, *self._range.meh, scale=0.5)
-
-        low, high = self.get_range(param)
-        value = low + (high - low) * sample_entry
-        if param in self._log_uniform:
-            return 10.0**value
-        return value
-
-    def inverse_prior(self, param, value):
-        """Return index and value within sample to set param to given value."""
-
-        param_ind = SampleParams._fields.index(param)
-        if param == "meh":
-            return param_ind, truncnorm.cdf(value, *self._range.meh, scale=0.5)
-        if param in self._log_uniform:
-            value = numpy.log10(value)
-        low, high = self.get_range(param)
-        return param_ind, (value - low) / (high - low)
-
-    def calc_prior_loglikelihood(self, mcmc_sample):
-        """Return the sum of prior log-likelihoods."""
-
-        return 0.0
-
-
-# This function is meant as a test
-# pylint: disable=import-outside-toplevel
-def experiment():
-    """Manually experiment with things."""
-
-    from argparse import Namespace
-
-    from paths import samples
-    from hacked_emcee_hdf5_backend import HDFBackend
-    from light_curve_plotter import LightCurvePlotter
-
-    test_tic = 26489741
-    log_likelihood = LogLikelihood(test_tic)
-
-    # logging.basicConfig(level=logging.DEBUG)
-    backend = HDFBackend(
-        samples.format(tic_id=test_tic),
-        # name="prelim_mcmc_4",
-        read_only=True,
-    )
-    log_prob = backend.get_log_prob()
-    best_index = numpy.unravel_index(numpy.argmax(log_prob), log_prob.shape)
-    best_params = SampleParams(*backend.get_blobs()[best_index])
-    best_params = best_params._replace(
-       eclipse_time=best_params.eclipse_time - 1.0
-    )
-    best_binary = Binary(from_mcmc=best_params)
-    for header, lightcurve in log_likelihood.lcs:
-        log_likelihood.get_eclipse_model(best_binary, header, lightcurve, 0.0)
-
-    print(f"Best binary: {best_binary!s}")
-    print(
-        f"Max log-likelihood: {log_likelihood.calc_lc_log_likelihood(best_binary, best_params.lc_sys)!r}"
-    )
-    LightCurvePlotter(
-        Namespace(
-            tic_id=test_tic,
-            plot_lightcurve=[
-                "test.pdf",
-                "[[full, full],"
-                " [folded, folded],"
-                " [zoom_primary, zoom_secondary]]",
-            ],
-            # highlight_first_model=True,
-        )
-    )(tic_id=test_tic, binaries=[best_binary])
-
-
-# pylint: enable=import-outside-toplevel
-
-
-if __name__ == "__main__":
-    experiment()

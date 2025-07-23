@@ -19,7 +19,8 @@ from general_purpose_python_modules.multiprocessing_util import (
 from general_purpose_python_modules.emcee_util import save_initial_position
 
 from hacked_emcee_hdf5_backend import HDFBackend
-from log_likelihood import SampleParams, LogLikelihood, LogLikelihoodPriorsOnly
+from log_likelihood import SampleParams, LogLikelihood
+from log_likelihood_priors import LogLikelihoodPriorsOnly
 from paths import results_dir
 from paths import samples as samples_fname_pattern
 from find_starting_positions import FindStartingPositions
