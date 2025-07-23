@@ -369,7 +369,7 @@ def main(config):
             config.num_parallel,
             initializer=setup_process_map,
             initargs=[vars(config)],
-            maxtasksperchild=100,
+            maxtasksperchild=1024,
         ) as pool:
             EnsembleSampler(
                 *backend.shape, log_likelihood, backend=backend, pool=pool

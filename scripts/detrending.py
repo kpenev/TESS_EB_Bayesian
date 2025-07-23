@@ -91,12 +91,16 @@ def ooe_ends_to_discard(mask, min_tail_points=10):
     return left, right
 
 
+# Hiding argument names or putting in an object is worse for readability
+# pylint: disable=too-many-arguments
 def get_ooe_variability(
     lightcurve,
     half_porb=numpy.inf,
     mask=None,
+    *,
     spline_rejection=(5.0, 3.0),
     eclipse_rejection=2.0,
+    return_mask=False,
 ):
     """Remove the out-of-eclipse variability from the lightcurve."""
 
@@ -138,7 +142,15 @@ def get_ooe_variability(
         lightcurve["time"][-1],
     )
 
+    if return_mask:
+        print(f"OOE model size: {ooe_model.size}, mask size: {mask.size}")
+        result_mask = numpy.copy(mask)
+        result_mask[mask] = ooe_mask
+        return ooe_model, result_mask
     return ooe_model
+
+
+# pylint: enable=too-many-arguments
 
 
 def detrend_with_gaps(
@@ -199,6 +211,8 @@ def detrend_with_gaps(
         )
     start_index = 0
     good_mask = numpy.ones(detrended.size, dtype=bool)
+    if fixed_kwargs.get("return_mask", False):
+        eclipse_mask = numpy.zeros(detrended.size, dtype=bool)
     for end_index in gap_indices:
         if end_index - start_index < 20:
             good_mask[start_index:end_index] = False
@@ -211,6 +225,10 @@ def detrend_with_gaps(
                 for key, value in segment_kwargs.items()
             },
         )
+        if fixed_kwargs.get("return_mask", False):
+            eclipse_mask[start_index:end_index] = scaling[1]
+            scaling = scaling[0]
+
         good_mask[start_index:end_index] = numpy.isfinite(scaling)
         print(
             f"Scaling ({lightcurve['time'][start_index]} < t < "
@@ -222,7 +240,10 @@ def detrend_with_gaps(
             detrended[start_index:end_index]["trend"] = scaling
         start_index = end_index
 
-    return detrended[good_mask]
+    detrended = detrended[good_mask]
+    if fixed_kwargs.get("return_mask", False):
+        return detrended, eclipse_mask[good_mask]
+    return detrended
 
 
 def masked_detrend(
@@ -270,7 +291,7 @@ def test():
 
     # pylint: enable=import-outside-toplevel
 
-    for tic in [101462]:#[1045298, 1220444, 2020964, 22766107]:
+    for tic in [101462]:  # [1045298, 1220444, 2020964, 22766107]:
         try:
             config = Namespace(
                 tic_id=tic,

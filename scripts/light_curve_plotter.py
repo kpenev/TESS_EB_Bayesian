@@ -502,7 +502,7 @@ class LightCurvePlotter:
                 cfg["zorder"] = 30
             self.sed_plot_config["zorder"] = 30
 
-    def __call__(self, tic_id, binaries=None, get_trend=None, title_info=None):
+    def __call__(self, tic_id, binaries=None, title_info=None):
         """
         Plot lightcurves of TESS target together with detrending and model(s).
 
@@ -525,7 +525,6 @@ class LightCurvePlotter:
             save_detrending=getattr(
                 self._config, "show_lc_detrending", False
             ),
-            get_trend=get_trend,
         )
         if self._folding_period is None:
             self._folding_period = log_likelihood.bls_porb

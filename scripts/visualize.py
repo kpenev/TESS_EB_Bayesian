@@ -572,12 +572,15 @@ def get_model_binaries(config, raw_data, log_prob, include, log_likelihood):
             if top_params is not None:
                 sample_params = [top_params] + sample_params
         elif len(selection) == 1:
-            include = include[
-                selection[0]
-                * log_prob.shape[1] : (selection[0] + 1)
-                * log_prob.shape[1]
-            ]
-            selection = raw_data[selection][include]
+            if include is not None:
+                include = include[
+                    selection[0]
+                    * log_prob.shape[1] : (selection[0] + 1)
+                    * log_prob.shape[1]
+                ]
+                selection = raw_data[selection][include]
+            else:
+                selection = raw_data[selection]
         else:
             assert selection[0] >= 0
             selection = [raw_data[selection]]

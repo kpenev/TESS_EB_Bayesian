@@ -516,7 +516,7 @@ class TESSTarget:
                 # pylint: enable=invalid-unary-operand-type
         return combined_lc
 
-    def fit_bls(self, plot=False):
+    def fit_bls(self):
         """Fit BLS models to the given lightcurve."""
 
         combined_lc = self.get_combined_lc()
@@ -532,8 +532,6 @@ class TESSTarget:
                 [f"{param}: {value}" for param, value in best_fit_bls.items()]
             ),
         )
-        if plot:
-            self.plot_best_fit_bls(combined_lc, best_fit_bls, plot)
         return best_fit_bls
 
 
