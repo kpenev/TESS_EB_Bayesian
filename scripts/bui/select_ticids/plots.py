@@ -61,7 +61,10 @@ def plot_tic(config, fname):
     if fname is None or not path.exists(fname):
         # pylint: enable=possibly-used-before-assignment
 
-        visualize(config)
+        try:
+            visualize(config)
+        except: # pylint: disable=bare-except
+            print(f"Error while plotting {config.tic_id}:\n{format_exc()}")
 
     if fname is None:
         return b64encode(png_stream.getvalue()).decode("utf-8")
