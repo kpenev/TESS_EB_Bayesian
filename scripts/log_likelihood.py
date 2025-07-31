@@ -247,10 +247,12 @@ class LogLikelihood(TESSTarget):
         for phase in eclipse_phases:
             print(f"Searching place for phase: {phase} among {up_crossings!r}")
             print(f"Start ind: {numpy.searchsorted(up_crossings, phase)}")
-            start = up_crossings[numpy.searchsorted(up_crossings, phase) - 1]
-            end = down_crossings[
-                numpy.searchsorted(down_crossings, phase, side="right")
-            ]
+            start = numpy.searchsorted(up_crossings, phase)
+            start = up_crossings[start - 1]
+            end = numpy.searchsorted(down_crossings, phase, side="right")
+            if end == down_crossings.size:
+                end = 0
+            end = down_crossings[end]
             if start > end:
                 duration = end + 1 - start
             else:
