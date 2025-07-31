@@ -21,8 +21,7 @@ from general_purpose_python_modules.emcee_util import save_initial_position
 from hacked_emcee_hdf5_backend import HDFBackend
 from log_likelihood import SampleParams, LogLikelihood
 from log_likelihood_priors import LogLikelihoodPriorsOnly
-from paths import results_dir
-from paths import samples as samples_fname_pattern
+from paths import results_dir, samples as samples_fname_pattern
 from find_starting_positions import FindStartingPositions
 
 _logger = logging.getLogger(__name__)
@@ -129,12 +128,12 @@ def parse_command_line():
         "sampling begins.",
     )
     parser.add_argument(
-        '--changed-likelihood',
-        action='store_true',
+        "--changed-likelihood",
+        action="store_true",
         default=False,
         help="If passed, the log-likelihood function is assumed to have changed"
         " since the last sampling run. This will cause the sampling to restart"
-        " from the last step of the existing chain, rather than continuing."
+        " from the last step of the existing chain, rather than continuing.",
     )
 
     parser.add_argument(

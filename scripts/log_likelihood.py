@@ -554,10 +554,12 @@ class LogLikelihood(TESSTarget):
         flags[flag_time % binary.per > eclipse_duration + 2 * mask_expand] = -1
         return flags
 
-    def _evaluate_eclipse_model(self, binary, header, lightcurve):
-        """Evaluate the model near eclipses and decide eclipse order."""
+    def _evaluate_eclipse_model(
+        self, binary, header, lightcurve, require_coverage=True
+    ):
+        """Evaluate the model near eclipses and list eclipse indices present."""
 
-        eclipse_order = numpy.unique(lightcurve["eclipse_flags"])
+        eclipse_indices = numpy.unique(lightcurve["eclipse_flags"])
 
         bls_times = [
             (start + 0.5 * duration) * header["bls_period"]
@@ -569,14 +571,14 @@ class LogLikelihood(TESSTarget):
             supersample_factor=100,
             exp_time=header["exptime"],
         )
-        if eclipse_model[-1] >= 1 or eclipse_model[-2] == 1:
+        if require_coverage and (
+            eclipse_model[-1] == 1 or eclipse_model[-2] == 1
+        ):
             raise ValueError(
                 f"BLS eclipse centers ({bls_times[-2:]!r}) not covered by "
                 f"model eclipse: {eclipse_model[-2:]!r}."
             )
-        if eclipse_model[-1] < 1:
-            eclipse_order = numpy.flip(eclipse_order)
-        return (eclipse_model[:-2], eclipse_order)  # Remove BLS check points
+        return (eclipse_model[:-2], eclipse_indices)  # Remove BLS check points
 
     def get_eclipse_model(self, binary, header, lightcurve, lc_sys_err):
         """
