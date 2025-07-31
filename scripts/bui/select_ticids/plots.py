@@ -63,8 +63,9 @@ def plot_tic(config, fname):
 
         try:
             visualize(config)
-        except: # pylint: disable=bare-except
+        except:  # pylint: disable=bare-except
             print(f"Error while plotting {config.tic_id}:\n{format_exc()}")
+            return ""
 
     if fname is None:
         return b64encode(png_stream.getvalue()).decode("utf-8")
@@ -153,7 +154,7 @@ def best(tic_id, fname=None):
             burn_in=0,
             thin=1,
             sample_condition=None,
-            eclipse_model_only='OOE' in exclude_data.get(tic_id, []),
+            eclipse_model_only="OOE" in exclude_data.get(tic_id, []),
         ),
         fname,
     )
@@ -213,9 +214,7 @@ def ooe_var_removal(tic_id, fname=None):
     )
 
 
-def render_one(
-    tic_id, tablename, plot_func, render_dir, samples_template
-):
+def render_one(tic_id, tablename, plot_func, render_dir, samples_template):
     """Render the lightcurve for a single TIC ID."""
 
     globals()["samples_fname_template"] = samples_template
