@@ -2,7 +2,7 @@
 
 import logging
 
-from matplotlib import pyplot, colormaps
+from matplotlib import pyplot, cm as colormaps
 import numpy
 from astropy.timeseries import BoxLeastSquares
 
@@ -10,6 +10,11 @@ from astropy.timeseries import BoxLeastSquares
 
 from download_lcs import get_astroquery as download_lcs
 from exclude_data import exclude_data
+from catalog_interface import (
+    get_eb_info,
+    get_catalog_period_range,
+    is_in_catalog,
+)
 
 
 class FalsePositiveError(Exception):
@@ -188,7 +193,7 @@ class TESSTarget:
             )
         )
 
-    def _get_best_fit_bls(self, lightcurve, periods=None):
+    def _get_best_fit_bls(self, lightcurve, periods=None, use_catalog=True):
         """Return the best fit orbital period and time of primary transit."""
 
         model = BoxLeastSquares(
@@ -198,7 +203,17 @@ class TESSTarget:
         )
 
         auto_period = periods is None
-        if auto_period:
+
+        # Comprehensive P/P2 search when using catalog
+        if auto_period and use_catalog:
+            cat_info = get_eb_info(self._tic_id)
+            if cat_info is not None:
+                return self._comprehensive_period_search(
+                    lightcurve, model, cat_info
+                )
+
+        # Fallback to original logic for blind search or when catalog unavailable
+        if auto_period and periods is None:
             periods = 1.0 / numpy.arange(
                 1.0 / 0.4,
                 1.0 / 30.0,
@@ -297,6 +312,171 @@ class TESSTarget:
                 periodogram.period[index_range[1]] - result["period"],
             ),
         )
+
+        return result
+
+    def _comprehensive_period_search(self, lightcurve, model, cat_info):
+        """Search both P and P/2 periods and select best based on likelihood."""
+
+        catalog_period = cat_info["period"]
+        self._logger.debug(
+            f"Testing P and P/2 for TIC {self._tic_id}, catalog P={catalog_period:.4f}d"
+        )
+
+        candidates = []
+        p_range = (catalog_period * 0.95, catalog_period * 1.05)
+        p2_range = (catalog_period * 0.475, catalog_period * 0.525)
+        candidates.append(("P", numpy.linspace(p_range[0], p_range[1], 50)))
+        candidates.append(("P/2", numpy.linspace(p2_range[0], p2_range[1], 50)))
+
+        bls_results = {}
+        for name, periods in candidates:
+            periodogram = model.power(
+                periods,
+                numpy.linspace(
+                    min(periods[0] / 10, 0.02), min(periods[0] / 2, 0.2), 100
+                ),
+            )
+
+            best_index = numpy.argmax(periodogram.power)
+            stats = model.compute_stats(
+                **{
+                    param: getattr(periodogram, param)[best_index]
+                    for param in ["period", "duration", "transit_time"]
+                }
+            )
+
+            result = {
+                param: getattr(periodogram, param)[best_index]
+                for param in ["period", "duration", "transit_time"]
+            }
+            result.update(stats)
+            result["bls_power"] = periodogram.power[best_index]
+
+            # Debug: print available keys
+            self._logger.debug(
+                f"Available stats keys for {name}: {list(stats.keys())}"
+            )
+
+            # Use the correct likelihood key from astropy BLS
+            if "log_likelihood" in stats:
+                result["log_likelihood"] = stats["log_likelihood"]
+            elif "per_transit_log_likelihood" in stats:
+                # Use the average log likelihood across transits
+                result["log_likelihood"] = numpy.mean(
+                    stats["per_transit_log_likelihood"]
+                )
+            else:
+                # Fallback to using BLS power as a proxy
+                result["log_likelihood"] = float(periodogram.power[best_index])
+
+            result["candidate_type"] = name
+            bls_results[name] = result
+
+        best_candidate = self._select_best_period_candidate(
+            bls_results, catalog_period
+        )
+
+        if best_candidate["candidate_type"] == "P/2":
+            best_candidate = self._analyze_p2_eclipses(
+                lightcurve, model, best_candidate, catalog_period
+            )
+
+        result = {
+            "period": best_candidate["period"],
+            "duration": best_candidate["duration"],
+            "transit_time": best_candidate["transit_time"],
+            "depth": best_candidate["depth"],
+            "depth_even": best_candidate.get(
+                "depth_even", best_candidate["depth"]
+            ),
+            "depth_odd": best_candidate.get(
+                "depth_odd", best_candidate["depth"]
+            ),
+            "log_likelihood": best_candidate["log_likelihood"],
+            "candidate_type": best_candidate["candidate_type"],
+        }
+
+        period_step = self._get_bls_period_step()
+        result["period"] = (result["period"], period_step)
+
+        for key in [
+            "transit_times",
+            "per_transit_count",
+            "per_transit_log_likelihood",
+        ]:
+            if key in result:
+                del result[key]
+
+        return result
+
+    def _select_best_period_candidate(self, bls_results, catalog_period):
+        """Select best candidate using likelihood, with catalog consistency for tie-breaking."""
+
+        candidates = list(bls_results.values())
+        best_by_likelihood = max(candidates, key=lambda x: x["log_likelihood"])
+
+        likelihood_diff = best_by_likelihood["log_likelihood"] - min(
+            c["log_likelihood"] for c in candidates
+        )
+
+        if likelihood_diff < 5.0:
+            catalog_diffs = []
+            for candidate in candidates:
+                if candidate["candidate_type"] == "P":
+                    diff = (
+                        abs(candidate["period"] - catalog_period)
+                        / catalog_period
+                    )
+                else:
+                    diff = (
+                        abs(candidate["period"] * 2 - catalog_period)
+                        / catalog_period
+                    )
+                catalog_diffs.append((diff, candidate))
+
+            best_by_catalog = min(catalog_diffs, key=lambda x: x[0])[1]
+            self._logger.debug(
+                f"Close likelihoods, using catalog consistency: {best_by_catalog['candidate_type']}"
+            )
+            return best_by_catalog
+
+        self._logger.debug(
+            f"Clear likelihood winner: {best_by_likelihood['candidate_type']}"
+        )
+        return best_by_likelihood
+
+    def _analyze_p2_eclipses(
+        self, lightcurve, model, p2_result, catalog_period
+    ):
+        """Separate even/odd eclipses for P/2 candidate and identify primary/secondary."""
+
+        folded_time = (
+            lightcurve["time"] - p2_result["transit_time"]
+        ) % p2_result["period"]
+        even_mask = folded_time < p2_result["period"] / 2
+        odd_mask = ~even_mask
+
+        even_depth = numpy.nanmedian(lightcurve["flux"][even_mask])
+        odd_depth = numpy.nanmedian(lightcurve["flux"][odd_mask])
+        baseline = numpy.nanmedian(lightcurve["flux"])
+
+        even_depth_pf = (baseline - even_depth) / baseline
+        odd_depth_pf = (baseline - odd_depth) / baseline
+
+        if even_depth_pf > odd_depth_pf:
+            primary_depth = even_depth_pf
+            primary_type = "even"
+        else:
+            primary_depth = odd_depth_pf
+            primary_type = "odd"
+
+        result = p2_result.copy()
+        result["period"] = catalog_period
+        result["depth"] = primary_depth
+        result["depth_even"] = even_depth_pf
+        result["depth_odd"] = odd_depth_pf
+        result["primary_eclipse"] = primary_type
 
         return result
 
@@ -522,11 +702,13 @@ class TESSTarget:
                 # pylint: enable=invalid-unary-operand-type
         return combined_lc
 
-    def fit_bls(self):
+    def fit_bls(self, use_catalog=True):
         """Fit BLS models to the given lightcurve."""
 
         combined_lc = self.get_combined_lc()
-        best_fit_bls = self._get_best_fit_bls(combined_lc)
+        best_fit_bls = self._get_best_fit_bls(
+            combined_lc, use_catalog=use_catalog
+        )
         best_fit_bls.update(
             self._get_masked_best_fit_bls(combined_lc, best_fit_bls)
         )
