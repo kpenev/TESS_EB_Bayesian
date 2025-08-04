@@ -425,10 +425,10 @@ class LogLikelihood(TESSTarget):
             age_gyr=(-3, 1.1),
             meh=Binary.meh_range,
             per=(
-                self._best_fit_bls["period"][0]
-                - 3.0 * self._best_fit_bls["period"][1],
-                self._best_fit_bls["period"][0]
-                + 3.0 * self._best_fit_bls["period"][1],
+                self.bls_porb
+                - 10.0 * self._best_fit_bls["period"][1],
+                self.bls_porb
+                + 10.0 * self._best_fit_bls["period"][1],
             ),
             ecc=(0, self.max_ecc),
             w=(-360, 360),

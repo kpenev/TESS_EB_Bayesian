@@ -22,6 +22,7 @@ urlpatterns = [
                 "bad period",
                 "bad minimum",
                 "changed likelihood",
+                "unsuitable",
             ),
             grid={"columns": "1fr 1fr", "rows": "1fr"},
         ),
