@@ -1,4 +1,9 @@
-"""Interface for TESS-EBs catalog."""
+"""Interface for accessing the Villanova TESS Eclipsing Binary Catalog.
+
+This module provides a clean Python interface to query eclipsing binary
+parameters from the Villanova TESS-EBs catalog. It supports looking up
+periods, eclipse properties, and other parameters needed for BLS analysis.
+"""
 
 import os
 import logging
@@ -12,8 +17,20 @@ logger = logging.getLogger(__name__)
 
 
 class TESSEBsCatalog:
+    """Interface to the Villanova TESS Eclipsing Binary Catalog.
+    
+    This class provides methods to load and query the TESS-EBs catalog,
+    extracting eclipsing binary parameters like orbital periods, eclipse
+    depths, and timing information needed for period analysis.
+    """
     
     def __init__(self, catalog_path=None):
+        """Initialize the catalog interface.
+        
+        Args:
+            catalog_path (str, optional): Path to the catalog CSV file.
+                Defaults to tess_ebs_catalog.csv in parent directory.
+        """
         if catalog_path is None:
             catalog_path = CATALOG_PATH
             
@@ -22,6 +39,11 @@ class TESSEBsCatalog:
         self.load_catalog()
     
     def load_catalog(self):
+        """Load the TESS-EBs catalog from CSV file.
+        
+        Attempts to load the catalog data into a pandas DataFrame.
+        Sets catalog_data to None if loading fails.
+        """
         if not os.path.exists(self.catalog_path):
             logger.warning(f"Catalog file not found at {self.catalog_path}")
             self.catalog_data = None
@@ -35,9 +57,35 @@ class TESSEBsCatalog:
             self.catalog_data = None
     
     def is_available(self):
+        """Check if catalog data is loaded and available.
+        
+        Returns:
+            bool: True if catalog data is loaded, False otherwise.
+        """
         return self.catalog_data is not None
     
     def get_eb_info(self, tic_id):
+        """Get eclipsing binary information for a given TIC ID.
+        
+        Args:
+            tic_id (int): TESS Input Catalog identifier.
+            
+        Returns:
+            dict or None: Dictionary containing EB parameters if found,
+                None if TIC ID not in catalog or catalog unavailable.
+                
+        Dictionary contains:
+            - tic_id: TESS Input Catalog ID
+            - period: Orbital period in days
+            - period_uncert: Period uncertainty in days
+            - bjd0: Reference epoch (BJD)
+            - bjd0_uncert: Epoch uncertainty
+            - prim_depth_pf: Primary eclipse depth (polynomial fit)
+            - sec_depth_pf: Secondary eclipse depth (polynomial fit)
+            - ra, dec: Coordinates
+            - tmag: TESS magnitude
+            - Additional eclipse parameters if available
+        """
         if not self.is_available():
             return None
             
@@ -84,6 +132,17 @@ class TESSEBsCatalog:
         return result
     
     def get_period_range(self, tic_id, factor=0.1):
+        """Get period search range around catalog value.
+        
+        Args:
+            tic_id (int): TESS Input Catalog identifier.
+            factor (float): Fractional range around catalog period.
+                Default 0.1 means ±10% of catalog period.
+                
+        Returns:
+            tuple or None: (min_period, max_period) in days if found,
+                None if TIC ID not in catalog.
+        """
         eb_info = self.get_eb_info(tic_id)
         if eb_info is None:
             return None
@@ -102,11 +161,26 @@ class TESSEBsCatalog:
         return (min_p, max_p)
     
     def get_all_tic_ids(self):
+        """Get list of all TIC IDs in the catalog.
+        
+        Returns:
+            list: List of TIC IDs as integers, empty list if catalog unavailable.
+        """
         if not self.is_available():
             return []
         return self.catalog_data['tess_id'].tolist()
     
     def search_by_period(self, min_period, max_period):
+        """Find all TIC IDs with periods in specified range.
+        
+        Args:
+            min_period (float): Minimum period in days.
+            max_period (float): Maximum period in days.
+            
+        Returns:
+            list: List of TIC IDs with periods in range,
+                empty list if catalog unavailable.
+        """
         if not self.is_available():
             return []
             
@@ -117,6 +191,11 @@ class TESSEBsCatalog:
 catalog_instance = None
 
 def get_catalog():
+    """Get the singleton catalog instance.
+    
+    Returns:
+        TESSEBsCatalog: Shared catalog instance, created on first call.
+    """
     global catalog_instance
     if catalog_instance is None:
         catalog_instance = TESSEBsCatalog()
@@ -124,12 +203,37 @@ def get_catalog():
 
 
 def get_eb_info(tic_id):
+    """Convenience function to get EB info for a TIC ID.
+    
+    Args:
+        tic_id (int): TESS Input Catalog identifier.
+        
+    Returns:
+        dict or None: EB parameters dict or None if not found.
+    """
     return get_catalog().get_eb_info(tic_id)
 
 
 def get_catalog_period_range(tic_id, factor=0.1):
+    """Convenience function to get period search range.
+    
+    Args:
+        tic_id (int): TESS Input Catalog identifier.
+        factor (float): Fractional range around catalog period.
+        
+    Returns:
+        tuple or None: (min_period, max_period) or None if not found.
+    """
     return get_catalog().get_period_range(tic_id, factor)
 
 
 def is_in_catalog(tic_id):
+    """Check if a TIC ID exists in the catalog.
+    
+    Args:
+        tic_id (int): TESS Input Catalog identifier.
+        
+    Returns:
+        bool: True if TIC ID is in catalog, False otherwise.
+    """
     return get_eb_info(tic_id) is not None 

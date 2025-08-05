@@ -2,7 +2,12 @@
 
 import logging
 
-from matplotlib import pyplot, cm as colormaps
+from matplotlib import pyplot
+try:
+    from matplotlib import colormaps
+except ImportError:
+    # For older matplotlib versions (< 3.5)
+    from matplotlib import cm as colormaps
 import numpy
 from astropy.timeseries import BoxLeastSquares
 

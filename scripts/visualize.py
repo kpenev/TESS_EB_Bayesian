@@ -8,7 +8,12 @@ from glob import glob
 import logging
 from itertools import repeat
 
-from matplotlib import pyplot, colormaps, rcParams
+from matplotlib import pyplot
+try:
+    from matplotlib import colormaps
+except ImportError:
+    # For older matplotlib versions (< 3.5)
+    from matplotlib import cm as colormaps
 import numpy
 from configargparse import ArgumentParser, DefaultsFormatter
 import pandas
