@@ -55,6 +55,23 @@ class FindStartingPositions:
             return "even", "odd", single
         return "odd", "even", single
 
+    def _set_age(self, params, logage_fraction):
+        """Return params with age set according to ``logage_fraction``."""
+
+        mprimary = params.mtotal / (1.0 + params.mratio)
+        primary_log_age_range = Binary.get_star_log_age_range(
+            mprimary, params.meh
+        )
+        secondary_log_age_range = Binary.get_star_log_age_range(
+            mprimary * params.mratio, params.meh
+        )
+        min_log_age = max(primary_log_age_range[0], secondary_log_age_range[0])
+        max_log_age = min(primary_log_age_range[1], secondary_log_age_range[1])
+        return params._replace(
+            age_gyr=10.0
+            ** (min_log_age + logage_fraction * (max_log_age - min_log_age))
+        )
+
     def _match_eclipse_times(self, params, randomize_e):
         """Set the eccentricity to match the eclipse phases."""
 
@@ -210,14 +227,16 @@ class FindStartingPositions:
         ), f"Failed to optimize impact parameter: {result!r}!"
         return params._replace(primary_impact_param=min(result.x, max_impact))
 
-    def _match_both_depths(self, params, mass_range):
+    def _match_both_depths(self, params, logage_fraction):
         """Tune primary impact and mratio to best fit both eclipses."""
 
         def to_minimize(mratio):
             try:
                 binary = Binary(
                     from_mcmc=self._match_deeper_eclipse_depth(
-                        params._replace(mratio=mratio)
+                        self._set_age(
+                            params._replace(mratio=mratio), logage_fraction
+                        )
                     )
                 )
             except ValueError:
@@ -230,6 +249,10 @@ class FindStartingPositions:
             )
             return result
 
+        mass_range = self._log_likelihood.get_range("mtotal")
+        mass_range = (mass_range[0] / 2, mass_range[1])
+        _logger.debug("Mass range: %s", repr(mass_range))
+        _logger.debug("Mtot: %s", repr(params.mtotal))
         # False positive
         # pylint: disable=unsubscriptable-object
         min_mratio = max(
@@ -250,24 +273,27 @@ class FindStartingPositions:
         assert result.success, f"Failed to optimize mass ratio: {result!r}!"
         _logger.debug("Matching both depths solution: %s", repr(result))
         return self._match_deeper_eclipse_depth(
-            params._replace(mratio=min(max(result.x, min_mratio), 1.0))
+            self._set_age(
+                params._replace(mratio=min(max(result.x, min_mratio), 1.0)),
+                logage_fraction,
+            )
         )
 
-    def _match_eclipses_and_sed(self, params):
+    def _match_eclipses_and_sed(self, params, logage_fraction):
         """Tune masses and impact parameter to best fit eclipses and SED."""
 
-        mass_range = Binary.mini_range(params.meh, params.age_gyr)
         _logger.debug(
-            "Matching eclipses and SED: for [M/H]=%s, t=%s Gyr, mass range=%s",
+            "Matching eclipses and SED: for [M/H]=%s, log(age) fraction=%s",
             repr(params.meh),
-            repr(params.age_gyr),
-            repr(mass_range),
+            repr(logage_fraction),
         )
 
         def to_minimize(mtotal, lc_tuned_params):
             try:
                 binary = Binary(
-                    from_mcmc=lc_tuned_params._replace(mtotal=mtotal)
+                    from_mcmc=self._set_age(
+                        lc_tuned_params._replace(mtotal=mtotal), logage_fraction
+                    )
                 )
             except ValueError:
                 return numpy.inf
@@ -275,7 +301,7 @@ class FindStartingPositions:
 
         def to_solve(mtotal, get_params=False):
             lc_tuned_params = self._match_both_depths(
-                params._replace(mtotal=mtotal), mass_range
+                params._replace(mtotal=mtotal), logage_fraction
             )
             result = optimize.minimize_scalar(
                 to_minimize,
@@ -294,16 +320,14 @@ class FindStartingPositions:
             )
 
             if get_params:
-                return lc_tuned_params._replace(mtotal=result.x)
+                return self._set_age(
+                    lc_tuned_params._replace(mtotal=result.x), logage_fraction
+                )
             if abs(result.x - mtotal) < 1e-3 * mtotal:
                 raise GoodEnough("eclipses_and_sed", mtotal)
             return result.x - mtotal
 
         mtotal_range = self._log_likelihood.get_range("mtotal")
-        mtotal_range = (
-            max(mtotal_range[0], 2 * mass_range[0]),
-            min(mtotal_range[1], 2 * mass_range[1]),
-        )
         try:
             result = optimize.root_scalar(
                 to_solve,
@@ -371,11 +395,19 @@ class FindStartingPositions:
                 - self._secondary_eclipse_phase
             )
 
-        log_age_values = numpy.linspace(-2.5, 1, config.initial_num_ages)
-        meh_values = numpy.linspace(-1.0, 0.5, config.initial_num_mehs)
+        logage_fractions = numpy.linspace(
+            config.initial_logage_smear / 2,
+            1.0 - config.initial_logage_smear / 2,
+            config.initial_num_ages,
+        )
+        meh_values = numpy.linspace(
+            -1.0 + config.initial_meh_smear / 2,
+            0.5 - config.initial_meh_smear / 2,
+            config.initial_num_mehs,
+        )
 
         if self._secondary_eclipse_phase == 0.5:
-            w_values = numpy.linspace(-180.0, 135.0, config.initial_num_ws)
+            wmin, wmax = -180.0, 135.0
         else:
             wlimit = optimize.root_scalar(
                 wmax_eq,
@@ -386,60 +418,54 @@ class FindStartingPositions:
                 ),
             ).root
             if self._secondary_eclipse_phase > 0.5:
-                w_values = numpy.linspace(
-                    -wlimit, wlimit, config.initial_num_ws
-                )
+                wmin, wmax = -wlimit, wlimit
             else:
-                w_values = numpy.linspace(
-                    wlimit, 360 - wlimit, config.initial_num_ws
-                )
+                wmin, wmax = wlimit, 360 - wlimit
+
+        w_values = numpy.linspace(
+            wmin + config.initial_w_smear / 2,
+            wmax - config.initial_w_smear / 2,
+            config.initial_num_ws,
+        )
+
         _logger.debug(
-            "Initial grid from:\nlog(t)=%s\n[M/H]=%s\nw=%s",
-            repr(log_age_values),
+            "Initial grid from:\nlog(t) index=%s\n[M/H]=%s\nw=%s",
+            repr(logage_fractions),
             repr(meh_values),
             repr(w_values),
         )
         grid = [
             arr.flatten()
-            for arr in numpy.meshgrid(log_age_values, meh_values, w_values)
+            for arr in numpy.meshgrid(logage_fractions, meh_values, w_values)
         ]
 
         result = numpy.empty(
             shape=config.initial_num_ages
             * config.initial_num_mehs
             * config.initial_num_ws,
-            dtype=[("age_gyr", float), ("meh", float), ("w", float)],
+            dtype=[("logage_fraction", int), ("meh", float), ("w", float)],
         )
-        result["age_gyr"] = 10.0 ** (
-            grid[0]
-            + uniform.rvs(
-                loc=-config.initial_logage_smear / 2,
-                scale=config.initial_logage_smear,
-                size=grid[0].size,
-            )
+        result["logage_fraction"] = grid[0] + uniform.rvs(
+            loc=-config.initial_logage_smear / 2,
+            scale=config.initial_logage_smear,
         )
+
         result["meh"] = grid[1] + uniform.rvs(
             loc=-config.initial_meh_smear / 2,
             scale=config.initial_meh_smear,
             size=grid[1].size,
         )
-        wmin, wmax = w_values[[0, -1]]
-        out_of_range = numpy.ones(result.shape, dtype=bool)
-        while out_of_range.any():
-            result["w"][out_of_range] = grid[2][out_of_range] + uniform.rvs(
-                loc=-config.initial_w_smear / 2,
-                scale=config.initial_w_smear,
-                size=out_of_range.sum(),
-            )
-            out_of_range = numpy.logical_or(
-                result["w"] < wmin, result["w"] > wmax
-            )
-            _logger.debug(
-                "Found %d proposed arguments of periapsis outside %s < w < %s",
-                out_of_range.sum(),
-                repr(wmin),
-                repr(wmax),
-            )
+        result["w"] = grid[2] + uniform.rvs(
+            loc=-config.initial_w_smear / 2,
+            scale=config.initial_w_smear,
+            size=grid[2].size,
+        )
+        assert not numpy.logical_or(
+            result["w"] < wmin, result["w"] > wmax
+        ).any(), (
+            f"Found proposed arguments of periapsis outside {wmin!r} < w "
+            f"< {wmax!r}: {result['w']!r}"
+        )
 
         _logger.debug(
             "Initial scenarios:\n\t%s", "\n\t".join([str(e) for e in result])
@@ -491,7 +517,7 @@ class FindStartingPositions:
                 _logger.debug("Looking for position %d", scenario_ind)
                 try:
                     params = self.optimize(
-                        scenario["age_gyr"],
+                        scenario["logage_fraction"],
                         scenario["meh"],
                         scenario["w"],
                         scenario_ind > 0
@@ -534,6 +560,7 @@ class FindStartingPositions:
                     / params.per
                     / 2
                 )
+
                 params = params._replace(
                     eclipse_time=params.eclipse_time + timing_tweak,
                     per=params.per + period_tweak,
@@ -581,37 +608,40 @@ class FindStartingPositions:
 
         _logger.info("From BLS: %s", repr(self._bls_eclipses))
 
-    def optimize(self, age_gyr, meh, w, randomize_e):
+    def optimize(self, logage_fraction, meh, w, randomize_e):
         """Find a local maximum in log-likelihood for given parameters."""
 
-        params = SampleParams(
-            mtotal=2.0,
-            mratio=1.0,
-            age_gyr=age_gyr,
-            meh=meh,
-            per=(
-                self._log_likelihood.best_fit_bls["period"][0]
-                * (
-                    1
-                    if self._bls_eclipses["shallower"] == "masked"
-                    or self._bls_eclipses["deeper"] == "masked"
-                    else 2
-                )
+        params = self._set_age(
+            SampleParams(
+                mtotal=2.0,
+                mratio=1.0,
+                age_gyr=0.0,
+                meh=meh,
+                per=(
+                    self._log_likelihood.best_fit_bls["period"][0]
+                    * (
+                        1
+                        if self._bls_eclipses["shallower"] == "masked"
+                        or self._bls_eclipses["deeper"] == "masked"
+                        else 2
+                    )
+                ),
+                ecc=0.0,
+                w=w,
+                primary_impact_param=0.0,
+                eclipse_time=(
+                    self._log_likelihood.best_fit_bls["masked_transit_time"]
+                    if self._bls_eclipses["deeper"] == "masked"
+                    else self._log_likelihood.best_fit_bls["transit_time"]
+                ),
             ),
-            ecc=0.0,
-            w=w,
-            primary_impact_param=0.0,
-            eclipse_time=(
-                self._log_likelihood.best_fit_bls["masked_transit_time"]
-                if self._bls_eclipses["deeper"] == "masked"
-                else self._log_likelihood.best_fit_bls["transit_time"]
-            ),
+            logage_fraction,
         )
 
         _logger.debug("Starting params: %s", params)
         params = self._match_eclipse_times(params, randomize_e)
         _logger.debug("Eclipse timing matched params: %s", params)
-        params = self._match_eclipses_and_sed(params)
+        params = self._match_eclipses_and_sed(params, logage_fraction)
         _logger.debug("Eclipse and SED matched params: %s", params)
         params = self._fit_limbdark(params)
         _logger.debug("Suggested starting params: %s", params)

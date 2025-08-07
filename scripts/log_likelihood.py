@@ -420,7 +420,7 @@ class LogLikelihood(TESSTarget):
             self._cache(tic_id)
 
         self._range = SampleParams(
-            mtotal=(0.2, 4),
+            mtotal=(0.2, 50),
             mratio=(0.01, 2),
             age_gyr=(-3, 1.1),
             meh=Binary.meh_range,

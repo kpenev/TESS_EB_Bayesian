@@ -1,6 +1,7 @@
 *.pyc
 .ipynb_checkpoints/
 results
+**/.DS_Store
 
 ## Core latex/pdflatex auxiliary files:
 *.aux

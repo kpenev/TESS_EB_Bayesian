@@ -77,10 +77,13 @@ def parse_command_line():
     parser.add_argument(
         "--initial-logage-smear",
         type=float,
-        default=0.1,
-        help="The initial age are approximately on a log-uniform grid with this"
-        "much smear added (i.e. each log10(age) gets an independent uniform "
-        "random variable with range +- half of this value added to it.",
+        default=0.02,
+        help="The initial log age are approximately on a log-uniform grid "
+        "between the minimum and maximum age allowed by the stellar evolution "
+        "interpolation for the given star, with this much smear added to the "
+        "fractional log-age (i.e. each log10(age) gets an independent uniform "
+        "random variable with range +- half of this value * the interpolation "
+        "range added to it.",
     )
     parser.add_argument(
         "--initial-num-mehs",

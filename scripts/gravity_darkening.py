@@ -38,7 +38,10 @@ class GravDarkInterpolator:
         while i < raw_data.size:
             if i == 0:
                 feh, logg = raw_data[0]["Z"], raw_data[0]["logg"]
+            # False positive
+            # pylint: disable=possibly-used-before-assignment
             if raw_data[i]["Z"] != feh or raw_data[i]["logg"] != logg:
+                # pylint: enable=possibly-used-before-assignment
                 assert (
                     feh
                     == self._grid[0][1][
@@ -76,6 +79,16 @@ class GravDarkInterpolator:
             if name == quantity:
                 return values[0], values[-1]
         raise ValueError(f"Unknown grid quantity {quantity}!")
+
+    def get_logteff_range(self, logg, z):
+        """Return the range of logTeff for given logg and Z."""
+
+        return grid_tracks_interpolate(
+            {"logg": logg, "Z": z, "logTeff": "range"},
+            None,
+            self._grid,
+            self._data,
+        )
 
 
 def make_test_plots():

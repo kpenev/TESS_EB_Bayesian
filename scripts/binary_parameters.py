@@ -129,10 +129,20 @@ class BinaryParams(batman.TransitParams):
         return cls._log_age_range
 
     @classmethod
-    def mini_range(cls, meh, age_gyr):
+    def get_mini_range(cls, meh, age_gyr):
         BinaryParams.prepare_class()
         return cls._cmd_interpolators[0][1].get_mini_range(
             meh, 9.0 + numpy.log10(age_gyr)
+        )
+
+    @classmethod
+    def get_star_log_age_range(cls, mini, meh):
+        """Return the log(age) range for the given initial mass and [Fe/H]."""
+
+        BinaryParams.prepare_class()
+        return tuple(
+            lgt - 9
+            for lgt in cls._cmd_interpolators[0][1].get_log_age_range(mini, meh)
         )
 
     # pylint: enable=no-self-argument
@@ -288,10 +298,25 @@ class BinaryParams(batman.TransitParams):
                 "logTeff": comp_interp[2],
             }
             for var_name, var_value in interp_args.items():
-                interp_range = self._gravdark_interp.get_range(var_name)
+                if var_name == "logTeff":
+                    interp_range = self._gravdark_interp.get_logteff_range(
+                        logg=interp_args["logg"], z=interp_args["Z"]
+                    )
+                else:
+                    interp_range = self._gravdark_interp.get_range(var_name)
                 interp_args[var_name] = max(
                     interp_range[0], min(var_value, interp_range[1])
                 )
+                if var_value != interp_args[var_name]:
+                    _logger.debug(
+                        "Truncating %s=%s in gravity darkening interpolation to"
+                        " range %s, setting to %s.",
+                        var_name,
+                        repr(var_value),
+                        repr(interp_range),
+                        repr(interp_args[var_name]),
+                    )
+                    self._out_of_range.append(var_name)
             self._gravdark_both[component] = self._gravdark_interp(
                 **interp_args
             )
