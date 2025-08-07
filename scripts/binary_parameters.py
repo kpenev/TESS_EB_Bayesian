@@ -316,7 +316,6 @@ class BinaryParams(batman.TransitParams):
                         repr(interp_range),
                         repr(interp_args[var_name]),
                     )
-                    self._out_of_range.append(var_name)
             self._gravdark_both[component] = self._gravdark_interp(
                 **interp_args
             )

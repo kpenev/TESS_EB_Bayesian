@@ -55,8 +55,8 @@ class FindStartingPositions:
             return "even", "odd", single
         return "odd", "even", single
 
-    def _set_age(self, params, logage_fraction):
-        """Return params with age set according to ``logage_fraction``."""
+    def _get_logage_range(self, params):
+        """Return the valid range for log(age) for the given parameters."""
 
         mprimary = params.mtotal / (1.0 + params.mratio)
         primary_log_age_range = Binary.get_star_log_age_range(
@@ -65,11 +65,56 @@ class FindStartingPositions:
         secondary_log_age_range = Binary.get_star_log_age_range(
             mprimary * params.mratio, params.meh
         )
-        min_log_age = max(primary_log_age_range[0], secondary_log_age_range[0])
-        max_log_age = min(primary_log_age_range[1], secondary_log_age_range[1])
+        likelihood_log_age_range = self._log_likelihood.get_range("age_gyr")
+        return (
+            max(
+                likelihood_log_age_range[0],
+                primary_log_age_range[0],
+                secondary_log_age_range[0],
+            ),
+            min(
+                likelihood_log_age_range[1],
+                primary_log_age_range[1],
+                secondary_log_age_range[1],
+            ),
+        )
+
+    def _set_age(self, params, logage_fraction):
+        """Return params with age set according to ``logage_fraction``."""
+
+        assert (
+            0.0 <= logage_fraction <= 1.0
+        ), f"Log(age) fraction {logage_fraction} is not in [0, 1] range!"
+        min_log_age, max_log_age = self._get_logage_range(params)
+        _logger.debug(
+            "Setting age for params %s, log(age) fraction = %s based on range "
+            "(%s, %s)",
+            params,
+            logage_fraction,
+            repr(min_log_age),
+            repr(max_log_age),
+        )
         return params._replace(
             age_gyr=10.0
             ** (min_log_age + logage_fraction * (max_log_age - min_log_age))
+        )
+
+    def _get_age_fraction(self, params):
+        """Return what fraction of the log(age) interval is the current age."""
+
+        min_log_age, max_log_age = self._get_logage_range(params)
+        return (numpy.log10(params.age_gyr) - min_log_age) / (
+            max_log_age - min_log_age
+        )
+
+    def _get_mcmc_sample(self, params):
+        """Return the MCMC sample corresponding to the given parameters."""
+
+        return numpy.array(
+            [
+                self._log_likelihood.inverse_prior(param, value)[1]
+                for param, value in zip(params._fields, params)
+            ]
         )
 
     def _match_eclipse_times(self, params, randomize_e):
@@ -346,6 +391,40 @@ class FindStartingPositions:
         _logger.info("Optimized parameters: %s", params)
         return params
 
+    def _fit_age(self, params):
+        """Fit for the age of the system to maximize LC log-likelihood."""
+
+        def to_minimize(logage_fraction):
+            """Return -log-likelihood for given log(age) fraction."""
+
+            try:
+                binary = Binary(
+                    from_mcmc=self._match_both_depths(params, logage_fraction)
+                )
+            except ValueError:
+                return numpy.inf
+            result = -self._log_likelihood.calc_lc_log_likelihood(
+                binary,
+                0.0,
+                (self._bls_eclipses["deeper"], self._bls_eclipses["shallower"]),
+            )
+            _logger.debug(
+                "For log(age) fraction = %s\nbinary=%s\n LC -LL = %s",
+                repr(logage_fraction),
+                binary,
+                repr(result),
+            )
+            return result
+
+        result = optimize.minimize_scalar(
+            to_minimize, bounds=(0.0, 1.0), options={"xatol": 1e-3}
+        )
+        assert (
+            result.success
+        ), f"Failed to optimize log(age) fraction: {result!r}!"
+        _logger.debug("Age optimization result: %s", repr(result))
+        return self._match_both_depths(params, result.x)
+
     def _fit_limbdark(self, params):
         """Fit for the limb darkening coefficients."""
 
@@ -443,11 +522,12 @@ class FindStartingPositions:
             shape=config.initial_num_ages
             * config.initial_num_mehs
             * config.initial_num_ws,
-            dtype=[("logage_fraction", int), ("meh", float), ("w", float)],
+            dtype=[("logage_fraction", float), ("meh", float), ("w", float)],
         )
         result["logage_fraction"] = grid[0] + uniform.rvs(
             loc=-config.initial_logage_smear / 2,
             scale=config.initial_logage_smear,
+            size=grid[0].size,
         )
 
         result["meh"] = grid[1] + uniform.rvs(
@@ -475,22 +555,32 @@ class FindStartingPositions:
     def _params_to_sample(self, params):
         """Initialize non-optimized parameters and return MCMC sample."""
 
-        mcmc_sample = numpy.array(
-            [
-                self._log_likelihood.inverse_prior(param, value)[1]
-                for param, value in zip(params._fields, params)
-            ]
-        )
+        mcmc_sample = self._get_mcmc_sample(params)
         non_finite = numpy.logical_not(numpy.isfinite(mcmc_sample))
         tiny = numpy.logical_and(non_finite, mcmc_sample < 0)
         tiny[SampleParams._fields.index("lc_sys")] = True
         tiny[SampleParams._fields.index("sed_sys")] = True
 
-        mcmc_sample[tiny] = norm.ppf(uniform.rvs(size=tiny.sum(), scale=0.2))
         huge = numpy.logical_and(non_finite, mcmc_sample > 0)
+
+        mcmc_sample[tiny] = norm.ppf(uniform.rvs(size=tiny.sum(), scale=0.2))
         mcmc_sample[huge] = norm.ppf(
             uniform.rvs(size=huge.sum(), loc=0.8, scale=0.2)
         )
+        if (
+            non_finite[SampleParams._fields.index("mtotal")]
+            or non_finite[SampleParams._fields.index("mratio")]
+        ):
+            tweaked_params = self._log_likelihood.get_sample_params(mcmc_sample)
+            tweaked_params = self._set_age(
+                tweaked_params, self._get_age_fraction(params)
+            )
+            mcmc_sample = self._get_mcmc_sample(tweaked_params)
+            assert numpy.isfinite(mcmc_sample).all(), (
+                "Even after fixing params, non-finite sample entries found: "
+                f"{mcmc_sample!r}"
+            )
+
         _logger.info(
             "Generated optimized sample:\n%s",
             mcmc_sample,
@@ -608,7 +698,7 @@ class FindStartingPositions:
 
         _logger.info("From BLS: %s", repr(self._bls_eclipses))
 
-    def optimize(self, logage_fraction, meh, w, randomize_e):
+    def optimize(self, logage_or_mass_fraction, meh, w, randomize_e):
         """Find a local maximum in log-likelihood for given parameters."""
 
         params = self._set_age(
@@ -635,14 +725,32 @@ class FindStartingPositions:
                     else self._log_likelihood.best_fit_bls["transit_time"]
                 ),
             ),
-            logage_fraction,
+            logage_or_mass_fraction,
         )
 
         _logger.debug("Starting params: %s", params)
         params = self._match_eclipse_times(params, randomize_e)
         _logger.debug("Eclipse timing matched params: %s", params)
-        params = self._match_eclipses_and_sed(params, logage_fraction)
-        _logger.debug("Eclipse and SED matched params: %s", params)
+        if numpy.isfinite(self._log_likelihood.sed[0]).any():
+            params = self._match_eclipses_and_sed(
+                params, logage_or_mass_fraction
+            )
+            _logger.debug("Eclipse and SED matched params: %s", params)
+        else:
+            mtotal_range = self._log_likelihood.get_range("mtotal")
+            _logger.debug(
+                "Fitting age for mass fraction %s of range %s",
+                repr(logage_or_mass_fraction),
+                repr(mtotal_range),
+            )
+            params = self._fit_age(
+                params._replace(
+                    mtotal=mtotal_range[0]
+                    + logage_or_mass_fraction
+                    * (mtotal_range[1] - mtotal_range[0])
+                )
+            )
+            _logger.debug("Age fit params: %s", params)
         params = self._fit_limbdark(params)
         _logger.debug("Suggested starting params: %s", params)
 

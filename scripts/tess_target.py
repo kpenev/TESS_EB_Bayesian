@@ -23,6 +23,12 @@ def get_bls_eclipse_mask(bls, lightcurve, which):
     See `self.calc_lc_log_likelihood()` for what masks are supported.
     """
 
+    if not isinstance(which, str):
+        result = numpy.zeros(lightcurve["time"].size, dtype=bool)
+        for entry in which:
+            result |= get_bls_eclipse_mask(bls, lightcurve, entry)
+        return result
+
     if which == "masked":
         period = bls["masked_period"][0]
         window = 1.5 * bls["masked_duration"] + 2.0 * bls["masked_period"][1]

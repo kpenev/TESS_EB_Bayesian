@@ -420,7 +420,7 @@ class LogLikelihood(TESSTarget):
             self._cache(tic_id)
 
         self._range = SampleParams(
-            mtotal=(0.2, 50),
+            mtotal=(0.21, 50),
             mratio=(0.01, 2),
             age_gyr=(-3, 1.1),
             meh=Binary.meh_range,
@@ -822,7 +822,7 @@ class LogLikelihood(TESSTarget):
         return max(sys_err, 1e-10)
 
     def calc_lc_log_likelihood(
-        self, binary, lc_sys_err, bls_eclipse_only=False
+        self, binary, lc_sys_err, bls_eclipse_only=()
     ):
         """
         Return log-likelihood of observing the TESS LCs for given binary.
