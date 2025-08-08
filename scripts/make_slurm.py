@@ -45,13 +45,19 @@ def parse_command_line():
         "HPC node can handle, the last job file will have fewer.",
     )
     parser.add_argument(
+        "--slurm-mode",
+        default=None,
+        help="Determines which slurm file to use to generate the template. By "
+        "default assumes ``basic`` if launcher is not used and ``launcher`` "
+        "otherwise.",
+    )
+    parser.add_argument(
         "--tic-range",
         type=int,
         nargs=2,
         metavar=("START", "COUNT"),
         default=None,
-        help="If specified, only COUNT tics, starting from START, will be "
-        "used.",
+        help="If specified, only COUNT tics, starting from START, will be " "used.",
     )
     parser.add_argument(
         "--hpc",
@@ -91,9 +97,10 @@ def parse_command_line():
         "``{hpc}`` and ``{jobid}`` substitutions.",
     )
     parser.add_argument(
-        "--continue-flag",
+        "--continue-flags",
         type=int,
         default=None,
+        nargs="+",
         help="The flag assigned to the tics for which sampling should continue."
         " If not specified, all positive flags will be continued.",
     )
@@ -179,9 +186,9 @@ def make_slurm(config):
         config.tic_table,
         (
             None
-            if config.continue_flag is None
+            if config.continue_flags is None
             else (
-                [config.continue_flag]
+                config.continue_flags
                 + (
                     []
                     if config.changed_likelihood_flag is None
@@ -201,10 +208,12 @@ def make_slurm(config):
             len(ticid_list) + config.launcher_njobs - 1
         ) // config.launcher_njobs
 
+    if config.slurm_mode is None:
+        config.slurm_mode = "basic" if config.launcher_njobs is None else "launcher"
     substitutions = {
         "hpc": config.hpc,
         "partition": config.partition,
-        "mode": "basic" if config.launcher_njobs is None else "launcher",
+        "mode": config.slurm_mode,
         "nodes_per_job": (
             1
             if config.launcher_njobs is None
@@ -213,13 +222,20 @@ def make_slurm(config):
                 // _tic_per_node[config.hpc]
             )
         ),
+        "ntics_per_job": ntics_per_job,
         "num_parallel": config.num_parallel,
         "time_limit": config.time_limit,
     }
+
+    substitutions["processes_per_job"] = (
+        (ntics_per_job + substitutions["nodes_per_job"] - 1)
+        // substitutions["nodes_per_job"]
+    ) * substitutions["nodes_per_job"]
     make_slurm_file = FileFromTemplate(slurm_fname, substitutions)
-    make_launchercmd_file = FileFromTemplate(
-        config.launcher_commands_fname, substitutions
-    )
+    if config.launcher_njobs is not None:
+        make_launchercmd_file = FileFromTemplate(
+            config.launcher_commands_fname, substitutions
+        )
 
     first_tic = 0
     while first_tic < len(ticid_list):
@@ -228,7 +244,7 @@ def make_slurm(config):
             tic_list = " ".join(
                 [
                     str(tic)
-                    for tic in ticid_list[first_tic : first_tic + ntics_per_job]
+                    for tic, _ in ticid_list[first_tic : first_tic + ntics_per_job]
                 ]
             )
             make_slurm_file(
@@ -247,9 +263,7 @@ def make_slurm(config):
                             else ""
                         ),
                     }
-                    for tic, flag in ticid_list[
-                        first_tic : first_tic + ntics_per_job
-                    ]
+                    for tic, flag in ticid_list[first_tic : first_tic + ntics_per_job]
                 ]
             )
             make_slurm_file([{"jobid": jobid, "launcher_cmd": cmdfname}])
