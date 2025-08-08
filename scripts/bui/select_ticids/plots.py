@@ -7,6 +7,7 @@ from os import path, makedirs
 from functools import partial
 from traceback import print_exc, format_exc
 from time import sleep
+from itertools import count
 
 from multiprocessing import Pool
 import matplotlib
@@ -61,11 +62,23 @@ def plot_tic(config, fname):
     if fname is None or not path.exists(fname):
         # pylint: enable=possibly-used-before-assignment
 
-        try:
-            visualize(config)
-        except:  # pylint: disable=bare-except
-            print(f"Error while plotting {config.tic_id}:\n{format_exc()}")
-            return ""
+        for retry in count():
+            try:
+                visualize(config)
+                break
+            except MemoryError:
+                if retry == 10:
+                    return ""
+                wait = randint(60)
+                print(
+                    "Plotting error:\n" 
+                    + format_exc() 
+                    + f"\nWaiting {wait}s and retrying!"
+                )
+                sleep(wait)
+            except:  # pylint: disable=bare-except
+                print(f"Error while plotting {config.tic_id}:\n{format_exc()}")
+                return ""
 
     if fname is None:
         return b64encode(png_stream.getvalue()).decode("utf-8")
@@ -232,27 +245,14 @@ def render_one(tic_id, tablename, plot_func, render_dir, samples_template):
     # pylint: enable=invalid-name
 
     try:
-        while True:
-            try:
-                plot_func(tic_id, path.join(render_dir, f"tess{tic_id}.png"))
-                break
-            except (MemoryError, OSError):
-                wait = randint(60)
-                print(
-                    "".join(
-                        ["Plotting error:"]
-                        + format_exc()
-                        + ["Waiting {wait}s and retrying!"]
-                    )
+        if plot_func(tic_id, path.join(render_dir, f"tess{tic_id}.png")):
+            # False positivie
+            # pylint: disable=no-member
+            with Session.begin() as db_session:
+                # pylint: enable=no-member
+                db_session.execute(
+                    update(SelectTICIDs).filter_by(id=tic_id).values(rendered=1)
                 )
-                sleep(wait)
-        # False positivie
-        # pylint: disable=no-member
-        with Session.begin() as db_session:
-            # pylint: enable=no-member
-            db_session.execute(
-                update(SelectTICIDs).filter_by(id=tic_id).values(rendered=1)
-            )
     # The point is to avoid crashes at all costs
     # pylint: disable=bare-except
     except:
@@ -304,8 +304,9 @@ def render_all_plots(config):
             min(config.num_parallel, len(tic_id_list)),
             initializer=setup_process_map,
             initargs=[vars(config)],
+            maxtasksperchild=1
         ) as pool:
-            pool.map(render_func, tic_id_list)
+            pool.map(render_func, tic_id_list, chunksize=1)
     else:
         for tic_id in tic_id_list:
             render_func(tic_id)
