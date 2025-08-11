@@ -2,6 +2,8 @@
 .ipynb_checkpoints/
 results
 **/.DS_Store
+*.sqlite
+*.sqlite3
 
 ## Core latex/pdflatex auxiliary files:
 *.aux
