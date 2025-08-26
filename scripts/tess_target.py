@@ -3,6 +3,7 @@
 import logging
 
 from matplotlib import pyplot
+
 try:
     from matplotlib import colormaps
 except ImportError:

@@ -5,11 +5,11 @@ parameters from the Villanova TESS-EBs catalog. It supports looking up
 periods, eclipse properties, and other parameters needed for BLS analysis.
 """
 
-import os
 import logging
-import numpy
-import pandas
+import os
 from pathlib import Path
+
+import pandas
 
 CATALOG_PATH = Path(__file__).parent.parent / "tess_ebs_catalog.csv"
 
@@ -45,17 +45,22 @@ class TESSEBsCatalog:
         Sets catalog_data to None if loading fails.
         """
         if not os.path.exists(self.catalog_path):
-            logger.warning(f"Catalog file not found at {self.catalog_path}")
+            logger.warning("Catalog file not found at %s", self.catalog_path)
             self.catalog_data = None
             return
 
         try:
             self.catalog_data = pandas.read_csv(self.catalog_path)
             logger.info(
-                f"Loaded TESS-EBs catalog with {len(self.catalog_data)} entries"
+                "Loaded TESS-EBs catalog with %d entries",
+                len(self.catalog_data),
             )
-        except Exception as e:
-            logger.error(f"Failed to load catalog: {e}")
+        except (
+            FileNotFoundError,
+            pandas.errors.EmptyDataError,
+            pandas.errors.ParserError,
+        ) as exc:
+            logger.error("Failed to load catalog: %s", exc)
             self.catalog_data = None
 
     def is_available(self):
@@ -214,7 +219,7 @@ class TESSEBsCatalog:
         return self.catalog_data[mask]["tess_id"].tolist()
 
 
-catalog_instance = None
+_CATALOG_INSTANCE = None
 
 
 def get_catalog():
@@ -223,10 +228,10 @@ def get_catalog():
     Returns:
         TESSEBsCatalog: Shared catalog instance, created on first call.
     """
-    global catalog_instance
-    if catalog_instance is None:
-        catalog_instance = TESSEBsCatalog()
-    return catalog_instance
+    global _CATALOG_INSTANCE  # pylint: disable=global-statement
+    if _CATALOG_INSTANCE is None:
+        _CATALOG_INSTANCE = TESSEBsCatalog()
+    return _CATALOG_INSTANCE
 
 
 def get_eb_info(tic_id):
