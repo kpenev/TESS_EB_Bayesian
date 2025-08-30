@@ -18,9 +18,9 @@ urlpatterns = [
             rendered_only=True,
             states=(
                 "finished",
-                "continue",
-                "bad period",
-                "bad minimum",
+                "continue ls6",
+                "continue juno",
+                "restart juno",
                 "changed likelihood",
                 "unsuitable",
             ),

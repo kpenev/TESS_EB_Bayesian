@@ -305,28 +305,34 @@ def get_chain_expressions(plot_data, chain_expressions):
         plot_data = plot_data[plot_data["selected"]]
     if chain_expressions:
         evaluate = Interpreter(user_symbols=plot_data)
-        split_expressions = [
-            expression.split("=") for expression in chain_expressions
-        ]
-        plot_data = pandas.DataFrame(
-            {
-                name: evaluate(expression)
-                for name, expression in split_expressions
-            }
-        )
-    return plot_data
+        plot_data = {}
+        ranges = {}
+        for expression in chain_expressions:
+            value_expression, range_expression = expression.split(":", 1)
+            name, value_expression = value_expression.split("=")
+            plot_data[name] = evaluate(value_expression)
+            ranges[name] = tuple(
+                evaluate(v) for v in range_expression.split(":")
+            )
+    print(f"Plot data: {plot_data!r}")
+    plot_data = pandas.DataFrame(plot_data)
+    ranges = [ranges[col] for col in plot_data.columns]
+    return plot_data, ranges
 
 
 def create_corner_plot(plot_data, config):
     """Create and save a corner plot."""
 
-    plot_data = get_chain_expressions(plot_data, config.chain_expression)
+    plot_data, ranges = get_chain_expressions(
+        plot_data, config.chain_expression
+    )
     make_corner_plot(
         plot_data,
         corner_plot_fname=config.corner_plot_fname,
-        plot_contours=False,
+        plot_contours=True,
         bins=30,
         labelpad=0.08,
+        range=ranges,
     )
     pyplot.cla()
     pyplot.clf()

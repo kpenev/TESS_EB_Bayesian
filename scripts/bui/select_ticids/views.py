@@ -36,6 +36,7 @@ class TICIdSelectorView(View):
         """Allow user to review LCs from Villanova catalog and select some."""
 
         state_slugs = ["pending"] + [slugify(state) for state in self.states]
+        print(f"State slugs: {state_slugs!r}")
         sort_flag = state_slugs.index(sort_state)
         # That's the whole point
         # pylint: disable=no-member
