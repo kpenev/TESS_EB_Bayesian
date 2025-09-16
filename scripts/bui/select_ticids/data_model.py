@@ -4,7 +4,7 @@ import re
 from glob import glob
 from os import path
 
-from sqlalchemy import Table, Column, Integer, TIMESTAMP, text, inspect
+from sqlalchemy import Table, Column, Integer, String, TIMESTAMP, text, inspect
 from sqlalchemy.orm import DeclarativeBase
 
 from bui.db_interface import db_engine, Session
@@ -42,11 +42,19 @@ def get_ticid_select_table(tablename, plot_dirs=(), require_all=False):
                 "id", Integer, primary_key=True, doc="The TIC ID to consider."
             ),
             Column(
-                "flag",
+                "status",
                 Integer,
                 doc="Status assigned to the TIC ID (selection dependent).",
             ),
             Column("rendered", Integer, doc="1 - rendered, 0 - not"),
+            Column(
+                "hpc", String, doc="The HPC system this TIC is assigned to."
+            ),
+            Column(
+                "job_id",
+                Integer,
+                doc="The ID of the job this TIC is assigned to.",
+            ),
             Column(
                 "timestamp",
                 TIMESTAMP,
@@ -57,6 +65,7 @@ def get_ticid_select_table(tablename, plot_dirs=(), require_all=False):
             ),
             keep_existing=True,
         )
+
     # pylint: enable=too-few-public-methods
 
     if not inspect(db_engine).has_table(tablename):
@@ -71,11 +80,12 @@ def get_ticid_select_table(tablename, plot_dirs=(), require_all=False):
                     plot_tic_ids,
                     "intersection_update" if require_all else "update",
                 )(set(tic_id for tic_id, _ in get_ticids(plot_dir)))
-        # False positive
-        # pylint: disable=no-member
-        with Session.begin() as db_session:
-            # pylint: enable=no-member
-            for tic_id in plot_tic_ids:
-                db_session.add(Result(id=tic_id, flag=0, rendered=1))
+        if plot_tic_ids is not None:
+            # False positive
+            # pylint: disable=no-member
+            with Session.begin() as db_session:
+                # pylint: enable=no-member
+                for tic_id in plot_tic_ids:
+                    db_session.add(Result(id=tic_id, status=0, rendered=1))
 
     return Result

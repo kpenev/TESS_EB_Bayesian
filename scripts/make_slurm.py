@@ -7,7 +7,7 @@ from os import makedirs
 from os.path import dirname, exists
 
 from configargparse import ArgumentParser, DefaultsFormatter
-from sqlalchemy import select
+from sqlalchemy import select, func, update
 
 from paths import slurm_fname, launcher_fname
 
@@ -45,11 +45,13 @@ def parse_command_line():
         "HPC node can handle, the last job file will have fewer.",
     )
     parser.add_argument(
-        "--slurm-mode",
-        default=None,
-        help="Determines which slurm file to use to generate the template. By "
-        "default assumes ``basic`` if launcher is not used and ``launcher`` "
-        "otherwise.",
+        "--update-only",
+        action="store_true",
+        help="Pass this argument to update the job files after marking some "
+        "systems as not to be sampled any more (e.g. finished or bad model). "
+        "This will preserve the total number of jobs but bring in fresh TIC IDs"
+        " to fill gaps in the job files. Jobs for which no systems are updated "
+        "will be left untouched.",
     )
     parser.add_argument(
         "--tic-range",
@@ -57,7 +59,8 @@ def parse_command_line():
         nargs=2,
         metavar=("START", "COUNT"),
         default=None,
-        help="If specified, only COUNT tics, starting from START, will be " "used.",
+        help="If specified, only COUNT tics, starting from START, will be "
+        "used.",
     )
     parser.add_argument(
         "--hpc",
@@ -97,40 +100,84 @@ def parse_command_line():
         "``{hpc}`` and ``{jobid}`` substitutions.",
     )
     parser.add_argument(
-        "--continue-flags",
+        "--continue-statuses",
         type=int,
         default=None,
         nargs="+",
-        help="The flag assigned to the tics for which sampling should continue."
-        " If not specified, all positive flags will be continued.",
+        help="The status(es) assigned to the tics for which sampling should "
+        "continue. If not specified, all positive status values will be "
+        "continued.",
     )
     parser.add_argument(
-        "--changed-likelihood-flag",
+        "--changed-likelihood-status",
         type=int,
         default=None,
-        help="The flag assigned to the tics for which likelihood has changed "
+        help="The status assigned to the tics for which likelihood has changed "
         "and need the ``--changed-likelihood`` argument.",
     )
     return parser.parse_args()
 
 
-def get_ticid_list(tablename, acceptable_flags=None):
-    """Return the list of TIC IDs to sample."""
+def get_ticids_to_add(SelectTICIDs, acceptable_statuses=None, update_hpc=None):
+    """
+    Return the list of TIC IDs to add for sampling.
+    """
 
-    # pylint: disable=no-member
-    # This is actually a class
-    # pylint: disable=invalid-name
-    SelectTICIDs = get_ticid_select_table(tablename)
-    # pylint: enable=invalid-name
-
-    query = select(SelectTICIDs.id, SelectTICIDs.flag)
-    if acceptable_flags is None:
-        query = query.where(SelectTICIDs.flag > 0)
-    else:
-        query = query.where(SelectTICIDs.flag.in_(acceptable_flags))
-    with Session.begin() as db_session:
-        # pylint: enable=no-member
-        return list(db_session.execute(query).all())
+    with Session.begin() as db_session:  # pylint: disable=no-member
+        query = select(
+            SelectTICIDs.id, SelectTICIDs.status  # pylint: disable=no-member
+        )
+        if update_hpc is None:
+            if acceptable_statuses is None:
+                query = query.where(
+                    SelectTICIDs.status > 0  # pylint: disable=no-member
+                )
+            else:
+                query = query.where(
+                    SelectTICIDs.status.in_(  # pylint: disable=no-member
+                        acceptable_statuses
+                    )
+                )
+            print(f'query: {query}')
+            return [(None, list(db_session.execute(query).all()))]
+        replace = db_session.execute(
+            select(
+                func.count(  # pylint: disable=not-callable
+                    SelectTICIDs.id  # pylint: disable=no-member
+                ),
+                SelectTICIDs.job_id,  # pylint: disable=no-member, not-callable
+            )
+            .where(SelectTICIDs.hpc == update_hpc)  # pylint: disable=no-member
+            .where(
+                SelectTICIDs.not_in(  # pylint: disable=no-member
+                    acceptable_statuses
+                )
+            )
+            .group_by(SelectTICIDs.job_id)  # pylint: disable=no-member
+            .all()
+        )
+        result = []
+        for num_replace, job_id in replace:
+            result.append(
+                job_id,
+                list(
+                    db_session.execute(
+                        query.filter_by(job_id=None).limit(num_replace).all()
+                    )
+                )
+                + list(
+                    db_session.execute(
+                        query.filter_by(job_id=job_id)
+                        .filter_by(hpc=update_hpc)
+                        .where(
+                            SelectTICIDs.status.in_(  # pylint: disable=no-member
+                                acceptable_statuses
+                            )
+                        )
+                    )
+                ),
+            )
+        return result
 
 
 # Meant to function as callable
@@ -182,93 +229,128 @@ class FileFromTemplate:
 def make_slurm(config):
     """Create the slurm scripts per the given configuration."""
 
-    ticid_list = get_ticid_list(
+    SelectTICIDs = get_ticid_select_table(  # pylint: disable=invalid-name
         config.tic_table,
+    )
+
+    ticids_by_job = get_ticids_to_add(
+        SelectTICIDs,
         (
             None
-            if config.continue_flags is None
+            if config.continue_statuses is None
             else (
-                config.continue_flags
+                config.continue_statuses
                 + (
                     []
-                    if config.changed_likelihood_flag is None
-                    else [config.changed_likelihood_flag]
+                    if config.changed_likelihood_status is None
+                    else [config.changed_likelihood_status]
                 )
             )
         ),
+        config.hpc if config.update_only else None,
     )
-    if config.tic_range:
-        ticid_list = ticid_list[
-            config.tic_range[0] : config.tic_range[0] + config.tic_range[1]
-        ]
-    if config.launcher_njobs is None:
-        ntics_per_job = _tic_per_node[config.hpc]
-    else:
-        ntics_per_job = (
-            len(ticid_list) + config.launcher_njobs - 1
-        ) // config.launcher_njobs
-
-    if config.slurm_mode is None:
-        config.slurm_mode = "basic" if config.launcher_njobs is None else "launcher"
-    substitutions = {
-        "hpc": config.hpc,
-        "partition": config.partition,
-        "mode": config.slurm_mode,
-        "nodes_per_job": (
-            1
-            if config.launcher_njobs is None
-            else (
-                (ntics_per_job + _tic_per_node[config.hpc] - 1)
-                // _tic_per_node[config.hpc]
-            )
-        ),
-        "ntics_per_job": ntics_per_job,
-        "num_parallel": config.num_parallel,
-        "time_limit": config.time_limit,
-    }
-
-    substitutions["processes_per_job"] = (
-        (ntics_per_job + substitutions["nodes_per_job"] - 1)
-        // substitutions["nodes_per_job"]
-    ) * substitutions["nodes_per_job"]
-    make_slurm_file = FileFromTemplate(slurm_fname, substitutions)
-    if config.launcher_njobs is not None:
-        make_launchercmd_file = FileFromTemplate(
-            config.launcher_commands_fname, substitutions
-        )
-
-    first_tic = 0
-    while first_tic < len(ticid_list):
-
+    print(f'TIC IDs by job: {ticids_by_job}')
+    for job_index, ticid_list in ticids_by_job:
+        if job_index is None and config.tic_range:
+            ticid_list = ticid_list[
+                config.tic_range[0] : config.tic_range[0] + config.tic_range[1]
+            ]
         if config.launcher_njobs is None:
-            tic_list = " ".join(
-                [
-                    str(tic)
-                    for tic, _ in ticid_list[first_tic : first_tic + ntics_per_job]
-                ]
-            )
-            make_slurm_file(
-                [{"tic_list": tic_list, "jobid": tic_list.replace(" ", "_")}]
-            )
+            ntics_per_job = _tic_per_node[config.hpc]
         else:
-            jobid = f"{first_tic:03d}_{ntics_per_job:03d}"
-            cmdfname = make_launchercmd_file(
-                [
-                    {
-                        "jobid": jobid,
-                        "ticid": tic,
-                        "extra_cmdline": (
-                            "--changed-likelihood"
-                            if flag == config.changed_likelihood_flag
-                            else ""
-                        ),
-                    }
-                    for tic, flag in ticid_list[first_tic : first_tic + ntics_per_job]
-                ]
-            )
-            make_slurm_file([{"jobid": jobid, "launcher_cmd": cmdfname}])
+            ntics_per_job = (
+                len(ticid_list) + config.launcher_njobs - 1
+            ) // config.launcher_njobs
 
-        first_tic += ntics_per_job
+        config.slurm_mode = (
+            "basic" if config.launcher_njobs is None else "launcher"
+        )
+        substitutions = {
+            "hpc": config.hpc,
+            "partition": config.partition,
+            "mode": config.slurm_mode,
+            "nodes_per_job": (
+                1
+                if config.launcher_njobs is None
+                else (
+                    (ntics_per_job + _tic_per_node[config.hpc] - 1)
+                    // _tic_per_node[config.hpc]
+                )
+            ),
+            "ntics_per_job": ntics_per_job,
+            "num_parallel": config.num_parallel,
+            "time_limit": config.time_limit,
+        }
+
+        substitutions["processes_per_job"] = (
+            (ntics_per_job + substitutions["nodes_per_job"] - 1)
+            // substitutions["nodes_per_job"]
+        ) * substitutions["nodes_per_job"]
+        make_slurm_file = FileFromTemplate(slurm_fname, substitutions)
+        if config.launcher_njobs is not None:
+            make_launchercmd_file = FileFromTemplate(
+                config.launcher_commands_fname, substitutions
+            )
+
+        first_tic = 0
+        if job_index is None:
+            jobid = 0
+        while first_tic < len(ticid_list):
+
+            if config.launcher_njobs is None:
+                tic_list = " ".join(
+                    [
+                        str(tic)
+                        for tic, _ in ticid_list[
+                            first_tic : first_tic + ntics_per_job
+                        ]
+                    ]
+                )
+                make_slurm_file(
+                    [
+                        {
+                            "tic_list": tic_list,
+                            "jobid": tic_list.replace(" ", "_"),
+                        }
+                    ]
+                )
+            else:
+                cmdfname = make_launchercmd_file(  # pylint: disable=possibly-used-before-assignment
+                    [
+                        {
+                            "jobid": jobid,
+                            "ticid": tic,
+                            "extra_cmdline": (
+                                "--changed-likelihood"
+                                if status == config.changed_likelihood_status
+                                else ""
+                            ),
+                        }
+                        for tic, status in ticid_list[
+                            first_tic : first_tic + ntics_per_job
+                        ]
+                    ]
+                )
+                make_slurm_file(
+                    [{"jobid": str(jobid), "launcher_cmd": cmdfname}]
+                )
+                if job_index is None:
+                    jobid += 1
+                else:
+                    assert first_tic + ntics_per_job == len(ticid_list)
+
+                with Session.begin() as db_session:  # pylint: disable=no-member
+                    db_session.execute(
+                        update(SelectTICIDs),
+                        [
+                            {"id": tic_id, "hpc": config.hpc, "job_id": jobid}
+                            for tic_id, _ in ticid_list[
+                                first_tic : first_tic + ntics_per_job
+                            ]
+                        ],
+                    )
+
+            first_tic += ntics_per_job
 
 
 if __name__ == "__main__":

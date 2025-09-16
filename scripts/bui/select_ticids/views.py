@@ -32,12 +32,14 @@ class TICIdSelectorView(View):
     states = ("selected", "discarded")
     grid = {"columns": "1fr", "rows": "1fr"}
 
-    def get(self, request, sort_state, displayed_ticid=None, decision=None):
+    def get(
+        self, request, sort_state="pending", displayed_ticid=None, decision=None
+    ):
         """Allow user to review LCs from Villanova catalog and select some."""
 
         state_slugs = ["pending"] + [slugify(state) for state in self.states]
         print(f"State slugs: {state_slugs!r}")
-        sort_flag = state_slugs.index(sort_state)
+        sort_state_index = state_slugs.index(sort_state)
         # That's the whole point
         # pylint: disable=no-member
         # This is actually a class
@@ -54,18 +56,18 @@ class TICIdSelectorView(View):
             if decision is not None:
                 assert displayed_ticid is not None
                 if decision == "skip":
-                    flag = sort_flag
+                    status = sort_state_index
                 else:
-                    flag = state_slugs.index(decision)
-                if flag:
+                    status = state_slugs.index(decision)
+                if status:
                     db_session.execute(
                         update(SelectTICIDs)
                         .filter_by(id=displayed_ticid)
-                        .values(flag=flag)
+                        .values(status=status)
                     )
                 displayed_ticid = db_session.scalar(
                     select(SelectTICIDs.id)
-                    .filter_by(flag=sort_flag, rendered=1)
+                    .filter_by(status=sort_state_index, rendered=1)
                     .where(SelectTICIDs.id > displayed_ticid)
                     .order_by(SelectTICIDs.id)
                 )
@@ -88,14 +90,16 @@ class TICIdSelectorView(View):
                 "sort_state": sort_state,
                 "by_state": [
                     (
-                        state,
+                        state_index,
                         db_session.execute(
-                            select_expr.filter_by(flag=flag).order_by(
-                                SelectTICIDs.id
-                            )
+                            select_expr.where(
+                                SelectTICIDs.status == state
+                            ).order_by(SelectTICIDs.id)
                         ).all(),
                     )
-                    for flag, state in enumerate(("pending",) + self.states)
+                    for state, state_index in enumerate(
+                        ("pending",) + self.states
+                    )
                 ],
                 "decisions": self.states + ("skip",),
                 "review": self.reviewing,
@@ -106,7 +110,11 @@ class TICIdSelectorView(View):
 
         if displayed_ticid is None:
             displayed_ticid = dict(context["by_state"])[
-                self.states[sort_flag - 1] if sort_flag else "pending"
+                (
+                    self.states[sort_state_index - 1]
+                    if sort_state_index
+                    else "pending"
+                )
             ][0][0]
         context["displayed_ticid"] = displayed_ticid
         for dirname, area in self.plot_dirs:

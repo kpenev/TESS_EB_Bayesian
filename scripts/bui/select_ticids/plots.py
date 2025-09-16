@@ -71,8 +71,8 @@ def plot_tic(config, fname):
                     return ""
                 wait = randint(60)
                 print(
-                    "Plotting error:\n" 
-                    + format_exc() 
+                    "Plotting error:\n"
+                    + format_exc()
                     + f"\nWaiting {wait}s and retrying!"
                 )
                 sleep(wait)
@@ -272,18 +272,20 @@ def render_all_plots(config):
     # pylint: enable=no-member
     # pylint: enable=invalid-name
 
-    selection = select(SelectTICIDs.id)
-    if config.limit_to_flags:
+    selection = select(SelectTICIDs.id)  # pylint: disable=no-member
+    if config.limit_to_statuses:
         selection = selection.where(
-            SelectTICIDs.flag.in_(config.limit_to_flags)
+            SelectTICIDs.status.in_(  # pylint: disable=no-member
+                config.limit_to_statuses
+            )
         )
 
-    # False positive
-    # pylint: disable=no-member
-    with Session.begin() as db_session:
+    with Session.begin() as db_session:  # pylint: disable=no-member
         # pylint: enable=no-member
         tic_id_list = list(
-            db_session.execute(selection.order_by(SelectTICIDs.id)).scalars()
+            db_session.execute(
+                selection.order_by(SelectTICIDs.id)  # pylint: disable=no-member
+            ).scalars()
         )[config.start :]
 
     if config.count is not None:
@@ -304,7 +306,7 @@ def render_all_plots(config):
             min(config.num_parallel, len(tic_id_list)),
             initializer=setup_process_map,
             initargs=[vars(config)],
-            maxtasksperchild=1
+            maxtasksperchild=1,
         ) as pool:
             pool.map(render_func, tic_id_list, chunksize=1)
     else:
@@ -350,10 +352,10 @@ def parse_command_line():
         default=16,
     )
     parser.add_argument(
-        "--limit-to-flags",
+        "--limit-to-statuses",
         nargs="+",
         default=False,
-        help="Only render objects that have one of the specified flags.",
+        help="Only render objects that have one of the specified statuses.",
     )
     parser.add_argument(
         "--plot-dir",
