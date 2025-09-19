@@ -193,7 +193,8 @@ class TESSEBsCatalog:
         """Get list of all TIC IDs in the catalog.
 
         Returns:
-            list: List of TIC IDs as integers, empty list if catalog unavailable.
+            list: List of TIC IDs as integers, empty list if catalog
+            unavailable.
         """
         if not self.is_available():
             return []
@@ -219,19 +220,15 @@ class TESSEBsCatalog:
         return self.catalog_data[mask]["tess_id"].tolist()
 
 
-_CATALOG_INSTANCE = None
-
-
 def get_catalog():
     """Get the singleton catalog instance.
 
     Returns:
         TESSEBsCatalog: Shared catalog instance, created on first call.
     """
-    global _CATALOG_INSTANCE  # pylint: disable=global-statement
-    if _CATALOG_INSTANCE is None:
-        _CATALOG_INSTANCE = TESSEBsCatalog()
-    return _CATALOG_INSTANCE
+    if getattr(get_catalog.catalog_instance, None) is None:
+        get_catalog.catalog_instance = TESSEBsCatalog()
+    return get_catalog.catalog_instance
 
 
 def get_eb_info(tic_id):

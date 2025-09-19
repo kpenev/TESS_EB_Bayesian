@@ -470,16 +470,7 @@ class LogLikelihood(TESSTarget):
           * masked_harmonic_delta_log_likelihood < -5
         """
 
-        bls = self._best_fit_bls
-        return (
-            bls["masked_depth"][0] > 10.0 * bls["masked_depth"][1]
-            and bls["masked_harmonic_delta_log_likelihood"] < -10.0
-            and abs(bls["depth_even"][0] - bls["depth_odd"][0])
-            < max(
-                10.0 * (bls["depth_even"][1] + bls["depth_odd"][1]),
-                bls["masked_depth"][0],
-            )
-        )
+        return self.masked_bls_is_significant(self._best_fit_bls)
 
     @staticmethod
     def get_full_model(binary, header, lightcurve, lc_sys_err):
