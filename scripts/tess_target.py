@@ -356,25 +356,19 @@ class TESSTarget:
             if p_factor == 1:
                 result.update(self._get_masked_best_fit_bls(lightcurve, result))
             else:
+                for key in ["depth", "period"]:
+                    result[f"masked_{key}"] = (numpy.nan, numpy.nan)
                 for key in [
-                    "depth",
+                    "duration",
                     "harmonic_amplitude",
                     "harmonic_delta_log_likelihood",
+                    "transit_time",
                 ]:
                     result[f"masked_{key}"] = numpy.nan
 
             bls_results.append(result)
-        return self._select_catalog_bls(bls_results)
 
-    @staticmethod
-    def _select_catalog_bls(bls_results):
-        """Select from among the BLS results near catalog P or P/2."""
-
-        if (
-            abs(bls_results[1]["depth_even"] - bls_results[1]["depth_odd"])
-            > 0.5 * bls_results[1]["depth"]
-        ):
-            assert TESSTarget.masked_bls_is_significant(bls_results[0])
+        if TESSTarget.masked_bls_is_significant(bls_results[0]):
             return bls_results[0]
         return bls_results[1]
 
@@ -418,6 +412,7 @@ class TESSTarget:
                 *period_range,
                 num_periods,
             ),
+            use_catalog=False,
         )
         return {
             f"masked_{param}": value

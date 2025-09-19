@@ -226,7 +226,7 @@ def get_catalog():
     Returns:
         TESSEBsCatalog: Shared catalog instance, created on first call.
     """
-    if getattr(get_catalog.catalog_instance, None) is None:
+    if getattr(get_catalog, 'catalog_instance', None) is None:
         get_catalog.catalog_instance = TESSEBsCatalog()
     return get_catalog.catalog_instance
 
