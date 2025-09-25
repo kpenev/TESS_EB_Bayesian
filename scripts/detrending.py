@@ -4,10 +4,15 @@ from argparse import Namespace
 import logging
 
 import numpy
+from numpy.polynomial import Polynomial
 from numpy.lib.recfunctions import append_fields
-from autowisp.iterative_rejection_util import iterative_rej_smoothing_spline
+from autowisp.iterative_rejection_util import (
+    iterative_rej_smoothing_spline,
+    iterative_rej_polynomial_fit,
+)
+from matplotlib import pyplot
 
-from tess_target import get_bls_eclipse_mask
+from tess_target import get_bls_eclipse_mask, get_bls_model
 
 _logger = logging.getLogger(__name__)
 
@@ -58,7 +63,13 @@ def get_ooe_spline_nodes(masked_time, half_porb):
     node_times = numpy.linspace(
         masked_time[0],
         masked_time[-1],
-        int(timespan // min(half_porb, 0.5)) + 2,
+        2 * int(numpy.ceil(timespan / half_porb)) + 6,
+    )
+    _logger.debug(
+        "Guess node times (timespan=%s, P/2=%s): %s",
+        repr(timespan),
+        repr(half_porb),
+        repr(node_times),
     )
     found_nodes = False
     while not found_nodes:
@@ -69,6 +80,13 @@ def get_ooe_spline_nodes(masked_time, half_porb):
                     masked_time[0],
                     masked_time[-1],
                     node_times.size - 1,
+                )
+                _logger.debug(
+                    "Only %d between %s < t < %s, new suggested node times: %s",
+                    numpy.logical_and(masked_time > t0, masked_time < t1).sum(),
+                    repr(t0),
+                    repr(t1),
+                    repr(node_times),
                 )
                 found_nodes = False
                 break
@@ -113,12 +131,37 @@ def get_ooe_variability(
 
     ooe_mask = numpy.ones(masked_time.size, dtype=bool)
     while True:
-        ooe_model = iterative_rej_smoothing_spline(
-            masked_time[ooe_mask],
-            masked_flux[ooe_mask],
-            spline_rejection,
-            t=get_ooe_spline_nodes(masked_time, half_porb)[1:-1],
-        )(lightcurve["time"])
+        spline_nodes = get_ooe_spline_nodes(masked_time, half_porb)[1:-1]
+        if spline_nodes.size > 6:
+            _logger.debug(
+                "Using %d nodes spline detrending for %s < t < %s",
+                spline_nodes.size,
+                lightcurve["time"][0],
+                lightcurve["time"][-1],
+            )
+
+            ooe_model = iterative_rej_smoothing_spline(
+                masked_time[ooe_mask],
+                masked_flux[ooe_mask],
+                spline_rejection,
+                t=spline_nodes,
+            )(lightcurve["time"])
+        else:
+            _logger.debug(
+                "Not enough nodes, using cubic polynomial detrending for "
+                "%s < t < %s",
+                lightcurve["time"][0],
+                lightcurve["time"][-1],
+            )
+            poly_coef = iterative_rej_polynomial_fit(
+                masked_time[ooe_mask],
+                masked_flux[ooe_mask],
+                order=3,
+                outlier_threshold=spline_rejection,
+            )[0]
+            _logger.debug("Polynomial coefficients: %s", repr(poly_coef))
+            ooe_model = Polynomial(poly_coef)(lightcurve["time"])
+
         residuals = masked_flux - ooe_model[mask]
         new_ooe_mask = masked_flux > (
             ooe_model[mask]
@@ -236,6 +279,7 @@ def detrend_with_gaps(
         )
         detrended[start_index:end_index]["flux"] /= scaling
         detrended[start_index:end_index]["flux_err"] /= scaling
+
         if full_output:
             detrended[start_index:end_index]["trend"] = scaling
         start_index = end_index

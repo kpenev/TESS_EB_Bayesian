@@ -104,11 +104,13 @@ class LogLikelihood(TESSTarget):
                 bls = {
                     column: (
                         (
-                            getattr(cached_bls, column),
-                            getattr(cached_bls, column + "_uncertainty"),
+                            none_to_nan(getattr(cached_bls, column)),
+                            none_to_nan(
+                                getattr(cached_bls, column + "_uncertainty")
+                            ),
                         )
                         if (column + "_uncertainty" in bls_columns)
-                        else getattr(cached_bls, column)
+                        else none_to_nan(getattr(cached_bls, column))
                     )
                     for column in bls_columns
                     if not column.endswith("_uncertainty")
@@ -425,10 +427,8 @@ class LogLikelihood(TESSTarget):
             age_gyr=(-3, 1.1),
             meh=Binary.meh_range,
             per=(
-                self.bls_porb
-                - 10.0 * self._best_fit_bls["period"][1],
-                self.bls_porb
-                + 10.0 * self._best_fit_bls["period"][1],
+                self.bls_porb - 10.0 * self._best_fit_bls["period"][1],
+                self.bls_porb + 10.0 * self._best_fit_bls["period"][1],
             ),
             ecc=(0, self.max_ecc),
             w=(-360, 360),
@@ -812,9 +812,7 @@ class LogLikelihood(TESSTarget):
         )
         return max(sys_err, 1e-10)
 
-    def calc_lc_log_likelihood(
-        self, binary, lc_sys_err, bls_eclipse_only=()
-    ):
+    def calc_lc_log_likelihood(self, binary, lc_sys_err, bls_eclipse_only=()):
         """
         Return log-likelihood of observing the TESS LCs for given binary.
 

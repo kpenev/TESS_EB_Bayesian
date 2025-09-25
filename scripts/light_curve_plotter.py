@@ -4,9 +4,8 @@ from matplotlib import pyplot, rcParams
 import numpy
 from asteval import Interpreter
 
-from tess_target import get_bls_eclipse_mask
+from tess_target import get_bls_eclipse_mask, get_bls_model
 from log_likelihood import LogLikelihood
-
 
 class LightCurvePlotter:
     """Plot lightcurves, models, and detrndeing of TESS targets."""
@@ -406,6 +405,8 @@ class LightCurvePlotter:
             else "others"
         )
         for bnry in binaries or ():
+            if bnry == "bls":
+                continue
             pyplot.plot(
                 plot_x, bnry.absmag, **self.model_sed_plot_config[config_key]
             )
@@ -432,6 +433,8 @@ class LightCurvePlotter:
         if getattr(self._config, "eclipse_model_only", False):
             model_lcs = []
             for bnry in binaries:
+                if bnry == "bls":
+                    continue
                 masked_model, _, mask = log_likelihood.get_eclipse_model(
                     bnry, header, lightcurve, bnry.lc_sys_err
                 )
@@ -445,7 +448,10 @@ class LightCurvePlotter:
                     bnry, header, lightcurve, bnry.lc_sys_err
                 )[0]
                 for bnry in binaries
+                if bnry != "bls"
             ]
+        if "bls" in binaries:
+            model_lcs.append(get_bls_model(lightcurve, log_likelihood))
         return model_lcs
 
     def _setup_figure(self, num_lcs):
@@ -457,6 +463,11 @@ class LightCurvePlotter:
                 rcParams["figure.figsize"][1] * 1.5 * num_lcs,
             ),
             layout="constrained",
+        )
+        print(
+            f"Created {rcParams['figure.figsize'][0]} by "
+            f"{rcParams['figure.figsize'][1] * 1.5 * num_lcs} figure to "
+            f"plot {num_lcs} lightcurves."
         )
         print(f"Mosai spec str: {self._config.plot_lightcurve[1]}")
         return [
@@ -521,20 +532,21 @@ class LightCurvePlotter:
         title_pre = f"TIC {tic_id}\n"
         log_likelihood = LogLikelihood(
             tic_id,
-            save_detrending=getattr(
-                self._config, "show_lc_detrending", False
-            ),
+            save_detrending=getattr(self._config, "show_lc_detrending", False),
         )
         if self._folding_period is None:
             self._folding_period = log_likelihood.bls_porb
 
-            if binaries and numpy.allclose(
-                binaries[0].per, self._folding_period, rtol=1e-3
+            if (
+                binaries
+                and binaries[0] != "bls"
+                and numpy.allclose(
+                    binaries[0].per, self._folding_period, rtol=1e-3
+                )
             ):
                 self._folding_period = binaries[0].per
         title_pre = (
-            title_pre.strip()
-            + f": $P_{{orb}}$ = {self._folding_period:.5f}\n"
+            title_pre.strip() + f": $P_{{orb}}$ = {self._folding_period:.5f}\n"
         )
 
         title_pre += f"({title_info})"
@@ -544,15 +556,16 @@ class LightCurvePlotter:
             lightcurve = numpy.copy(lightcurve)
             lightcurve["flux"] /= numpy.median(lightcurve["flux"])
 
-            model_lcs = self._get_model_lcs(header, lightcurve, binaries,
-                                            log_likelihood)
+            model_lcs = self._get_model_lcs(
+                header, lightcurve, binaries, log_likelihood
+            )
             print("Mosaic spec: " + repr(self._mosaic_spec))
             for plot_type, axis in subfig.subplot_mosaic(
                 self._mosaic_spec,
                 empty_sentinel="empty",
                 gridspec_kw={"hspace": 0.0},
             ).items():
-                print(f'Plot type: {plot_type!r}.')
+                print(f"Plot type: {plot_type!r}.")
                 pyplot.sca(axis)
                 if plot_type.startswith("zoom_"):
                     zoom_type = plot_type[len("zoom_") :]
