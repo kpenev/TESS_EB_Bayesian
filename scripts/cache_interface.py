@@ -167,6 +167,12 @@ class CachedBLS(DataModelBase):
         " and the transit model. If harmonic_delta_log_likelihood is greater "
         "than zero, the sinusoidal model is preferred.",
     )
+    count_odd = mapped_column(
+        Integer, doc="The total number of points in all odd transits."
+    )
+    count_even = mapped_column(
+        Integer, doc="The total number of points in all even transits."
+    )
 
     masked_period = mapped_column(Float, doc="The best fit BLS orbital period.")
     masked_period_uncertainty = mapped_column(
@@ -217,6 +223,15 @@ class CachedBLS(DataModelBase):
         doc="The difference in log likelihood between a sinusoidal model"
         " and the transit model. If harmonic_delta_log_likelihood is greater "
         "than zero, the sinusoidal model is preferred.",
+    )
+
+    masked_count_odd = mapped_column(
+        Integer,
+        doc="The total number of points in all odd transits after masking.",
+    )
+    masked_count_even = mapped_column(
+        Integer,
+        doc="The total number of points in all even transits after masking.",
     )
 
 

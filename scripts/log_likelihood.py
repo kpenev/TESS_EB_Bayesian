@@ -20,6 +20,7 @@ from binary import Binary
 from cache_interface import CacheSession, CachedSED, CachedBLS
 from sample_params import SampleParams
 from exclude_data import exclude_data
+from catalog_interface import get_eb_info
 
 
 class LogLikelihood(TESSTarget):
@@ -320,12 +321,14 @@ class LogLikelihood(TESSTarget):
         detrend_kwargs = {
             "full_output": save_detrending,
         }
+        cat_info = get_eb_info(self._tic_id)
 
-        if "OOE" in tic_exclude:
+        if "OOE" in tic_exclude or "BLSOOE" in tic_exclude:
             self.get_model = self.get_eclipse_model
             detrend_kwargs["get_trend"] = get_ooe_variability
             detrend_kwargs["spline_rejection"] = 5.0
             detrend_kwargs["eclipse_rejection"] = 2.0
+            detrend_kwargs["half_porb"] = cat_info["period"] / 2
         else:
             self.get_model = self.get_full_model
             detrend_kwargs["get_trend"] = get_moving_median
@@ -353,7 +356,7 @@ class LogLikelihood(TESSTarget):
                     )
                 self._lcs.append((header, detrend(lightcurve)))
             if self._best_fit_bls is None:
-                self._best_fit_bls = self.fit_bls()
+                self._best_fit_bls = self.fit_bls(cat_info=cat_info)
                 self._lcs = []
                 overwrite_cache = True
 

@@ -126,12 +126,6 @@ def parse_command_line():
         "selected only among surviving samples.",
     )
     parser.add_argument(
-        "--remove-lc-trend",
-        choices=["moving_median", "ooe_variability", "none"],
-        default="moving_median",
-        help="Specify the detrending method to use for the lightcurve.",
-    )
-    parser.add_argument(
         "--show-lc-detrending",
         action="store_true",
         default=False,

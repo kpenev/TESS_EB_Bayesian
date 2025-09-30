@@ -16,7 +16,6 @@ from astropy.timeseries import BoxLeastSquares
 
 from download_lcs import get_astroquery as download_lcs
 from exclude_data import exclude_data
-from catalog_interface import get_eb_info
 
 
 class FalsePositiveError(Exception):
@@ -283,6 +282,9 @@ class TESSTarget:
             for param in ["period", "duration", "transit_time"]
         }
         result.update(model.compute_stats(**result))
+        result["count_even"] = result["per_transit_count"][::2].sum()
+        result["count_odd"] = result["per_transit_count"][1::2].sum()
+
         del result["transit_times"]
         del result["per_transit_count"]
         del result["per_transit_log_likelihood"]
@@ -307,26 +309,32 @@ class TESSTarget:
             model, periodogram, numpy.argmax(periodogram.power)
         )
         in_eclipse = get_bls_eclipse_mask(result, lightcurve, "both")
+        if in_eclipse.all():
+            return None
 
-        # pyplot.subplot(231)
-        # pyplot.plot(periods, periodogram["power"], ".k")
-        # pyplot.subplot(232)
-        # pyplot.plot(periods, periodogram["duration"], ".k")
-        # pyplot.subplot(233)
-        # pyplot.plot(periods, periodogram["depth"], ".k")
-        # pyplot.subplot(212)
-        # pyplot.plot(lightcurve["time"], lightcurve["flux"], ".k")
-        # pyplot.plot(
-        #    lightcurve["time"],
-        #    _evaluate_bls(
-        #        lightcurve["time"] - result["transit_time"],
-        #        result["period"][0],
-        #        result["duration"],
-        #        result["depth"][0],
-        #    ),
-        #    "-r",
-        # )
-        # pyplot.show()
+        pyplot.subplot(231)
+        pyplot.plot(periods, periodogram["power"], ".k")
+        pyplot.subplot(232)
+        pyplot.plot(periods, periodogram["duration"], ".k")
+        pyplot.subplot(233)
+        pyplot.plot(periods, periodogram["depth"], ".k")
+        pyplot.subplot(212)
+        pyplot.plot(lightcurve["time"], lightcurve["flux"], ".k")
+        pyplot.suptitle(
+            f"BLS for {periods[0]} < P < {periods[-1]}, {durations[0]} < "
+            f"duration < {durations[-1]}"
+        )
+        pyplot.plot(
+            lightcurve["time"],
+            _evaluate_bls(
+                lightcurve["time"] - result["transit_time"],
+                result["period"][0],
+                result["duration"],
+                result["depth"][0],
+            ),
+            "-r",
+        )
+        pyplot.show()
 
         if in_eclipse[0] or in_eclipse[-1]:
             out_of_eclipse = numpy.argwhere(numpy.logical_not(in_eclipse))
@@ -361,7 +369,7 @@ class TESSTarget:
                 -self._get_bls_period_step(),
             )
             durations = numpy.linspace(
-                min(periods[0] / 100, 0.02), periods[0] / 2, 1000
+                min(periods[0] / 100, 0.02), periods[0] / 2, 100
             )
             self._logger.debug(
                 "Based on Porb = %s, BLS durations: %s",
@@ -369,7 +377,8 @@ class TESSTarget:
                 repr(durations),
             )
             result = self._fit_bls(lightcurve, periods, durations)
-            result.update(self._get_masked_best_fit_bls(lightcurve, result))
+            if result is not None:
+                result.update(self._get_masked_best_fit_bls(lightcurve, result))
 
             self._logger.debug(
                 "Best BLS for %s < P < %s periodogram with %d periods and "
@@ -391,50 +400,54 @@ class TESSTarget:
         )
         assert not TESSTarget.masked_bls_is_significant(bls_results[2])
 
-        if not TESSTarget.masked_bls_is_significant(bls_results[1]):
-            self._logger.warning(
-                "Catalog period (%s) appears to be half of the true orbital "
-                "period: %s",
-                repr(catalog_period),
-                repr(bls_results[0]["period"]),
-            )
+        if bls_results[1] is not None:
+            if not TESSTarget.masked_bls_is_significant(bls_results[1]):
+                self._logger.warning(
+                    "Catalog period (%s) appears to be half of the true orbital"
+                    " period: %s",
+                    repr(catalog_period),
+                    repr(bls_results[0]["period"]),
+                )
+                return bls_results[1]
+
+            if (
+                bls_results[1]["masked_depth"][0]
+                > 0.5 * bls_results[1]["depth"][0]
+                and abs(
+                    abs(
+                        bls_results[1]["transit_time"]
+                        - bls_results[1]["masked_transit_time"]
+                    )
+                    - bls_results[1]["period"][0] / 2
+                )
+                < bls_results[1]["period"][1]
+            ):
+                self._logger.debug(
+                    "Primary and secondary eclipses appear to have comparable "
+                    "depths (%s +- %s and %s +- %s) and are %s days apart, very"
+                    " close to P/2 (%s +- %s) apart. Using half-period BLS.",
+                    *bls_results[1]["depth"],
+                    *bls_results[1]["masked_depth"],
+                    (
+                        bls_results[1]["transit_time"]
+                        - bls_results[1]["masked_transit_time"]
+                    ),
+                    bls_results[1]["period"][0] / 2,
+                    bls_results[1]["period"][1] / 2,
+                )
+                return bls_results[2]
+
+            self._logger.debug("Using catalog period BLS")
             return bls_results[1]
 
-        if (
-            bls_results[1]["masked_depth"][0] > 0.5 * bls_results[1]["depth"][0]
-            and abs(
-                abs(
-                    bls_results[1]["transit_time"]
-                    - bls_results[1]["masked_transit_time"]
-                )
-                - bls_results[1]["period"][0] / 2
-            )
-            < bls_results[1]["period"][1]
-        ):
-            self._logger.debug(
-                "Primary and secondary eclipses appear to have comparable "
-                "depths (%s +- %s and %s +- %s) and are %s days apart, very "
-                "close to P/2 (%s +- %s) apart. Using half-period BLS.",
-                *bls_results[1]["depth"],
-                *bls_results[1]["masked_depth"],
-                (
-                    bls_results[1]["transit_time"]
-                    - bls_results[1]["masked_transit_time"]
-                ),
-                bls_results[1]["period"][0] / 2,
-                bls_results[1]["period"][1] / 2,
-            )
-            return bls_results[2]
+        assert bls_results[2] is not None
+        return bls_results[2]
 
-        self._logger.debug("Using catalog period BLS")
-        return bls_results[1]
-
-    def _get_best_fit_bls(self, lightcurve, periods=None, use_catalog=True):
+    def _get_best_fit_bls(self, lightcurve, periods=None, cat_info=None):
         """Return the best fit orbital period and time of primary transit."""
 
-        if use_catalog:
+        if cat_info:
             assert periods is None
-            cat_info = get_eb_info(self._tic_id)
             if cat_info is not None:
                 return self._get_catalog_bls(lightcurve, cat_info)
 
@@ -454,7 +467,9 @@ class TESSTarget:
                 else periods
             ),
             numpy.linspace(
-                min(periods[0] / 10, 0.02), max(periods[0] / 2, 0.2), 100
+                min(periods[0] / 10, 0.02),
+                min(periods[0], periods[-1] / 2),
+                100,
             ),
         )
 
@@ -471,8 +486,8 @@ class TESSTarget:
                     1.0 / numpy.arange(1 / 2.0, 0.01, -0.1 / 30.0**2),
                     numpy.linspace(0.1, 1.0, 100),
                 )
-            elif periodogram.duration[best_index] < 0.04:
-                return self._fit - bls(
+            if periodogram.duration[best_index] < 0.04:
+                return self._fit_bls(
                     lightcurve,
                     1.0 / numpy.arange(1 / 0.1, 0.01, -0.01 / 30.0**2),
                     numpy.linspace(0.01, 0.05, 100),
@@ -507,8 +522,17 @@ class TESSTarget:
         masked_bls_result = self._get_best_fit_bls(
             lightcurve[mask],
             periods=periods,
-            use_catalog=False,
         )
+        if masked_bls_result is None:
+            return {
+                "masked_period": (numpy.nan, numpy.nan),
+                "masked_duration": numpy.nan,
+                "masked_transit_time": numpy.nan,
+                "masked_depth": (numpy.nan, numpy.nan),
+                "masked_depth_even": (numpy.nan, numpy.nan),
+                "masked_depth_odd": (numpy.nan, numpy.nan),
+                "masked_harmonic_delta_log_likelihood": numpy.nan,
+            }
         return {
             f"masked_{param}": value
             for param, value in masked_bls_result.items()
@@ -702,14 +726,12 @@ class TESSTarget:
 
         return combined_lc
 
-    def fit_bls(self, use_catalog=True):
+    def fit_bls(self, cat_info=None):
         """Fit BLS models to the given lightcurve."""
 
         combined_lc = self.get_combined_lc()
-        best_fit_bls = self._get_best_fit_bls(
-            combined_lc, use_catalog=use_catalog
-        )
-        if not use_catalog:
+        best_fit_bls = self._get_best_fit_bls(combined_lc, cat_info=cat_info)
+        if cat_info is None:
             best_fit_bls.update(
                 self._get_masked_best_fit_bls(combined_lc, best_fit_bls)
             )
@@ -742,10 +764,14 @@ class TESSTarget:
         return (
             bls["masked_depth"][0] > 10.0 * bls["masked_depth"][1]
             and bls["masked_harmonic_delta_log_likelihood"] < -10.0
-            and abs(bls["depth_even"][0] - bls["depth_odd"][0])
-            < max(
-                10.0 * (bls["depth_even"][1] + bls["depth_odd"][1]),
-                bls["masked_depth"][0],
+            and (
+                min(bls["count_odd"], bls["count_even"])
+                < 0.01 * max(bls["count_odd"], bls["count_even"])
+                or abs(bls["depth_even"][0] - bls["depth_odd"][0])
+                < max(
+                    10.0 * (bls["depth_even"][1] + bls["depth_odd"][1]),
+                    bls["masked_depth"][0],
+                )
             )
         )
 

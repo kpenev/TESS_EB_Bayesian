@@ -122,17 +122,23 @@ def get_ooe_variability(
 ):
     """Remove the out-of-eclipse variability from the lightcurve."""
 
-    _logger.debug("Extractiong OOE variability with mask %s", repr(mask))
+    _logger.debug("Extracting OOE variability with mask %s", repr(mask))
     if mask is None:
         mask = numpy.ones(lightcurve.size, dtype=bool)
 
     masked_time = lightcurve["time"][mask]
     masked_flux = lightcurve["flux"][mask]
 
+    if (
+        numpy.isfinite(half_porb)
+        and masked_time[-1] - masked_time[0] < half_porb
+    ):
+        return numpy.full(masked_time.shape, numpy.nan)
+
     ooe_mask = numpy.ones(masked_time.size, dtype=bool)
     while True:
         spline_nodes = get_ooe_spline_nodes(masked_time, half_porb)[1:-1]
-        if spline_nodes.size > 6:
+        if spline_nodes.size > 3:
             _logger.debug(
                 "Using %d nodes spline detrending for %s < t < %s",
                 spline_nodes.size,
@@ -161,6 +167,16 @@ def get_ooe_variability(
             )[0]
             _logger.debug("Polynomial coefficients: %s", repr(poly_coef))
             ooe_model = Polynomial(poly_coef)(lightcurve["time"])
+
+        pyplot.plot(lightcurve["time"], lightcurve["flux"], ".k")
+        pyplot.plot(masked_time, masked_flux, ".r")
+        pyplot.plot(masked_time[ooe_mask], masked_flux[ooe_mask], ".g")
+        pyplot.plot(lightcurve["time"], ooe_model, ".b")
+        pyplot.title(
+            ("Spline" if spline_nodes.size > 3 else "Polynomial")
+            + " detrending"
+        )
+        pyplot.show()
 
         residuals = masked_flux - ooe_model[mask]
         new_ooe_mask = masked_flux > (
