@@ -17,8 +17,9 @@ from django.template.defaultfilters import slugify
 from db_interface import Session
 
 # pylint: enable=import-error
+from download_lcs import get_available_sectors
+from exclude_data import exclude_data
 
-from paths import render_dir
 from .data_model import get_ticid_select_table
 
 
@@ -31,6 +32,36 @@ class TICIdSelectorView(View):
     rendered_only = False
     states = ("selected", "discarded")
     grid = {"columns": "1fr", "rows": "1fr"}
+
+    def _get_sector_context(self, ticid):
+        """Return the sector info to add to context for given TIC ID."""
+
+        excluded_data = exclude_data[ticid]
+        spoc_sectors = get_available_sectors(ticid, "SPOC")
+        qlp_sectors = set(get_available_sectors(ticid, "QLP")) - set(
+            spoc_sectors
+        )
+
+        return {
+            "spoc_sectors": [
+                (
+                    "SPOC" not in excluded_data and sector not in excluded_data,
+                    sector,
+                )
+                for sector in spoc_sectors
+            ],
+            "qlp_sectors": [
+                (
+                    "QLP" not in excluded_data and sector not in excluded_data,
+                    sector,
+                )
+                for sector in qlp_sectors
+            ],
+            "ooe_flags": [
+                ("OOE" not in exclude_data, "model"),
+                ("BLSOOE" not in exclude_data, "BLS"),
+            ]
+        }
 
     def get(
         self, request, sort_state="pending", displayed_ticid=None, decision=None
@@ -71,6 +102,7 @@ class TICIdSelectorView(View):
                     .where(SelectTICIDs.id > displayed_ticid)
                     .order_by(SelectTICIDs.id)
                 )
+
             rendered_progress = dict(
                 db_session.execute(
                     select(
@@ -117,6 +149,7 @@ class TICIdSelectorView(View):
                 )
             ][0][0]
         context["displayed_ticid"] = displayed_ticid
+        context.update(self._get_sector_context(displayed_ticid))
         for dirname, area in self.plot_dirs:
             plot_fname = path.join(dirname, f"tess{displayed_ticid}.png")
             if path.exists(plot_fname):

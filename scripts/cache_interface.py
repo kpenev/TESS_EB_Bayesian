@@ -4,7 +4,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy import create_engine
 from sqlalchemy.pool import NullPool
 from sqlalchemy.orm import DeclarativeBase, mapped_column
-from sqlalchemy import Float, Integer, inspect, select, delete
+from sqlalchemy import Float, Integer, inspect
 
 # from sqlalchemy.ext.hybrid import hybrid_property
 
@@ -18,14 +18,12 @@ db_engine = create_engine(
     poolclass=NullPool,
 )
 
-# pylint false positive - Session is actually a class name.
-# pylint: disable=invalid-name
-CacheSession = sessionmaker(db_engine, expire_on_commit=False)
-# pylint: enable=invalid-name
+CacheSession = sessionmaker(
+    db_engine, expire_on_commit=False
+)  # pylint: disable=invalid-name
 
 
-# pylint: disable=too-few-public-methods
-class DataModelBase(DeclarativeBase):
+class DataModelBase(DeclarativeBase):  # pylint: disable=too-few-public-methods
     """Base class that handles 64 bit unsigned integer Gaia IDs."""
 
     tic_id = mapped_column(
@@ -52,7 +50,7 @@ class DataModelBase(DeclarativeBase):
 #        self._gaia_id = repr(gaia_id)
 
 
-class CachedSED(DataModelBase):
+class CachedSED(DataModelBase):  # pylint: disable=too-few-public-methods
     """Cache absolute magnitudes in PannSTARRS and WISE passbands."""
 
     __tablename__ = "sed"
@@ -116,7 +114,7 @@ class CachedSED(DataModelBase):
         )
 
 
-class CachedBLS(DataModelBase):
+class CachedBLS(DataModelBase):  # pylint: disable=too-few-public-methods
     """Cache best fit BLS properties."""
 
     __tablename__ = "bls"
@@ -235,30 +233,22 @@ class CachedBLS(DataModelBase):
     )
 
 
+class ExcludeDataTable(DataModelBase):  # pylint: disable=too-few-public-methods
+    """For each TIC ID specify sectors and/or (OOE=0, BLSOOE=-1) to exclude."""
+
+    __tablename__ = "exclude_data"
+
+    exclude = mapped_column(
+        Integer,
+        primary_key=True,
+        doc="Sector or part of data to exclude. Positive integers specify "
+        "sector numbers, 0 removes OOE variability only when running BLS, "
+        "-1 excludes OOE variability from LC model, -2 excludes all QLP "
+        "sectors, and -3 excludes all SPOC sectrs."
+        "",
+    )
+
+
 for table in DataModelBase.metadata.sorted_tables:
     if not inspect(db_engine).has_table(table.name):
         table.create(db_engine)
-
-
-if __name__ == "__main__":
-
-    with CacheSession.begin() as cache:
-        cache.add(
-            CachedSED(
-                tic_id=11119600,
-                gp1=1.0,
-                rp1=2.0,
-                ip1=3.0,
-                zp1=4.0,
-                yp1=5.0,
-            )
-        )
-
-    with CacheSession.begin() as cache:
-        cache.execute(delete(CachedSED).filter_by(tic_id=56))
-
-    with CacheSession.begin() as cache:
-        print(
-            cache.execute(select(CachedSED).filter_by(tic_id=11119600)).scalar()
-        )
-# pylint: enable=too-few-public-methods

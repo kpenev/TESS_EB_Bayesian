@@ -1,8 +1,12 @@
 """Defines which data to exclude for TICs with problematic sectors."""
 
+from sqlalchemy import select
+
+from cache_interface import ExcludeDataTable, CacheSession
+
 # TODO: for 260161144 get independent constraint from remaining sectors
 
-exclude_data = {
+_manual_exclude_data = {
     91961: ["QLP"],
     2353789: ["QLP"],
     3815360: ["OOE"],
@@ -14,9 +18,11 @@ exclude_data = {
     8624617: [78, 79],
     9054370: ["OOE"],
     9381557: ["OOE"],
+    9433212: ["OOE"],
     11704852: [15],
     12029932: ["OOE"],
     13092260: ["OOE"],
+    13037534: ["OOE"],
     13974582: ["OOE"],
     16479253: ["BLSOOE"],
     16728252: ["OOE"],
@@ -65,7 +71,7 @@ exclude_data = {
     63074282: [15],
     63315565: ["OOE"],
     63579446: ["OOE"],
-    63972440: ["56"],
+    63972440: [56],
     64904640: ["QLP"],
     65628544: ["OOE"],
     66355834: ["OOE"],
@@ -247,3 +253,45 @@ exclude_data = {
     292013448: ["OOE"],
     291466214: ["OOE"],
 }
+
+
+_exclude_flags = {0: "BLSOOE", -1: "OOE", -2: "QLP", -3: "SPOC"}
+
+
+class ExcludeData:  # pylint: disable=too-few-public-methods
+    """Mappin from TIC ID to what to exclude from modeling."""
+
+    def __getitem__(self, tic_id):
+        """Query the exclusions for the given TIC ID."""
+
+        with CacheSession.begin() as cache:  # pylint: disable=no-member
+            tic_excluded = cache.scalars(
+                select(ExcludeDataTable.exclude).filter_by(tic_id=tic_id)
+            ).all()
+        return [
+            _exclude_flags[exclude] if exclude <= 0 else exclude
+            for exclude in tic_excluded
+        ]
+
+
+exclude_data = ExcludeData()
+
+
+def add_manual_exclusions():
+    """Add the menual exclusions to the database."""
+
+    with CacheSession.begin() as cache:  # pylint: disable=no-member
+        for tic_id, exclude_list in _manual_exclude_data.items():
+            already_excluded = exclude_data[tic_id]
+            for exclude in exclude_list:
+                if exclude not in already_excluded:
+                    cache.add(
+                        ExcludeDataTable(
+                            tic_id=tic_id,
+                            exclude=_exclude_flags.get(exclude, exclude),
+                        )
+                    )
+
+
+if __name__ == "__main__":
+    add_manual_exclusions()
