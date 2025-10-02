@@ -25,7 +25,7 @@ body {
     flex-direction: row;
 }
 
-.navbar input {
+.navbar input:not(.replot) {
     width: 15em;
     height: 100%;
 }
@@ -61,10 +61,14 @@ body {
 
 .navbar li.enabled {
     background-color: green;
+    border-style: solid;
+    border-color: #333;
 }
 
 .navbar li.disabled {
     background-color: red;
+    border-style: solid;
+    border-color: #333;
 }
 
 #TICId {
@@ -104,4 +108,13 @@ body {
     oveflow: hidden
 }
 
+.replot {
+    background-color: red; 
+    height: 50%;
+}
 
+a.replot {
+    color: #000;
+    text-align: center;
+    align-content: center;
+}

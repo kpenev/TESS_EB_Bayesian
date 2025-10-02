@@ -168,15 +168,15 @@ def get_ooe_variability(
             _logger.debug("Polynomial coefficients: %s", repr(poly_coef))
             ooe_model = Polynomial(poly_coef)(lightcurve["time"])
 
-        pyplot.plot(lightcurve["time"], lightcurve["flux"], ".k")
-        pyplot.plot(masked_time, masked_flux, ".r")
-        pyplot.plot(masked_time[ooe_mask], masked_flux[ooe_mask], ".g")
-        pyplot.plot(lightcurve["time"], ooe_model, ".b")
-        pyplot.title(
-            ("Spline" if spline_nodes.size > 3 else "Polynomial")
-            + " detrending"
-        )
-        pyplot.show()
+        # pyplot.plot(lightcurve["time"], lightcurve["flux"], ".k")
+        # pyplot.plot(masked_time, masked_flux, ".r")
+        # pyplot.plot(masked_time[ooe_mask], masked_flux[ooe_mask], ".g")
+        # pyplot.plot(lightcurve["time"], ooe_model, ".b")
+        # pyplot.title(
+        #    ("Spline" if spline_nodes.size > 3 else "Polynomial")
+        #    + " detrending"
+        # )
+        # pyplot.show()
 
         residuals = masked_flux - ooe_model[mask]
         new_ooe_mask = masked_flux > (

@@ -1,11 +1,10 @@
 """Define the URL patterns for the sampling TICId selector."""
 
-import os.path
 
 from django.urls import path
 
-from paths import render_dir
-from bui.select_ticids.views import TICIdSelectorView
+from .views import TICIdSelectorView, toggle_data, replotlc
+from .path_util import get_render_dir
 
 
 def get_review_urls(mode, table_name, states):
@@ -14,21 +13,15 @@ def get_review_urls(mode, table_name, states):
     if mode == "lightcurve":
         plot_dirs = (
             (
-                os.path.join(render_dir, table_name, "lightcurve"),
+                get_render_dir(table_name, 'lightcurve'),
                 "1 / 1 / 1 / 1",
             ),
         )
     elif mode == "sampling":
         plot_dirs = (
-            (os.path.join(render_dir, table_name, "best"), "1 / 1 / 2 / 2"),
-            (
-                os.path.join(render_dir, table_name, "convergence"),
-                "1 / 2 / 2 / 3",
-            ),
-            # (
-            #    os.path.join(render_dir, table_name, "starting"),
-            #    "2 / 2 / 3 / 3"
-            # ),
+            (get_render_dir(table_name, "best"), "1 / 1 / 2 / 2"),
+            (get_render_dir(table_name, "convergence"), "1 / 2 / 2 / 3"),
+            # (get_render_dir(table_name, "starting"), "2 / 2 / 3 / 3"),
         )
     return [
         path(
@@ -58,12 +51,34 @@ def get_review_urls(mode, table_name, states):
     ]
 
 
-urlpatterns = get_review_urls(
-    "lightcurve",
-    "sample_prsa",
-    ("bad", "full_model", "discard_ooe", "discard_sectors"),
-) + get_review_urls(
-    "sampling",
-    "sample_prsa",
-    ("selected", "running_ls6", "running_juno", "restart", "stop", "finished"),
+urlpatterns = (
+    get_review_urls(
+        "lightcurve",
+        "sample_prsa",
+        ("bad", "full_model", "discard_ooe", "discard_sectors"),
+    )
+    + get_review_urls(
+        "sampling",
+        "sample_prsa",
+        (
+            "selected",
+            "running_ls6",
+            "running_juno",
+            "restart",
+            "stop",
+            "finished",
+        ),
+    )
+    + [
+        path(
+            "toggle_data/<int:ticid>/<slug:selection>/<slug:review_table>",
+            toggle_data,
+            name="toggle_data",
+        ),
+        path(
+            "replotlc/<int:ticid>/<slug:review_table>",
+            replotlc,
+            name="replotlc",
+        ),
+    ]
 )

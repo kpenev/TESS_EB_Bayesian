@@ -312,29 +312,29 @@ class TESSTarget:
         if in_eclipse.all():
             return None
 
-        pyplot.subplot(231)
-        pyplot.plot(periods, periodogram["power"], ".k")
-        pyplot.subplot(232)
-        pyplot.plot(periods, periodogram["duration"], ".k")
-        pyplot.subplot(233)
-        pyplot.plot(periods, periodogram["depth"], ".k")
-        pyplot.subplot(212)
-        pyplot.plot(lightcurve["time"], lightcurve["flux"], ".k")
-        pyplot.suptitle(
-            f"BLS for {periods[0]} < P < {periods[-1]}, {durations[0]} < "
-            f"duration < {durations[-1]}"
-        )
-        pyplot.plot(
-            lightcurve["time"],
-            _evaluate_bls(
-                lightcurve["time"] - result["transit_time"],
-                result["period"][0],
-                result["duration"],
-                result["depth"][0],
-            ),
-            "-r",
-        )
-        pyplot.show()
+        # pyplot.subplot(231)
+        # pyplot.plot(periods, periodogram["power"], ".k")
+        # pyplot.subplot(232)
+        # pyplot.plot(periods, periodogram["duration"], ".k")
+        # pyplot.subplot(233)
+        # pyplot.plot(periods, periodogram["depth"], ".k")
+        # pyplot.subplot(212)
+        # pyplot.plot(lightcurve["time"], lightcurve["flux"], ".k")
+        # pyplot.suptitle(
+        #    f"BLS for {periods[0]} < P < {periods[-1]}, {durations[0]} < "
+        #    f"duration < {durations[-1]}"
+        # )
+        # pyplot.plot(
+        #    lightcurve["time"],
+        #    _evaluate_bls(
+        #        lightcurve["time"] - result["transit_time"],
+        #        result["period"][0],
+        #        result["duration"],
+        #        result["depth"][0],
+        #    ),
+        #    "-r",
+        # )
+        # pyplot.show()
 
         if in_eclipse[0] or in_eclipse[-1]:
             out_of_eclipse = numpy.argwhere(numpy.logical_not(in_eclipse))
