@@ -468,7 +468,7 @@ class TESSTarget:
             ),
             numpy.linspace(
                 min(periods[0] / 10, 0.02),
-                min(periods[0], periods[-1] / 2),
+                min(0.999 * periods[0], periods[-1] / 2),
                 100,
             ),
         )
