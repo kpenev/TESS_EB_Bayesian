@@ -6,96 +6,39 @@ from sqlalchemy import select, func, update
 
 from paths import slurm_fname, launcher_fname
 
-from command_line_util import identify_hpc, tic_per_node, create_parser
-from new_sampling import FileFromTemplate
+from command_line_util import (
+    identify_hpc,
+    tic_per_node,
+    create_parser,
+    add_slurm_config,
+)
+from new_sampling import get_file_makers
 
 # False positive
 # pylint: disable=import-error
 from bui.db_interface import Session
 
 # pylint: enable=import-error
-from bui.select_ticids.data_model import get_ticid_select_table
+from bui.select_ticids.data_model import JobGroup, get_ticid_select_table
+
 
 def parse_command_line():
     """Return the command line configuration."""
 
-
     this_hpc = identify_hpc()
+
+    with Session.begin() as db_session:
+        job_groups = db_session.scalars(
+            select(JobGroup.id).filter_by(hpc=this_hpc)
+        ).all()
 
     parser = create_parser()
     parser.add_argument(
-        "--job-group",
-        default=None,
-        help="If specified, any empty slots in the jobs of the given group are "
-        "filled.",
+        "job_group",
+        choices=job_groups,
+        help="Which job group should be continued.",
     )
-    parser.add_argument(
-        '--create-job-group',
-        action='store_true',
-        help="Create a new group of jobs."
-    )
-    parser.add_argument(
-        "--update-only",
-        action="store_true",
-        help="Pass this argument to update the job files after marking some "
-        "systems as not to be sampled any more (e.g. finished or bad model). "
-        "This will preserve the total number of jobs but bring in fresh TIC IDs"
-        " to fill gaps in the job files. Jobs for which no systems are updated "
-        "will be left untouched.",
-    )
-    parser.add_argument(
-        "--tic-range",
-        type=int,
-        nargs=2,
-        metavar=("START", "COUNT"),
-        default=None,
-        help="If specified, only COUNT tics, starting from START, will be "
-        "used.",
-    )
-    parser.add_argument(
-        "--hpc",
-        choices=tic_per_node.keys(),
-        default=this_hpc,
-        help="The HPC system to create the slurm scripts for.",
-    )
-    parser.add_argument(
-        "--partition",
-        default="normal",
-        help="The SLURM partition to set up the script for.",
-    )
-    parser.add_argument(
-        "--time-limit", default="48:00:00", help="The time limit for the jobs."
-    )
-    parser.add_argument(
-        "--num-parallel",
-        type=int,
-        default=16,
-        help="The number of processes to use for each TIC ID.",
-    )
-    parser.add_argument(
-        "--nodes-per-job",
-        type=int,
-        default=None,
-        metavar="NNODES",
-        help="Enable the use of launcher to allocate multiple nodes per job. "
-        "If not specified, a non-launcher slurm file is created.",
-    )
-    parser.add_argument(
-        "--launcher-njobs",
-        type=int,
-        default=None,
-        metavar="NJOBS",
-        help="If launcher is going to be used, this option specifies the number"
-        " of jobs to create.",
-    )
-    parser.add_argument(
-        "--launcher-commands-fname",
-        "--launcher-fname",
-        "--launcher-commands",
-        default=launcher_fname,
-        help="The template for the launcher commands file. Should include "
-        "``{hpc}`` and ``{jobid}`` substitutions.",
-    )
+    add_slurm_config(parser)
     parser.add_argument(
         "--continue-statuses",
         type=int,
@@ -106,11 +49,12 @@ def parse_command_line():
         "continued.",
     )
     parser.add_argument(
-        "--changed-likelihood-status",
+        "--changed-likelihood-statuses",
         type=int,
-        default=None,
-        help="The status assigned to the tics for which likelihood has changed "
-        "and need the ``--changed-likelihood`` argument.",
+        default=[],
+        nargs="+",
+        help="The status(es) assigned to the tics for which likelihood has "
+        "changed and need the ``--changed-likelihood`` argument.",
     )
     parser.add_argument(
         "--submit-jobs",
@@ -120,6 +64,81 @@ def parse_command_line():
         "jobs are automatically submitted.",
     )
     return parser.parse_args()
+
+
+def update_job(group_id, job_id, config, make_file, SelectTICTable, db_session):
+    """Replace TIC IDs from the given job which are no longer to be sampled."""
+
+    job_entries = db_session.scalars(
+        select(SelectTICTable).filter_by(job_group=group_id, job_id=job_id)
+    ).all()
+    cmd_substitutions = []
+
+    select_replacement = select(SelectTICTable).filter_by(
+        job_group=None, job_id=None
+    )
+    if config.continue_statuses is None:
+        select_replacement = select_replacement.where(
+            SelectTICTable.status > 0  # pylint: disable=no-member
+        )
+    else:
+        select_replacement = select_replacement.where(
+            SelectTICTable.status.in_(  # pylint: disable=no-member
+                (config.continue_statuses or [])
+                + config.changed_likelihood_statuses
+            )
+        )
+    select_replacement = select_replacement.limit(1)
+
+    for entry in job_entries:
+        substitution = {"job_id": job_id, "ticid": entry.id}
+        if entry.status in config.changed_likelihood_statuses:
+            substitution["extra_cmdline"] = "--changed-likelihood"
+        elif (config.continue_statuses is None and entry.status > 0) or (
+            entry.status in config.continue_statuses
+        ):
+            substitution["extra_cmdline"] = ""
+        else:
+            entry.job_id = None
+            entry.job_grop = None
+            replacement = db_session.scalar(select_replacement)
+            replacement.job_group = group_id
+            replacement.job_id = job_id
+            substitution["ticid"] = replacement.id
+            substitution["extra_cmdline"] = (
+                "--changed-likelihood"
+                if replacement.status in config.changed_likelihood_statuses
+                else ""
+            )
+
+        cmd_substitutions.append(substitution)
+    launcher_cmd = make_file["launcher_cmd"](cmd_substitutions)
+    return make_file["slurm"](
+        [{"job_id": job_id, "launcher_cmd": launcher_cmd}]
+    )
+
+
+def update_job_group(config):
+    """Update the job files for the given group as needed."""
+
+    SelectTICTable = get_ticid_select_table(config.tic_table, must_exist=True)
+    with Session.begin() as db_session:  # pylint: disable=no-member
+        job_group = db_session.scalar(
+            select(JobGroup).filter_by(id=config.job_group)
+        )
+        config.hpc = job_group.hpc
+        config.nodes_per_job = job_group.nodes_per_job
+        make_file = get_file_makers(job_group.id, config)
+
+        for job_id in range(job_group.num_jobs):
+            update_job(
+                job_group.id,
+                job_id,
+                config,
+                make_file,
+                SelectTICTable,
+                db_session,
+            )
 
 
 def get_ticids_to_add(
