@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
 
-"""Use templates to fully funcional make slurm files."""
+"""Use templates to make fully funcional slurm files."""
 
-from socket import gethostname
-from os import makedirs
-from os.path import dirname, exists
-
-from configargparse import ArgumentParser, DefaultsFormatter
 from sqlalchemy import select, func, update
 
 from paths import slurm_fname, launcher_fname
+
+from command_line_util import identify_hpc, tic_per_node, create_parser
+from new_sampling import FileFromTemplate
 
 # False positive
 # pylint: disable=import-error
@@ -18,31 +16,23 @@ from bui.db_interface import Session
 # pylint: enable=import-error
 from bui.select_ticids.data_model import get_ticid_select_table
 
-_tic_per_node = {"juno": 4, "ls6": 8, "ganymede": 1}
-
-
 def parse_command_line():
     """Return the command line configuration."""
 
-    host = gethostname()
-    this_hpc = None
-    for candidate in _tic_per_node:
-        if candidate in host.split("."):
-            this_hpc = candidate
 
-    parser = ArgumentParser(
-        description=__doc__,
-        default_config_files=["make_slurm.cfg"],
-        args_for_writing_out_config_file=["--generate-config-file"],
-        args_for_setting_config_path=["--config-file", "-c"],
-        formatter_class=DefaultsFormatter,
-        ignore_unknown_config_file_keys=False,
+    this_hpc = identify_hpc()
+
+    parser = create_parser()
+    parser.add_argument(
+        "--job-group",
+        default=None,
+        help="If specified, any empty slots in the jobs of the given group are "
+        "filled.",
     )
     parser.add_argument(
-        "tic_table",
-        help="Create slurm scripts for sampling the selected TIC identifiers in"
-        " the given table. If the number is not divisible by how many a given "
-        "HPC node can handle, the last job file will have fewer.",
+        '--create-job-group',
+        action='store_true',
+        help="Create a new group of jobs."
     )
     parser.add_argument(
         "--update-only",
@@ -64,7 +54,7 @@ def parse_command_line():
     )
     parser.add_argument(
         "--hpc",
-        choices=_tic_per_node.keys(),
+        choices=tic_per_node.keys(),
         default=this_hpc,
         help="The HPC system to create the slurm scripts for.",
     )
@@ -83,13 +73,20 @@ def parse_command_line():
         help="The number of processes to use for each TIC ID.",
     )
     parser.add_argument(
+        "--nodes-per-job",
+        type=int,
+        default=None,
+        metavar="NNODES",
+        help="Enable the use of launcher to allocate multiple nodes per job. "
+        "If not specified, a non-launcher slurm file is created.",
+    )
+    parser.add_argument(
         "--launcher-njobs",
         type=int,
         default=None,
         metavar="NJOBS",
         help="If launcher is going to be used, this option specifies the number"
-        " of jobs the list should be split into. If not specified, a "
-        "non-launcher slurm file is created.",
+        " of jobs to create.",
     )
     parser.add_argument(
         "--launcher-commands-fname",
@@ -115,10 +112,21 @@ def parse_command_line():
         help="The status assigned to the tics for which likelihood has changed "
         "and need the ``--changed-likelihood`` argument.",
     )
+    parser.add_argument(
+        "--submit-jobs",
+        default=False,
+        action="store_true",
+        help="If passed, and the script is running on a cluster, the generated "
+        "jobs are automatically submitted.",
+    )
     return parser.parse_args()
 
 
-def get_ticids_to_add(SelectTICIDs, acceptable_statuses=None, update_hpc=None):
+def get_ticids_to_add(
+    SelectTICIDs,  # pylint: disable=invalid-name
+    acceptable_statuses=None,
+    update_hpc=None,
+):
     """
     Return the list of TIC IDs to add for sampling.
     """
@@ -138,7 +146,7 @@ def get_ticids_to_add(SelectTICIDs, acceptable_statuses=None, update_hpc=None):
                         acceptable_statuses
                     )
                 )
-            print(f'query: {query}')
+            print(f"query: {query}")
             return [(None, list(db_session.execute(query).all()))]
         replace = db_session.execute(
             select(
@@ -180,52 +188,6 @@ def get_ticids_to_add(SelectTICIDs, acceptable_statuses=None, update_hpc=None):
         return result
 
 
-# Meant to function as callable
-# pylint: disable=too-few-public-methods
-class FileFromTemplate:
-    """Create a file from a template given substitutions."""
-
-    def __init__(self, fname, fixed_substitutions):
-        """Read the specified template get ready to make files."""
-
-        self._fname = fname
-        self._fixed_substitutions = fixed_substitutions
-        with open(
-            fname.format(**fixed_substitutions, jobid="template"),
-            "r",
-            encoding="utf-8",
-        ) as template_f:
-            self._template_text = template_f.read()
-
-    def __call__(self, var_substitution_list):
-        """Create a file adding the given substitutions to the fixed ones."""
-
-        substitutions = self._fixed_substitutions.copy()
-        substitutions.update(var_substitution_list[0])
-        fname = self._fname.format_map(substitutions)
-        dest_dir = dirname(fname)
-        if not exists(dest_dir):
-            makedirs(dest_dir)
-
-        with open(fname, "w", encoding="utf-8") as outf:
-            for var_substitutions in var_substitution_list:
-                substitutions = self._fixed_substitutions.copy()
-                substitutions.update(var_substitutions)
-                file_contents = self._template_text
-                for sub, value in substitutions.items():
-                    file_contents = file_contents.replace(
-                        f"@@{sub.upper()}@@", str(value)
-                    )
-                assert "@@" not in file_contents
-
-                assert fname == self._fname.format_map(substitutions)
-                outf.write(file_contents)
-        return fname
-
-
-# pylint: enable=too-few-public-methods
-
-
 def make_slurm(config):
     """Create the slurm scripts per the given configuration."""
 
@@ -249,14 +211,14 @@ def make_slurm(config):
         ),
         config.hpc if config.update_only else None,
     )
-    print(f'TIC IDs by job: {ticids_by_job}')
+    print(f"TIC IDs by job: {ticids_by_job}")
     for job_index, ticid_list in ticids_by_job:
         if job_index is None and config.tic_range:
             ticid_list = ticid_list[
                 config.tic_range[0] : config.tic_range[0] + config.tic_range[1]
             ]
         if config.launcher_njobs is None:
-            ntics_per_job = _tic_per_node[config.hpc]
+            ntics_per_job = tic_per_node[config.hpc]
         else:
             ntics_per_job = (
                 len(ticid_list) + config.launcher_njobs - 1
@@ -273,8 +235,8 @@ def make_slurm(config):
                 1
                 if config.launcher_njobs is None
                 else (
-                    (ntics_per_job + _tic_per_node[config.hpc] - 1)
-                    // _tic_per_node[config.hpc]
+                    (ntics_per_job + tic_per_node[config.hpc] - 1)
+                    // tic_per_node[config.hpc]
                 )
             ),
             "ntics_per_job": ntics_per_job,

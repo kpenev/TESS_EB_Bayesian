@@ -8,10 +8,10 @@ from sqlalchemy import Float, Integer, inspect
 
 # from sqlalchemy.ext.hybrid import hybrid_property
 
-from paths import cache_db as db_fname
+import paths
 
 db_engine = create_engine(
-    f"sqlite:///{db_fname}?timeout=100&uri=true",
+    f"sqlite:///{paths.cache_db}?timeout=100&uri=true",
     echo=True,
     pool_pre_ping=True,
     pool_recycle=3600,
