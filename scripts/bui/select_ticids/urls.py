@@ -55,7 +55,7 @@ urlpatterns = (
     get_review_urls(
         "lightcurve",
         "sample_prsa",
-        ("bad", "full_model", "discard_ooe", "discard_sectors"),
+        ("bad", "sample", "fix"),
     )
     + get_review_urls(
         "sampling",

@@ -167,7 +167,13 @@ class TICIdSelectorView(View):
                     if sort_state_index
                     else "pending"
                 )
-            ][0][0]
+            ]
+            if len(displayed_ticid) == 0:
+                redirect(
+                    f"{review_table}_lightcurve_jump", sort_state="pending"
+                )
+            else:
+                displayed_ticid = displayed_ticid[0][0]
         with CacheSession.begin() as cache:  # pylint: disable=no-member
             context["needs_replot"] = (
                 cache.scalar(

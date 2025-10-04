@@ -37,7 +37,7 @@ def get_bls_eclipse_mask(bls, lightcurve, which):
 
     if which == "masked":
         period = bls["masked_period"][0]
-        window = 0.75 * bls["masked_duration"] + min(
+        window = 0.75 * bls["masked_duration"] + max(
             bls["masked_period"][1], 0.5 * bls["masked_duration"]
         )
         time = lightcurve["time"] - bls["masked_transit_time"]
@@ -47,7 +47,7 @@ def get_bls_eclipse_mask(bls, lightcurve, which):
         )
     else:
         period = bls["period"][0] * (1 if which == "both" else 2)
-        window = 0.75 * bls["duration"] + min(
+        window = 0.75 * bls["duration"] + max(
             bls["period"][1], 0.5 * bls["duration"]
         )
         time = lightcurve["time"] - bls["transit_time"]
@@ -132,6 +132,7 @@ class TESSTarget:
     def _get_lc_format(self, sector, header, provenance):
         """Return the relevant column names and exposure time for gvien LC."""
 
+        print(f"Getting format of sector {sector} {provenance} LC")
         if provenance == "QLP":
             for existing_header, _ in self._lcs:
                 if existing_header["sector"] == sector:
@@ -158,6 +159,11 @@ class TESSTarget:
                 break
         # pylint: enable=consider-using-enumerate
 
+        print(
+            f"Sector {sector} {provenance} exposure = {header['INT_TIME']} * "
+            f" {header['NUM_FRM']} s"
+        )
+
         return ("PDCSAP_FLUX", "PDCSAP_FLUX_ERR"), header["INT_TIME"] * header[
             "NUM_FRM"
         ] / 86400
@@ -167,6 +173,7 @@ class TESSTarget:
 
         flux_columns, exptime = self._get_lc_format(sector, header, provenance)
         if exptime is None:
+            print(f"Sector {sector} {provenance} no exposure time defined!")
             assert flux_columns is None
             return None, None
         for column in flux_columns:
@@ -208,9 +215,17 @@ class TESSTarget:
         )
         formatted_lc["time"] = observed_lc["TIME"]
         scaling = numpy.nanmedian(observed_lc[flux_columns[0]])
+        print(f"Sector {sector} {provenance} LC scaling: {scaling!r}")
         formatted_lc["flux"] = observed_lc[flux_columns[0]] / scaling
         formatted_lc["flux_err"] = observed_lc[flux_columns[1]] / scaling
         formatted_lc["good"] = True
+        print(
+            f"Sector {sector} formatted {provenance} LC contains "
+            f"{numpy.isfinite(formatted_lc['flux']).sum()} finite flux points "
+            f"and {numpy.isfinite(formatted_lc['flux_err']).sum()} finite "
+            "flux error points."
+        )
+
         return formatted_lc, {
             "exptime": exptime,
             "sector": sector,
@@ -277,6 +292,7 @@ class TESSTarget:
     def _assemble_bls_result(model, periodogram, best_index):
         """Format the BLS result from the given periodogram and statistics."""
 
+        assert 0 <= best_index < periodogram["period"].size
         result = {
             param: getattr(periodogram, param)[best_index]
             for param in ["period", "duration", "transit_time"]
@@ -299,42 +315,53 @@ class TESSTarget:
     def _fit_bls(lightcurve, periods, durations):
         """Fit BLS to the given lightcurve avoiding partial eclipses."""
 
+        print(
+            f"Fitting BLS for {periods.size} periods:\n{periods} and "
+            f"Durations:\n{durations}"
+        )
+        assert numpy.isfinite(lightcurve["flux"]).all()
+        assert numpy.isfinite(lightcurve["time"]).all()
         model = BoxLeastSquares(
             lightcurve["time"],
             lightcurve["flux"],
             dy=lightcurve["flux_err"],
         )
         periodogram = model.power(periods, durations)
+        print(f"Periodogram: {periodogram}")
         result = TESSTarget._assemble_bls_result(
             model, periodogram, numpy.argmax(periodogram.power)
         )
+        print(f"BLS fit result: {result}")
         in_eclipse = get_bls_eclipse_mask(result, lightcurve, "both")
         if in_eclipse.all():
             return None
 
-        # pyplot.subplot(231)
-        # pyplot.plot(periods, periodogram["power"], ".k")
-        # pyplot.subplot(232)
-        # pyplot.plot(periods, periodogram["duration"], ".k")
-        # pyplot.subplot(233)
-        # pyplot.plot(periods, periodogram["depth"], ".k")
-        # pyplot.subplot(212)
-        # pyplot.plot(lightcurve["time"], lightcurve["flux"], ".k")
-        # pyplot.suptitle(
-        #    f"BLS for {periods[0]} < P < {periods[-1]}, {durations[0]} < "
-        #    f"duration < {durations[-1]}"
-        # )
-        # pyplot.plot(
-        #    lightcurve["time"],
-        #    _evaluate_bls(
-        #        lightcurve["time"] - result["transit_time"],
-        #        result["period"][0],
-        #        result["duration"],
-        #        result["depth"][0],
-        #    ),
-        #    "-r",
-        # )
-        # pyplot.show()
+        try:
+            pyplot.subplot(231)
+            pyplot.plot(periods, periodogram["power"], ".k")
+            pyplot.subplot(232)
+            pyplot.plot(periods, periodogram["duration"], ".k")
+            pyplot.subplot(233)
+            pyplot.plot(periods, periodogram["depth"], ".k")
+            pyplot.subplot(212)
+            pyplot.plot(lightcurve["time"], lightcurve["flux"], ".k")
+            pyplot.suptitle(
+                f"BLS for {periods[0]} < P < {periods[-1]}, {durations[0]} < "
+                f"duration < {durations[-1]}"
+            )
+            pyplot.plot(
+                lightcurve["time"],
+                _evaluate_bls(
+                    lightcurve["time"] - result["transit_time"],
+                    result["period"][0],
+                    result["duration"],
+                    result["depth"][0],
+                ),
+                "-r",
+            )
+            pyplot.show()
+        except:  # pylint: disable=bare-except
+            pass
 
         if in_eclipse[0] or in_eclipse[-1]:
             out_of_eclipse = numpy.argwhere(numpy.logical_not(in_eclipse))
@@ -472,6 +499,8 @@ class TESSTarget:
                 100,
             ),
         )
+        if result is None:
+            return None
 
         self._logger.debug(
             "Results:\n\t%s",
@@ -486,7 +515,7 @@ class TESSTarget:
                     1.0 / numpy.arange(1 / 2.0, 0.01, -0.1 / 30.0**2),
                     numpy.linspace(0.1, 1.0, 100),
                 )
-            if periodogram.duration[best_index] < 0.04:
+            if result["duration"] < 0.04:
                 return self._fit_bls(
                     lightcurve,
                     1.0 / numpy.arange(1 / 0.1, 0.01, -0.01 / 30.0**2),
@@ -695,6 +724,17 @@ class TESSTarget:
                     formatted_lc["time"].max(), self._time_span[1]
                 )
 
+                print(
+                    f"Adding header: {formatted_header!r} LC containing "
+                    + str(
+                        numpy.logical_and(
+                            numpy.isfinite(formatted_lc["flux"]),
+                            numpy.isfinite(formatted_lc["flux_err"]),
+                        ).sum()
+                    )
+                    + " finite points."
+                )
+
                 self._lcs.append((formatted_header, formatted_lc))
         self._lcs.sort(key=lambda x: x[0]["sector"])
 
@@ -703,6 +743,17 @@ class TESSTarget:
 
         combined_lc = None
         for _, formatted_lc in self.lcs:
+            print(
+                f"Combining with header: {_!r} LC containing "
+                + str(
+                    numpy.logical_and(
+                        numpy.isfinite(formatted_lc["flux"]),
+                        numpy.isfinite(formatted_lc["flux_err"]),
+                    ).sum()
+                )
+                + " finite points."
+            )
+
             finite_lc = numpy.copy(
                 formatted_lc[
                     numpy.logical_and(
@@ -711,7 +762,14 @@ class TESSTarget:
                     )
                 ]
             )
+            if not finite_lc.size:
+                continue
             med_flux = numpy.nanmedian(formatted_lc["flux"])
+            print(
+                f"For sector {_['sector']} LC contains {finite_lc.size} points "
+                f"and has median flux {med_flux}"
+            )
+
             if combined_lc is None:
                 combined_lc = finite_lc
                 combined_lc["flux"] /= med_flux
@@ -720,9 +778,12 @@ class TESSTarget:
                 combined_lc = numpy.concatenate([combined_lc, finite_lc])
                 # False positive
                 # pylint: disable=invalid-unary-operand-type
-                combined_lc[-formatted_lc.size :]["flux"] /= med_flux
-                combined_lc[-formatted_lc.size :]["flux_err"] /= med_flux
+                combined_lc[-finite_lc.size :]["flux"] /= med_flux
+                combined_lc[-finite_lc.size :]["flux_err"] /= med_flux
                 # pylint: enable=invalid-unary-operand-type
+
+            assert numpy.isfinite(combined_lc["flux"]).all()
+            assert numpy.isfinite(combined_lc["time"]).all()
 
         return combined_lc
 
