@@ -1,11 +1,39 @@
-ul.navbar  {
+body {
+    padding: 0;
+    margin: 0;
+}
+
+.navbar  {
   position: sticky; 
+  display: flex;
+  flex-direction: row;
   top: 0; 
-  list-style-type: none;
   margin: 0;
   padding: 0;
   overflow: hidden;
   background-color: #333;
+  height: calc(100px + 1rem);
+}
+
+.navbar div {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+}
+
+.navbar .excluded-data {
+    flex-direction: row;
+}
+
+.navbar input:not(.replot) {
+    width: 15em;
+    height: 100%;
+}
+
+.navbar ul {
+  list-style-type: none;
+  margin: 0;
+  padding: 0;
   height: 50px;
 }
 
@@ -31,6 +59,18 @@ ul.navbar  {
     background: green;
 }
 
+.navbar li.enabled {
+    background-color: green;
+    border-style: solid;
+    border-color: #333;
+}
+
+.navbar li.disabled {
+    background-color: red;
+    border-style: solid;
+    border-color: #333;
+}
+
 #TICId {
     float: right;
     text-align: center;
@@ -47,23 +87,34 @@ ul.navbar  {
 .img-parent {
     flex-grow: 1;
     display: grid;
-    height: calc(100vh - 50px - 1.2rem);
+    height: calc(100vh - 100px - 1.2rem);
     background-color: #f0f0f0;
     justify-content: start;
 }
 
 .img-area {
     overflow: scroll;
+    padding: 0;
+    margin: 0;
 }
 
 .ticid_lists {
     display: flex;
     flex-direction: column;
     width: 20em;
-    height: 90vh;
+    height: calc(100vh - 100px - 1.2rem);
     flex-grow: 0;
     position: relative;
     oveflow: hidden
 }
 
+.replot {
+    background-color: red; 
+    height: 50%;
+}
 
+a.replot {
+    color: #000;
+    text-align: center;
+    align-content: center;
+}

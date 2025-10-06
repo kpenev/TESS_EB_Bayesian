@@ -20,6 +20,7 @@ from binary import Binary
 from cache_interface import CacheSession, CachedSED, CachedBLS
 from sample_params import SampleParams
 from exclude_data import exclude_data
+from catalog_interface import get_eb_info
 
 
 class LogLikelihood(TESSTarget):
@@ -104,11 +105,13 @@ class LogLikelihood(TESSTarget):
                 bls = {
                     column: (
                         (
-                            getattr(cached_bls, column),
-                            getattr(cached_bls, column + "_uncertainty"),
+                            none_to_nan(getattr(cached_bls, column)),
+                            none_to_nan(
+                                getattr(cached_bls, column + "_uncertainty")
+                            ),
                         )
                         if (column + "_uncertainty" in bls_columns)
-                        else getattr(cached_bls, column)
+                        else none_to_nan(getattr(cached_bls, column))
                     )
                     for column in bls_columns
                     if not column.endswith("_uncertainty")
@@ -318,12 +321,14 @@ class LogLikelihood(TESSTarget):
         detrend_kwargs = {
             "full_output": save_detrending,
         }
+        cat_info = get_eb_info(self._tic_id)
 
-        if "OOE" in tic_exclude:
+        if "OOE" in tic_exclude or "BLSOOE" in tic_exclude:
             self.get_model = self.get_eclipse_model
             detrend_kwargs["get_trend"] = get_ooe_variability
             detrend_kwargs["spline_rejection"] = 5.0
             detrend_kwargs["eclipse_rejection"] = 2.0
+            detrend_kwargs["half_porb"] = cat_info["period"] / 2
         else:
             self.get_model = self.get_full_model
             detrend_kwargs["get_trend"] = get_moving_median
@@ -351,7 +356,7 @@ class LogLikelihood(TESSTarget):
                     )
                 self._lcs.append((header, detrend(lightcurve)))
             if self._best_fit_bls is None:
-                self._best_fit_bls = self.fit_bls()
+                self._best_fit_bls = self.fit_bls(cat_info=cat_info)
                 self._lcs = []
                 overwrite_cache = True
 
@@ -425,10 +430,8 @@ class LogLikelihood(TESSTarget):
             age_gyr=(-3, 1.1),
             meh=Binary.meh_range,
             per=(
-                self.bls_porb
-                - 10.0 * self._best_fit_bls["period"][1],
-                self.bls_porb
-                + 10.0 * self._best_fit_bls["period"][1],
+                self.bls_porb - 10.0 * self._best_fit_bls["period"][1],
+                self.bls_porb + 10.0 * self._best_fit_bls["period"][1],
             ),
             ecc=(0, self.max_ecc),
             w=(-360, 360),
@@ -470,16 +473,7 @@ class LogLikelihood(TESSTarget):
           * masked_harmonic_delta_log_likelihood < -5
         """
 
-        bls = self._best_fit_bls
-        return (
-            bls["masked_depth"][0] > 10.0 * bls["masked_depth"][1]
-            and bls["masked_harmonic_delta_log_likelihood"] < -10.0
-            and abs(bls["depth_even"][0] - bls["depth_odd"][0])
-            < max(
-                10.0 * (bls["depth_even"][1] + bls["depth_odd"][1]),
-                bls["masked_depth"][0],
-            )
-        )
+        return self.masked_bls_is_significant(self._best_fit_bls)
 
     @staticmethod
     def get_full_model(binary, header, lightcurve, lc_sys_err):
@@ -821,9 +815,7 @@ class LogLikelihood(TESSTarget):
         )
         return max(sys_err, 1e-10)
 
-    def calc_lc_log_likelihood(
-        self, binary, lc_sys_err, bls_eclipse_only=()
-    ):
+    def calc_lc_log_likelihood(self, binary, lc_sys_err, bls_eclipse_only=()):
         """
         Return log-likelihood of observing the TESS LCs for given binary.
 

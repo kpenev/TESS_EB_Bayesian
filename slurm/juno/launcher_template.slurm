@@ -5,7 +5,7 @@
 #SBATCH --time=48:00:00
 #SBATCH --mem=384000M #Maximum amount of memory likely to be needed
 #SBATCH --partition=@@PARTITION@@
-#SBATCH --job-name=TESS_EBs_@@JOBID@@
+#SBATCH --job-name=TESS_EBs_@@JOB_GROUP@@_@@JOB_NAME@@
 #SBATCH --output=/scratch/juno/kxp174430/output/TESS_EBs/render_output/slurm.out
 #SBATCH --mail-user=kxp174430@utdallas.edu
 #SBATCH --mail-type=all

@@ -1,14 +1,14 @@
 """The available views for the app allowing the selection of TIC IDs."""
 
 import sys
-from os import path
+from os import path, remove
 from base64 import b64encode
 
 sys.path.append(path.dirname(path.dirname(__file__)))
 
 # pylint: disable=wrong-import-position
-from sqlalchemy import select, update, func
-from django.shortcuts import render
+from sqlalchemy import select, update, delete, func
+from django.shortcuts import render, redirect
 from django.views import View
 from django.template.defaultfilters import slugify
 
@@ -17,9 +17,13 @@ from django.template.defaultfilters import slugify
 from db_interface import Session
 
 # pylint: enable=import-error
+from download_lcs import get_available_sectors
+from exclude_data import exclude_data
+from cache_interface import CacheSession, CachedBLS
 
-from paths import render_dir
 from .data_model import get_ticid_select_table
+from .path_util import get_render_dir
+from . import plots
 
 
 class TICIdSelectorView(View):
@@ -32,6 +36,44 @@ class TICIdSelectorView(View):
     states = ("selected", "discarded")
     grid = {"columns": "1fr", "rows": "1fr"}
 
+    def _get_sector_context(self, ticid):
+        """Return the sector info to add to context for given TIC ID."""
+
+        tic_excluded = exclude_data[ticid]
+        spoc_sectors = get_available_sectors(ticid, "SPOC")
+        qlp_sectors = set(get_available_sectors(ticid, "QLP")) - set(
+            spoc_sectors
+        )
+        enabled_prov = [
+            prov for prov in ["SPOC", "QLP"] if prov not in tic_excluded
+        ]
+        if "OOE" not in tic_excluded:
+            enabled_prov.append("OOE")
+
+        return {
+            "enabled_prov": enabled_prov,
+            "spoc_sectors": [
+                (
+                    "SPOC" in enabled_prov and sector not in tic_excluded,
+                    sector,
+                )
+                for sector in spoc_sectors
+            ],
+            "qlp_sectors": [
+                (
+                    "QLP" in enabled_prov and sector not in tic_excluded,
+                    sector,
+                )
+                for sector in qlp_sectors
+            ],
+            "ooe_flags": [
+                (
+                    "OOE" in enabled_prov and "BLSOOE" not in tic_excluded,
+                    "BLS",
+                ),
+            ],
+        }
+
     def get(
         self, request, sort_state="pending", displayed_ticid=None, decision=None
     ):
@@ -39,7 +81,6 @@ class TICIdSelectorView(View):
 
         state_slugs = ["pending"] + [slugify(state) for state in self.states]
         print(f"State slugs: {state_slugs!r}")
-        sort_state_index = state_slugs.index(sort_state)
         # That's the whole point
         # pylint: disable=no-member
         # This is actually a class
@@ -53,6 +94,14 @@ class TICIdSelectorView(View):
         # False positive
         # pylint: disable=no-member
         with Session.begin() as db_session:
+            if displayed_ticid is None:
+                sort_state_index = state_slugs.index(sort_state)
+            else:
+                sort_state_index = db_session.scalar(
+                    select(SelectTICIDs.status).filter_by(id=displayed_ticid)
+                )
+                sort_state = state_slugs[sort_state_index]
+
             if decision is not None:
                 assert displayed_ticid is not None
                 if decision == "skip":
@@ -71,6 +120,7 @@ class TICIdSelectorView(View):
                     .where(SelectTICIDs.id > displayed_ticid)
                     .order_by(SelectTICIDs.id)
                 )
+
             rendered_progress = dict(
                 db_session.execute(
                     select(
@@ -87,6 +137,7 @@ class TICIdSelectorView(View):
             if self.rendered_only:
                 select_expr = select_expr.filter_by(rendered=1)
             context = {
+                "review_table": self.tablename,
                 "sort_state": sort_state,
                 "by_state": [
                     (
@@ -103,6 +154,7 @@ class TICIdSelectorView(View):
                 ],
                 "decisions": self.states + ("skip",),
                 "review": self.reviewing,
+                "mode": self.reviewing.rsplit("_", 1)[1],
                 "grid": self.grid,
                 "images": [],
             }
@@ -115,12 +167,29 @@ class TICIdSelectorView(View):
                     if sort_state_index
                     else "pending"
                 )
-            ][0][0]
+            ]
+            if len(displayed_ticid) == 0:
+                redirect(
+                    f"{review_table}_lightcurve_jump", sort_state="pending"
+                )
+            else:
+                displayed_ticid = displayed_ticid[0][0]
+        with CacheSession.begin() as cache:  # pylint: disable=no-member
+            context["needs_replot"] = (
+                cache.scalar(
+                    select(
+                        func.count(  # pylint: disable=not-callable
+                            CachedBLS.tic_id
+                        )
+                    ).filter_by(tic_id=displayed_ticid)
+                )
+                == 0
+            )
         context["displayed_ticid"] = displayed_ticid
+        context.update(self._get_sector_context(displayed_ticid))
         for dirname, area in self.plot_dirs:
             plot_fname = path.join(dirname, f"tess{displayed_ticid}.png")
             if path.exists(plot_fname):
-                print(f"Loading {plot_fname}")
                 with open(plot_fname, "rb") as plotf:
                     context["images"].append(
                         (
@@ -136,3 +205,45 @@ class TICIdSelectorView(View):
         )
 
         return render(request, "select_ticids/index.html", context)
+
+
+def toggle_data(_, ticid, selection, review_table):
+    """Switch the state (enabled/disabled) for given data for given TIC ID."""
+
+    excluded = exclude_data[ticid]
+
+    if selection == "BLS":
+        selection = "BLSOOE"
+    elif selection not in ["OOE", "SPOC", "QLP"]:
+        selection = int(selection)
+
+    if selection in excluded:
+        excluded.remove(selection)
+    else:
+        excluded.add(selection)
+
+    with CacheSession.begin() as cache:  # pylint: disable=no-member
+        cache.execute(delete(CachedBLS).filter_by(tic_id=ticid))
+
+    return redirect(
+        f"{review_table}_lightcurve_jump",
+        sort_state="pending",
+        displayed_ticid=ticid,
+    )
+
+
+def replotlc(_, ticid, review_table):
+    """Re-generate the lightcurve plot for the given TIC ID."""
+
+    plot_fname = path.join(
+        get_render_dir(review_table, "lightcurve"), f"tess{ticid}.png"
+    )
+    if path.exists(plot_fname):
+        remove(plot_fname)
+
+    plots.lightcurve(ticid, plot_fname)
+    return redirect(
+        f"{review_table}_lightcurve_jump",
+        sort_state="pending",
+        displayed_ticid=ticid,
+    )

@@ -8,7 +8,13 @@ from glob import glob
 import logging
 from itertools import repeat
 
-from matplotlib import pyplot, colormaps, rcParams
+from matplotlib import pyplot, rcParams
+
+try:
+    from matplotlib import colormaps
+except ImportError:
+    # For older matplotlib versions (< 3.5)
+    from matplotlib import cm as colormaps
 import numpy
 from configargparse import ArgumentParser, DefaultsFormatter
 import pandas
@@ -26,7 +32,6 @@ from log_likelihood import LogLikelihood
 from paths import samples as samples_fname
 from binary import Binary
 from light_curve_plotter import LightCurvePlotter
-import detrending
 
 
 def parse_command_line():
@@ -107,8 +112,10 @@ def parse_command_line():
     )
     parser.add_argument(
         "--show-model-with-lc",
+        action="append",
         help="Specify a model or models to show with the lightcurve for "
         "``--plot-lightcurve``. Possible values are:\n"
+        "\t* bls Plot the best fit BLS model.\n"
         "\t* top<N:int>: Plot the N highest likelihood samples.\n"
         "\t* random<N:int>: Randomly select N samples.\n"
         "\t* <STEP:int>,<WALKER:int>: use the specified sample. Step indexs "
@@ -117,12 +124,6 @@ def parse_command_line():
         "specification can be ommitted to show all samples for a given step.\n"
         "If ``--sample-condition`` is specified, the top and random points are "
         "selected only among surviving samples.",
-    )
-    parser.add_argument(
-        "--remove-lc-trend",
-        choices=["moving_median", "ooe_variability", "none"],
-        default="moving_median",
-        help="Specify the detrending method to use for the lightcurve.",
     )
     parser.add_argument(
         "--show-lc-detrending",
@@ -376,7 +377,7 @@ def get_convergence_data(plot_data, config, num_walkers):
 def create_convergence_plot(plot_data, config, num_walkers):
     """Create a figure to gauge convergence of the chain per Raftery-Lewis."""
 
-    plot_data = get_chain_expressions(plot_data, config.chain_expression)
+    plot_data = get_chain_expressions(plot_data, config.chain_expression)[0]
 
     print("Creating convergence plot")
     quantile_height = 2 / 3 / len(config.diagnostic_quantiles)
@@ -505,37 +506,66 @@ def create_histogram_movie(plot_data, config, num_walkers):
             movie.add_frame()
 
 
-def get_param_binaries(sample_params, config, **extra_condition_vars):
+def get_param_binaries(sample_params):
     """Convert the given sample parameters to binaries for plotting."""
 
-    num_skipped = 0
     result = []
     for params in sample_params:
-        if (
-            config.show_model_with_lc.strip().startswith("-1")
-            and getattr(config, "sample_condition", None) is not None
-            and not Interpreter(
-                user_symbols=(
-                    dict(zip(SampleParams._fields, params))
-                    | extra_condition_vars
-                )
-            )(config.sample_condition)
-        ):
-            num_skipped += 1
-            continue
         try:
             result.append(Binary(from_mcmc=params))
         except ValueError:
             pass
-    return result, num_skipped
+    return result
+
+
+def get_walker_step_params(
+    raw_data, selection, config, log_likelihood, num_walkers
+):
+    """Return parameters for <STEP>,<WALKER> specifications."""
+
+    selection = tuple(int(s) for s in selection.split(","))
+    if selection[0] == -1:
+        initial_positions = load_initial_positions(
+            config.samples_fname, chain_name=config.chain_name
+        )
+        if len(selection) != 1:
+            initial_positions = [initial_positions[selection[1]]]
+        sample_params = [
+            log_likelihood.get_sample_params(sample)
+            for sample in initial_positions
+            if Interpreter(
+                user_symbols=(
+                    dict(zip(SampleParams._fields, sample))
+                    | {
+                        "bls_porb": log_likelihood.bls_porb,
+                        "bls_duration": log_likelihood.best_fit_bls["duration"],
+                    }
+                )
+            )(getattr(config, "sample_condition", "True"))
+        ]
+    else:
+        if len(selection) == 1:
+            if include is not None:
+                include = include[
+                    selection[0]
+                    * num_walkers : (selection[0] + 1)
+                    * num_walkers
+                ]
+                selection = raw_data[selection][include]
+            else:
+                selection = raw_data[selection]
+        else:
+            assert selection[0] >= 0
+            selection = [raw_data[selection]]
+
+        sample_params = [SampleParams(*sample) for sample in selection]
+
+    return sample_params
 
 
 def get_model_binaries(config, raw_data, log_prob, include, log_likelihood):
     """Return fully set-up binaries per ``--show-model-with-lc``."""
 
-    selection = config.show_model_with_lc
-    assert selection.strip().startswith("-1") or raw_data is not None
-    sample_params = None
     if raw_data is not None:
         ordered = numpy.flip(
             numpy.unique(log_prob.flatten(), return_index=True)[1]
@@ -551,55 +581,34 @@ def get_model_binaries(config, raw_data, log_prob, include, log_likelihood):
     else:
         top_params = None
 
-    config.highlight_first_model = top_params is not None
+    result = []
+    for selection in getattr(config, 'show_model_with_lc', []):
+        sample_params = None
+        assert selection.strip().startswith("-1") or raw_data is not None
 
-    if selection.startswith("top") or selection.startswith("random"):
-        if selection.startswith("top"):
-            selection = int(selection[3:])
-            selection = ordered[:selection]
-        else:
-            selection = int(selection[6:])
-            selection = numpy.random.choice(
-                numpy.nonzero(include)[0], selection
-            )
-        selection = raw_data[numpy.unravel_index(selection, log_prob.shape)]
-    else:
-        selection = tuple(int(s) for s in selection.split(","))
-        if selection[0] == -1:
-            initial_positions = load_initial_positions(
-                config.samples_fname, chain_name=config.chain_name
-            )
-            if len(selection) != 1:
-                initial_positions = [initial_positions[selection[1]]]
-            sample_params = [
-                log_likelihood.get_sample_params(sample)
-                for sample in initial_positions
-            ]
-            if top_params is not None:
-                sample_params = [top_params] + sample_params
-        elif len(selection) == 1:
-            if include is not None:
-                include = include[
-                    selection[0]
-                    * log_prob.shape[1] : (selection[0] + 1)
-                    * log_prob.shape[1]
-                ]
-                selection = raw_data[selection][include]
+        config.highlight_first_model = top_params is not None
+
+        if selection.startswith("top") or selection.startswith("random"):
+            if selection.startswith("top"):
+                selection = int(selection[3:])
+                selection = ordered[:selection]
             else:
-                selection = raw_data[selection]
-        else:
-            assert selection[0] >= 0
-            selection = [raw_data[selection]]
+                selection = int(selection[6:])
+                selection = numpy.random.choice(
+                    numpy.nonzero(include)[0], selection
+                )
+            selection = raw_data[numpy.unravel_index(selection, log_prob.shape)]
+            sample_params = [SampleParams(*sample) for sample in selection]
+        elif selection != "bls":
+            sample_params = get_walker_step_params(
+                raw_data, selection, config, log_likelihood, log_prob.shape[1]
+            )
+            if selection.startswith("-1,") and top_params is not None:
+                sample_params = [top_params] + sample_params
+        result.extend(get_param_binaries(sample_params))
 
-    if sample_params is None:
-        sample_params = [SampleParams(*sample) for sample in selection]
 
-    return get_param_binaries(
-        sample_params,
-        config,
-        bls_porb=log_likelihood.bls_porb,
-        bls_duration=log_likelihood.best_fit_bls["duration"],
-    )
+    return result
 
 
 def get_plot_data(config, backend, log_likelihood):
@@ -721,7 +730,7 @@ def main(config):
         ):
             if log_likelihood is None:
                 log_likelihood = LogLikelihood(config.tic_id)
-            binaries, num_skipped = get_model_binaries(
+            binaries = get_model_binaries(
                 config,
                 raw_data,
                 log_prob,
@@ -733,17 +742,12 @@ def main(config):
                 log_likelihood,
             )
         else:
-            num_skipped = 0
-            binaries = None
-        LightCurvePlotter(config)(
-            config.tic_id,
-            binaries,
-            title_info=(
-                f"{len(binaries)} shown, {num_skipped} skipped"
-                if num_skipped
-                else ""
-            ),
-        )
+            binaries = []
+
+        if "bls" in getattr(config, 'show_model_with_lc', []):
+            binaries.append("bls")
+
+        LightCurvePlotter(config)(config.tic_id, binaries)
 
     if getattr(config, "corner_plot_fname", False):
         print("Creating corner plot")

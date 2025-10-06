@@ -2,7 +2,13 @@
 
 import logging
 
-from matplotlib import pyplot, colormaps
+from matplotlib import pyplot
+
+try:
+    from matplotlib import colormaps
+except ImportError:
+    # For older matplotlib versions (< 3.5)
+    from matplotlib import cm as colormaps
 import numpy
 from astropy.timeseries import BoxLeastSquares
 
@@ -18,7 +24,7 @@ class FalsePositiveError(Exception):
 
 def get_bls_eclipse_mask(bls, lightcurve, which):
     """
-    Filter the lightcure per best fit BLS to leave only point per mask.
+    Filter the lightcure per best fit BLS to leave only points around eclipse.
 
     See `self.calc_lc_log_likelihood()` for what masks are supported.
     """
@@ -31,19 +37,65 @@ def get_bls_eclipse_mask(bls, lightcurve, which):
 
     if which == "masked":
         period = bls["masked_period"][0]
-        window = 1.5 * bls["masked_duration"] + 2.0 * bls["masked_period"][1]
+        window = 0.75 * bls["masked_duration"] + max(
+            bls["masked_period"][1], 0.5 * bls["masked_duration"]
+        )
         time = lightcurve["time"] - bls["masked_transit_time"]
+        print(
+            f"Based on masked duration {bls['masked_duration']} and masked "
+            f"P uncertainty {bls['masked_period'][1]}, window = {window}",
+        )
     else:
         period = bls["period"][0] * (1 if which == "both" else 2)
-        window = 1.5 * bls["duration"] + 2.0 * bls["period"][1]
+        window = 0.75 * bls["duration"] + max(
+            bls["period"][1], 0.5 * bls["duration"]
+        )
         time = lightcurve["time"] - bls["transit_time"]
         if which == "odd":
             time -= bls["period"][0]
+
+        print(
+            f"Based on duration {bls['duration']} and "
+            f"P uncertainty {bls['period'][1]}, window = {window}",
+        )
 
     window = min(0.3 * period, window)
 
     folded = time % period
     return numpy.minimum(folded, period - folded) < window
+
+
+def _evaluate_bls(times, period, duration, depth):
+    """Evaluate a BLS model with the given parameters at the given times."""
+
+    in_transit = (
+        numpy.abs((times + period / 2) % period - period / 2) < 0.5 * duration
+    )
+    model = numpy.ones(times.size)
+    model[in_transit] -= depth
+    return model
+
+
+def get_bls_model(lightcurve, log_likelihood):
+    """Return the best fit BLS model evaluated at the LC times."""
+
+    print("Adding BLS model per: %s", repr(log_likelihood.best_fit_bls))
+    model = _evaluate_bls(
+        lightcurve["time"] - log_likelihood.best_fit_bls["transit_time"],
+        log_likelihood.best_fit_bls["period"][0],
+        log_likelihood.best_fit_bls["duration"],
+        log_likelihood.best_fit_bls["depth"][0],
+    )
+    if log_likelihood.masked_is_significant():
+        model *= _evaluate_bls(
+            lightcurve["time"]
+            - log_likelihood.best_fit_bls["masked_transit_time"],
+            log_likelihood.best_fit_bls["masked_period"][0],
+            log_likelihood.best_fit_bls["masked_duration"],
+            log_likelihood.best_fit_bls["masked_depth"][0],
+        )
+
+    return model
 
 
 class TESSTarget:
@@ -80,6 +132,7 @@ class TESSTarget:
     def _get_lc_format(self, sector, header, provenance):
         """Return the relevant column names and exposure time for gvien LC."""
 
+        print(f"Getting format of sector {sector} {provenance} LC")
         if provenance == "QLP":
             for existing_header, _ in self._lcs:
                 if existing_header["sector"] == sector:
@@ -106,6 +159,11 @@ class TESSTarget:
                 break
         # pylint: enable=consider-using-enumerate
 
+        print(
+            f"Sector {sector} {provenance} exposure = {header['INT_TIME']} * "
+            f" {header['NUM_FRM']} s"
+        )
+
         return ("PDCSAP_FLUX", "PDCSAP_FLUX_ERR"), header["INT_TIME"] * header[
             "NUM_FRM"
         ] / 86400
@@ -115,6 +173,7 @@ class TESSTarget:
 
         flux_columns, exptime = self._get_lc_format(sector, header, provenance)
         if exptime is None:
+            print(f"Sector {sector} {provenance} no exposure time defined!")
             assert flux_columns is None
             return None, None
         for column in flux_columns:
@@ -156,9 +215,17 @@ class TESSTarget:
         )
         formatted_lc["time"] = observed_lc["TIME"]
         scaling = numpy.nanmedian(observed_lc[flux_columns[0]])
+        print(f"Sector {sector} {provenance} LC scaling: {scaling!r}")
         formatted_lc["flux"] = observed_lc[flux_columns[0]] / scaling
         formatted_lc["flux_err"] = observed_lc[flux_columns[1]] / scaling
         formatted_lc["good"] = True
+        print(
+            f"Sector {sector} formatted {provenance} LC contains "
+            f"{numpy.isfinite(formatted_lc['flux']).sum()} finite flux points "
+            f"and {numpy.isfinite(formatted_lc['flux_err']).sum()} finite "
+            "flux error points."
+        )
+
         return formatted_lc, {
             "exptime": exptime,
             "sector": sector,
@@ -178,7 +245,7 @@ class TESSTarget:
         return self._time_span
 
     def _get_bls_period_step(self):
-        """Return the period step for the BLS search."""
+        """Return the inverse-period step for the BLS search."""
 
         return 0.02 / (
             30.0
@@ -188,75 +255,9 @@ class TESSTarget:
             )
         )
 
-    def _get_best_fit_bls(self, lightcurve, periods=None):
-        """Return the best fit orbital period and time of primary transit."""
-
-        model = BoxLeastSquares(
-            lightcurve["time"],
-            lightcurve["flux"],
-            dy=lightcurve["flux_err"],
-        )
-
-        auto_period = periods is None
-        if auto_period:
-            periods = 1.0 / numpy.arange(
-                1.0 / 0.4,
-                1.0 / 30.0,
-                -self._get_bls_period_step(),
-            )
-        self._logger.debug("Computing BLS for perieds:\n%s", repr(periods))
-
-        periodogram = model.power(
-            periods,
-            numpy.linspace(
-                min(periods[0] / 10, 0.02), min(periods[0] / 2, 0.2), 100
-            ),
-        )
-        self._logger.debug(
-            "Periodogram periods:\n%s",
-            repr(periodogram.period),
-        )
-        best_index = numpy.argmax(periodogram.power)
-        stats = model.compute_stats(
-            **{
-                param: getattr(periodogram, param)[best_index]
-                for param in ["period", "duration", "transit_time"]
-            }
-        )
-        TESSTarget._logger.debug(
-            "Stats:\n\t%s",
-            "\n\t".join(
-                [f"{param}: {value}" for param, value in stats.items()]
-            ),
-        )
-        if auto_period:
-            if periodogram.duration[best_index] > 0.15:
-                candidate = model.power(
-                    1.0 / numpy.arange(1 / 2.0, 0.01, -0.1 / 30.0**2),
-                    numpy.linspace(0.1, 1.0, 100),
-                )
-                candidate_best_index = numpy.argmax(candidate.power)
-            elif periodogram.duration[best_index] < 0.04:
-                candidate = model.power(
-                    1.0 / numpy.arange(1 / 0.1, 0.01, -0.01 / 30.0**2),
-                    numpy.linspace(0.01, 0.05, 100),
-                )
-                candidate_best_index = numpy.argmax(candidate.power)
-            else:
-                candidate = None
-
-            if (
-                candidate is not None
-                # False positive
-                # pylint: disable=possibly-used-before-assignment
-                and candidate.depth[candidate_best_index]
-                > periodogram.depth[best_index]
-                # pylint: enable=possibly-used-before-assignment
-            ):
-                periodogram = candidate
-                best_index = candidate_best_index
-
-            assert best_index > 0
+    @staticmethod
+    def _estimate_period_uncertainty(periodogram, best_index):
+        """Estimate the period uncertainty per the given BLS periodogram."""
 
         index_range = [0, periodogram.power.size - 1]
         cutoff = 0.3 * periodogram.power[best_index]
@@ -282,21 +283,244 @@ class TESSTarget:
         assert index_range[0] <= best_index
         assert index_range[1] >= best_index
 
+        return max(
+            periodogram.period[best_index] - periodogram.period[index_range[0]],
+            periodogram.period[index_range[1]] - periodogram.period[best_index],
+        )
+
+    @staticmethod
+    def _assemble_bls_result(model, periodogram, best_index):
+        """Format the BLS result from the given periodogram and statistics."""
+
+        assert 0 <= best_index < periodogram["period"].size
         result = {
             param: getattr(periodogram, param)[best_index]
             for param in ["period", "duration", "transit_time"]
         }
         result.update(model.compute_stats(**result))
+        result["count_even"] = result["per_transit_count"][::2].sum()
+        result["count_odd"] = result["per_transit_count"][1::2].sum()
+
         del result["transit_times"]
         del result["per_transit_count"]
         del result["per_transit_log_likelihood"]
         result["period"] = (
             result["period"],
-            max(
-                result["period"] - periodogram.period[index_range[0]],
-                periodogram.period[index_range[1]] - result["period"],
+            TESSTarget._estimate_period_uncertainty(periodogram, best_index),
+        )
+
+        return result
+
+    @staticmethod
+    def _fit_bls(lightcurve, periods, durations):
+        """Fit BLS to the given lightcurve avoiding partial eclipses."""
+
+        print(
+            f"Fitting BLS for {periods.size} periods:\n{periods} and "
+            f"Durations:\n{durations}"
+        )
+        assert numpy.isfinite(lightcurve["flux"]).all()
+        assert numpy.isfinite(lightcurve["time"]).all()
+        model = BoxLeastSquares(
+            lightcurve["time"],
+            lightcurve["flux"],
+            dy=lightcurve["flux_err"],
+        )
+        periodogram = model.power(periods, durations)
+        print(f"Periodogram: {periodogram}")
+        result = TESSTarget._assemble_bls_result(
+            model, periodogram, numpy.argmax(periodogram.power)
+        )
+        print(f"BLS fit result: {result}")
+        in_eclipse = get_bls_eclipse_mask(result, lightcurve, "both")
+        if in_eclipse.all():
+            return None
+
+        try:
+            pyplot.subplot(231)
+            pyplot.plot(periods, periodogram["power"], ".k")
+            pyplot.subplot(232)
+            pyplot.plot(periods, periodogram["duration"], ".k")
+            pyplot.subplot(233)
+            pyplot.plot(periods, periodogram["depth"], ".k")
+            pyplot.subplot(212)
+            pyplot.plot(lightcurve["time"], lightcurve["flux"], ".k")
+            pyplot.suptitle(
+                f"BLS for {periods[0]} < P < {periods[-1]}, {durations[0]} < "
+                f"duration < {durations[-1]}"
+            )
+            pyplot.plot(
+                lightcurve["time"],
+                _evaluate_bls(
+                    lightcurve["time"] - result["transit_time"],
+                    result["period"][0],
+                    result["duration"],
+                    result["depth"][0],
+                ),
+                "-r",
+            )
+            pyplot.show()
+        except:  # pylint: disable=bare-except
+            pass
+
+        if in_eclipse[0] or in_eclipse[-1]:
+            out_of_eclipse = numpy.argwhere(numpy.logical_not(in_eclipse))
+            start = int(out_of_eclipse[0]) if in_eclipse[0] else 0
+            end = int(out_of_eclipse[-1]) if in_eclipse[-1] else in_eclipse.size
+            return TESSTarget._fit_bls(
+                lightcurve[start:end], periods, durations
+            )
+        return result
+
+    def _get_catalog_bls(self, lightcurve, cat_info):
+        """Compute the BLS periodograms for P and P/2."""
+
+        catalog_period = cat_info["period"]
+        self._logger.debug(
+            "Testing 2P, P, and P/2 for TIC %s, catalog P=%.4fd",
+            self._tic_id,
+            catalog_period,
+        )
+
+        bls_results = []
+        for p_factor in [0.5, 1, 2]:
+            if (
+                2 * catalog_period / p_factor
+                > lightcurve["time"][-1] - lightcurve["time"][0]
+            ):
+                bls_results.append(None)
+                continue
+            periods = 1.0 / numpy.arange(
+                p_factor / (0.95 * catalog_period),
+                p_factor / (1.05 * catalog_period),
+                -self._get_bls_period_step(),
+            )
+            durations = numpy.linspace(
+                min(periods[0] / 100, 0.02), periods[0] / 2, 100
+            )
+            self._logger.debug(
+                "Based on Porb = %s, BLS durations: %s",
+                repr(periods[0]),
+                repr(durations),
+            )
+            result = self._fit_bls(lightcurve, periods, durations)
+            if result is not None:
+                result.update(self._get_masked_best_fit_bls(lightcurve, result))
+
+            self._logger.debug(
+                "Best BLS for %s < P < %s periodogram with %d periods and "
+                "%s <= duration <= %s: %s",
+                periods[0],
+                periods[-1],
+                periods.size,
+                durations[0],
+                durations[-1],
+                repr(result),
+            )
+
+            bls_results.append(result)
+
+        assert (
+            bls_results[0] is None
+            or bls_results[0]["period"][0] > 10
+            or TESSTarget.masked_bls_is_significant(bls_results[0])
+        )
+        assert not TESSTarget.masked_bls_is_significant(bls_results[2])
+
+        if bls_results[1] is not None:
+            if not TESSTarget.masked_bls_is_significant(bls_results[1]):
+                self._logger.warning(
+                    "Catalog period (%s) appears to be half of the true orbital"
+                    " period: %s",
+                    repr(catalog_period),
+                    repr(bls_results[0]["period"]),
+                )
+                return bls_results[1]
+
+            if (
+                bls_results[1]["masked_depth"][0]
+                > 0.5 * bls_results[1]["depth"][0]
+                and abs(
+                    abs(
+                        bls_results[1]["transit_time"]
+                        - bls_results[1]["masked_transit_time"]
+                    )
+                    - bls_results[1]["period"][0] / 2
+                )
+                < bls_results[1]["period"][1]
+            ):
+                self._logger.debug(
+                    "Primary and secondary eclipses appear to have comparable "
+                    "depths (%s +- %s and %s +- %s) and are %s days apart, very"
+                    " close to P/2 (%s +- %s) apart. Using half-period BLS.",
+                    *bls_results[1]["depth"],
+                    *bls_results[1]["masked_depth"],
+                    (
+                        bls_results[1]["transit_time"]
+                        - bls_results[1]["masked_transit_time"]
+                    ),
+                    bls_results[1]["period"][0] / 2,
+                    bls_results[1]["period"][1] / 2,
+                )
+                return bls_results[2]
+
+            self._logger.debug("Using catalog period BLS")
+            return bls_results[1]
+
+        assert bls_results[2] is not None
+        return bls_results[2]
+
+    def _get_best_fit_bls(self, lightcurve, periods=None, cat_info=None):
+        """Return the best fit orbital period and time of primary transit."""
+
+        if cat_info:
+            assert periods is None
+            if cat_info is not None:
+                return self._get_catalog_bls(lightcurve, cat_info)
+
+        # Fallback to original logic for blind search or when catalog
+        # unavailable
+        self._logger.debug("Computing BLS for periods:\n%s", repr(periods))
+        result = self._fit_bls(
+            lightcurve,
+            (
+                1.0
+                / numpy.arange(
+                    1.0 / 0.4,
+                    1.0 / 30.0,
+                    -self._get_bls_period_step(),
+                )
+                if periods is None
+                else periods
+            ),
+            numpy.linspace(
+                min(periods[0] / 10, 0.02),
+                min(0.999 * periods[0], periods[-1] / 2),
+                100,
             ),
         )
+        if result is None:
+            return None
+
+        self._logger.debug(
+            "Results:\n\t%s",
+            "\n\t".join(
+                [f"{param}: {value}" for param, value in result.items()]
+            ),
+        )
+        if periods is None:
+            if result["duration"] > 0.15:
+                return self._fit_bls(
+                    lightcurve,
+                    1.0 / numpy.arange(1 / 2.0, 0.01, -0.1 / 30.0**2),
+                    numpy.linspace(0.1, 1.0, 100),
+                )
+            if result["duration"] < 0.04:
+                return self._fit_bls(
+                    lightcurve,
+                    1.0 / numpy.arange(1 / 0.1, 0.01, -0.01 / 30.0**2),
+                    numpy.linspace(0.01, 0.05, 100),
+                )
 
         return result
 
@@ -307,29 +531,37 @@ class TESSTarget:
             get_bls_eclipse_mask(bls_results, lightcurve, "both")
         )
         self._logger.debug("After masking, %d points remain", mask.sum())
-        num_periods = max(
-            10,
-            int(
-                (11.0 * bls_results["period"][1]) // self._get_bls_period_step()
-            ),
-        )
         period_range = (
             max(bls_results["period"][0] - 5 * bls_results["period"][1], 0.1),
             min(bls_results["period"][0] + 5 * bls_results["period"][1], 100),
         )
+        periods = 1.0 / numpy.arange(
+            1.0 / period_range[0],
+            1.0 / period_range[1],
+            -self._get_bls_period_step(),
+        )
+        if periods.size < 10:
+            periods = numpy.linspace(*period_range, 10)
         self._logger.debug(
             "Covering period range %s < Porb < %s with %d points",
             *period_range,
-            num_periods,
+            periods.size,
         )
 
         masked_bls_result = self._get_best_fit_bls(
             lightcurve[mask],
-            periods=numpy.linspace(
-                *period_range,
-                num_periods,
-            ),
+            periods=periods,
         )
+        if masked_bls_result is None:
+            return {
+                "masked_period": (numpy.nan, numpy.nan),
+                "masked_duration": numpy.nan,
+                "masked_transit_time": numpy.nan,
+                "masked_depth": (numpy.nan, numpy.nan),
+                "masked_depth_even": (numpy.nan, numpy.nan),
+                "masked_depth_odd": (numpy.nan, numpy.nan),
+                "masked_harmonic_delta_log_likelihood": numpy.nan,
+            }
         return {
             f"masked_{param}": value
             for param, value in masked_bls_result.items()
@@ -492,6 +724,17 @@ class TESSTarget:
                     formatted_lc["time"].max(), self._time_span[1]
                 )
 
+                print(
+                    f"Adding header: {formatted_header!r} LC containing "
+                    + str(
+                        numpy.logical_and(
+                            numpy.isfinite(formatted_lc["flux"]),
+                            numpy.isfinite(formatted_lc["flux_err"]),
+                        ).sum()
+                    )
+                    + " finite points."
+                )
+
                 self._lcs.append((formatted_header, formatted_lc))
         self._lcs.sort(key=lambda x: x[0]["sector"])
 
@@ -500,6 +743,17 @@ class TESSTarget:
 
         combined_lc = None
         for _, formatted_lc in self.lcs:
+            print(
+                f"Combining with header: {_!r} LC containing "
+                + str(
+                    numpy.logical_and(
+                        numpy.isfinite(formatted_lc["flux"]),
+                        numpy.isfinite(formatted_lc["flux_err"]),
+                    ).sum()
+                )
+                + " finite points."
+            )
+
             finite_lc = numpy.copy(
                 formatted_lc[
                     numpy.logical_and(
@@ -508,7 +762,14 @@ class TESSTarget:
                     )
                 ]
             )
+            if not finite_lc.size:
+                continue
             med_flux = numpy.nanmedian(formatted_lc["flux"])
+            print(
+                f"For sector {_['sector']} LC contains {finite_lc.size} points "
+                f"and has median flux {med_flux}"
+            )
+
             if combined_lc is None:
                 combined_lc = finite_lc
                 combined_lc["flux"] /= med_flux
@@ -517,19 +778,24 @@ class TESSTarget:
                 combined_lc = numpy.concatenate([combined_lc, finite_lc])
                 # False positive
                 # pylint: disable=invalid-unary-operand-type
-                combined_lc[-formatted_lc.size :]["flux"] /= med_flux
-                combined_lc[-formatted_lc.size :]["flux_err"] /= med_flux
+                combined_lc[-finite_lc.size :]["flux"] /= med_flux
+                combined_lc[-finite_lc.size :]["flux_err"] /= med_flux
                 # pylint: enable=invalid-unary-operand-type
+
+            assert numpy.isfinite(combined_lc["flux"]).all()
+            assert numpy.isfinite(combined_lc["time"]).all()
+
         return combined_lc
 
-    def fit_bls(self):
+    def fit_bls(self, cat_info=None):
         """Fit BLS models to the given lightcurve."""
 
         combined_lc = self.get_combined_lc()
-        best_fit_bls = self._get_best_fit_bls(combined_lc)
-        best_fit_bls.update(
-            self._get_masked_best_fit_bls(combined_lc, best_fit_bls)
-        )
+        best_fit_bls = self._get_best_fit_bls(combined_lc, cat_info=cat_info)
+        if cat_info is None:
+            best_fit_bls.update(
+                self._get_masked_best_fit_bls(combined_lc, best_fit_bls)
+            )
 
         self._logger.info(
             "Combined LC has %s usable points, BLS results:\n\t%s",
@@ -539,6 +805,36 @@ class TESSTarget:
             ),
         )
         return best_fit_bls
+
+    @staticmethod
+    def masked_bls_is_significant(bls):
+        """
+        Return True iff the masked BLS fit appears to fit real eclipses.
+
+        To be marked as significant all of the following must be satisfied:
+
+          * maked period should be close to unmasked period (within 5 unmasked
+            uncertanties)
+
+          * depth should exceed its uncertanity by at least a factor of 5
+
+          * masked_harmonic_delta_log_likelihood < -5
+        """
+
+        # bls = self._best_fit_bls
+        return (
+            bls["masked_depth"][0] > 10.0 * bls["masked_depth"][1]
+            and bls["masked_harmonic_delta_log_likelihood"] < -10.0
+            and (
+                min(bls["count_odd"], bls["count_even"])
+                < 0.01 * max(bls["count_odd"], bls["count_even"])
+                or abs(bls["depth_even"][0] - bls["depth_odd"][0])
+                < max(
+                    10.0 * (bls["depth_even"][1] + bls["depth_odd"][1]),
+                    bls["masked_depth"][0],
+                )
+            )
+        )
 
 
 if __name__ == "__main__":

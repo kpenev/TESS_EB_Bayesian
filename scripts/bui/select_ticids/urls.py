@@ -1,24 +1,35 @@
 """Define the URL patterns for the sampling TICId selector."""
 
+
 from django.urls import path
 
-from bui.select_ticids.views import TICIdSelectorView
+from .views import TICIdSelectorView, toggle_data, replotlc
+from .path_util import get_render_dir
 
 
-def get_review_urls(table_name, states):
+def get_review_urls(mode, table_name, states):
     """Return a list of URL patterns."""
 
+    if mode == "lightcurve":
+        plot_dirs = (
+            (
+                get_render_dir(table_name, 'lightcurve'),
+                "1 / 1 / 1 / 1",
+            ),
+        )
+    elif mode == "sampling":
+        plot_dirs = (
+            (get_render_dir(table_name, "best"), "1 / 1 / 2 / 2"),
+            (get_render_dir(table_name, "convergence"), "1 / 2 / 2 / 3"),
+            # (get_render_dir(table_name, "starting"), "2 / 2 / 3 / 3"),
+        )
     return [
         path(
-            f"{table_name}/{urltail}",
+            f"{table_name}/{mode}/{urltail}",
             TICIdSelectorView.as_view(
-                reviewing=table_name,
+                reviewing=f"{table_name}_{mode}",
                 tablename=table_name,
-                plot_dirs=(
-                    ("best", "1 / 1 / 2 / 2"),
-                    ("convergence", "1 / 2 / 2 / 3"),
-                    # ("starting", "2 / 2 / 3 / 3"),
-                ),
+                plot_dirs=plot_dirs,
                 rendered_only=False,
                 states=states,
                 grid={"columns": "1fr 1fr", "rows": "1fr"},
@@ -27,33 +38,47 @@ def get_review_urls(table_name, states):
         )
         for urltail, urlname in [
             ("", ""),
-            ("<slug:sort_state>/", f"{table_name}_index"),
-            ("<slug:sort_state>/<int:displayed_ticid>/", f"{table_name}_jump"),
+            ("<slug:sort_state>/", f"{table_name}_{mode}_index"),
+            (
+                "<slug:sort_state>/<int:displayed_ticid>/",
+                f"{table_name}_{mode}_jump",
+            ),
             (
                 "<slug:sort_state>/<int:displayed_ticid>/<slug:decision>/",
-                f"{table_name}_decision",
+                f"{table_name}_{mode}_decision",
             ),
         ]
     ]
 
 
-urlpatterns = get_review_urls(
-    "sampling",
-    (
-        "finished",
-        "continue ls6",
-        "continue juno",
-        "restart juno",
-        "changed likelihood",
-        "unsuitable",
-    ),
-) + get_review_urls(
-    "sample_prsa",
-    (
-        "finished",
-        "continue",
-        "restart",
-        "changed likelihood",
-        "unsuitable",
-    ),
+urlpatterns = (
+    get_review_urls(
+        "lightcurve",
+        "sample_prsa",
+        ("bad", "sample", "fix"),
+    )
+    + get_review_urls(
+        "sampling",
+        "sample_prsa",
+        (
+            "selected",
+            "running_ls6",
+            "running_juno",
+            "restart",
+            "stop",
+            "finished",
+        ),
+    )
+    + [
+        path(
+            "toggle_data/<int:ticid>/<slug:selection>/<slug:review_table>",
+            toggle_data,
+            name="toggle_data",
+        ),
+        path(
+            "replotlc/<int:ticid>/<slug:review_table>",
+            replotlc,
+            name="replotlc",
+        ),
+    ]
 )

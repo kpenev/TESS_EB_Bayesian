@@ -9,14 +9,16 @@ progress::-webkit-progress-bar {
 #progress-with-label span {
     position: absolute;
     display: inline-block;
-    color: #f00;
+    color: #fff;
     text-align: center;
     white-space:nowrap!important;
+    width: 100%;
 }
 
 #progress-with-label {
     display: flex;
     position: sticky;
+    flex-direction: row;
     top: 50px;
     width: 15.25rem;
     min-width: 100%;

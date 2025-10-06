@@ -1,8 +1,14 @@
 """Defines which data to exclude for TICs with problematic sectors."""
 
+from functools import partialmethod
+
+from sqlalchemy import select, delete
+
+from cache_interface import ExcludeDataTable, CacheSession
+
 # TODO: for 260161144 get independent constraint from remaining sectors
 
-exclude_data = {
+_manual_exclude_data = {
     91961: ["QLP"],
     2353789: ["QLP"],
     3815360: ["OOE"],
@@ -14,12 +20,18 @@ exclude_data = {
     8624617: [78, 79],
     9054370: ["OOE"],
     9381557: ["OOE"],
+    9433212: ["OOE"],
     11704852: [15],
     12029932: ["OOE"],
+    13092260: ["OOE"],
+    13037534: ["OOE"],
+    13974582: ["OOE"],
+    16479253: ["BLSOOE"],
     16728252: ["OOE"],
     16805617: ["OOE"],
     17451194: [15],
     22146154: ["QLP"],
+    23555025: ["OOE"],
     24004619: ["OOE"],
     24133365: [12],
     24433067: [6, 32, "OOE"],
@@ -61,7 +73,7 @@ exclude_data = {
     63074282: [15],
     63315565: ["OOE"],
     63579446: ["OOE"],
-    63972440: ["56"],
+    63972440: [56],
     64904640: ["QLP"],
     65628544: ["OOE"],
     66355834: ["OOE"],
@@ -243,3 +255,114 @@ exclude_data = {
     292013448: ["OOE"],
     291466214: ["OOE"],
 }
+
+
+class TICExcluded(set):
+    """Record changes to the set of excluded data in the database."""
+
+    _exclude_names = {0: "BLSOOE", -1: "OOE", -2: "QLP", -3: "SPOC"}
+    _exclude_flags = {name: flag for flag, name in _exclude_names.items()}
+
+    def _update_db(self):
+        """Make sure the database matches the given exclusion names."""
+
+        in_db = exclude_data[self.tic_id]
+        with CacheSession.begin() as cache:  # pylint: disable=no-member
+            for drop in in_db - self:
+                cache.execute(
+                    delete(ExcludeDataTable).filter_by(
+                        tic_id=self.tic_id,
+                        exclude=self._exclude_flags.get(drop, drop),
+                    )
+                )
+
+            for add in self - in_db:
+                cache.add(
+                    ExcludeDataTable(
+                        tic_id=self.tic_id,
+                        exclude=self._exclude_flags.get(add, add),
+                    )
+                )
+
+    def __init__(self, tic_id, exclude_flags):
+        """Remember TIC ID associated with exclusions."""
+
+        self.tic_id = tic_id
+        super().__init__(
+            self._exclude_names[exclude] if exclude <= 0 else exclude
+            for exclude in exclude_flags
+        )
+
+    def update_exclusions(self, method_name, *args, **kwargs):
+        """Apply a set method and record the result in the database."""
+
+        print(
+            f"Applying {method_name} with self: {self!r}, args: {args!r}, "
+            f"and kwargs: {kwargs!r}"
+        )
+        result = getattr(super(), method_name)(*args, **kwargs)
+        self._update_db()
+        return result
+
+    __iand__ = partialmethod(update_exclusions, "__iand__")
+    __ior__ = partialmethod(update_exclusions, "__ior__")
+    __isub__ = partialmethod(update_exclusions, "__isub_")
+    __ixor__ = partialmethod(update_exclusions, "__ixor__")
+    __rand__ = partialmethod(update_exclusions, "__rand__")
+    __ror__ = partialmethod(update_exclusions, "__ror__")
+    __rsub__ = partialmethod(update_exclusions, "__rsub__")
+    __rxor__ = partialmethod(update_exclusions, "__rxor__")
+    add = partialmethod(update_exclusions, "add")
+    clear = partialmethod(update_exclusions, "clear")
+    difference_update = partialmethod(update_exclusions, "difference_update")
+    discard = partialmethod(update_exclusions, "discard")
+    intersection_update = partialmethod(
+        update_exclusions, "intersection_update"
+    )
+    pop = partialmethod(update_exclusions, "pop")
+    remove = partialmethod(update_exclusions, "remove")
+    symmetric_difference_update = partialmethod(
+        update_exclusions, "symmetric_difference_update"
+    )
+    update = partialmethod(update_exclusions, "update")
+
+
+class ExcludeData:  # pylint: disable=too-few-public-methods
+    """Mapping from TIC ID to what to exclude from modeling."""
+
+    def __getitem__(self, tic_id):
+        """Query the exclusions for the given TIC ID."""
+
+        with CacheSession.begin() as cache:  # pylint: disable=no-member
+            return TICExcluded(
+                tic_id,
+                cache.scalars(
+                    select(ExcludeDataTable.exclude).filter_by(tic_id=tic_id)
+                ).all(),
+            )
+
+    def get(self, tic_id, default):
+        """Get the item or default if it does not exist."""
+
+        with CacheSession.begin() as cache:  # pylint: disable=no-member
+            exclude_flags = cache.scalars(
+                select(ExcludeDataTable.exclude).filter_by(tic_id=tic_id)
+            ).all()
+            if not exclude_flags:
+                return default
+            return TICExcluded(tic_id, exclude_flags)
+
+
+exclude_data = ExcludeData()
+
+
+def add_manual_exclusions():
+    """Add the menual exclusions to the database."""
+
+    for tic_id, exclude_list in _manual_exclude_data.items():
+        already_excluded = exclude_data[tic_id]
+        already_excluded |= set(exclude_list)
+
+
+if __name__ == "__main__":
+    add_manual_exclusions()

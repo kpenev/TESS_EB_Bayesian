@@ -14,19 +14,38 @@
         <title>Select TIC IDs</title>
     </head>
     <body>
-        <ul class="navbar">
-            {% for choice in decisions %}
-            <li><a href="{% url review|add:'_decision' sort_state=sort_state decision=choice|slugify displayed_ticid=displayed_ticid %}">{{ choice|title }}</a></li>
-            {% endfor %}
-            <input id="TICId" type="text" value="{{ displayed_ticid }}">
-        </ul>
-        <div id="progress-with-label">
-            <span style="width: {% widthratio render_progress.0 render_progress.1 100 %}%;">
-                Render progress: {{ render_progress.0 }}/{{ render_progress.1 }}
-            </span>
-            <div class="progress-success" 
-                 style="width: {% widthratio render_progress.0 render_progress.1 100 %}%">
+        <div class="navbar">
+            <div>
+                <ul>
+                    {% for choice in decisions %}
+                    <li><a href="{% url review|add:'_decision' sort_state=sort_state decision=choice|slugify displayed_ticid=displayed_ticid %}">{{ choice|title }}</a></li>
+                    {% endfor %}
+                </ul>
+                <div class="excluded-data">
+                    {% include "select_ticids/sectors.html" with provenance="OOE" sector_list=ooe_flags%}
+                    {% include "select_ticids/sectors.html" with provenance="SPOC" sector_list=spoc_sectors %}
+                    {% include "select_ticids/sectors.html" with provenance="QLP" sector_list=qlp_sectors %}
+                </div>
+                <div id="progress-with-label">
+                    <span style="width: {% widthratio render_progress.0 render_progress.1 100 %}%;">
+                        Render progress: {{ render_progress.0 }}/{{ render_progress.1 }}
+                    </span>
+                    <div class="progress-success" 
+                         style="width: {% widthratio render_progress.0 render_progress.1 100 %}%">
+                    </div>
+                </div>
             </div>
+            {% if needs_replot %}
+            <div style="width: min-content">
+                <a href="{% url 'replotlc' ticid=displayed_ticid review_table=review_table %}" 
+                    class="replot">
+                    Data selection changed: click to replot
+                </a>
+                <input class="replot" id="TICId" type="text" value="{{ displayed_ticid }}">
+            </div>
+            {% else %}
+            <input id="TICId" type="text" value="{{ displayed_ticid }}">
+            {% endif %}
         </div>
         <div class="main">
             <div class="img-parent" style="grid-template-columns: {{ grid.columns }}; grid-template-rows: {{ grid.rows }};">

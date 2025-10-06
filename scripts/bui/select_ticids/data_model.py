@@ -3,19 +3,66 @@
 import re
 from glob import glob
 from os import path
+from datetime import datetime
 
-from sqlalchemy import Table, Column, Integer, String, TIMESTAMP, text, inspect
-from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy import (
+    Table,
+    Column,
+    Integer,
+    TIMESTAMP,
+    text,
+    inspect,
+    ForeignKey,
+    func,
+)
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from bui.db_interface import db_engine, Session
 
 
-# pylint: disable=too-few-public-methods
-class SelectTICIDBase(DeclarativeBase):
+class SelectTICIDBase(  # pylint: disable=too-few-public-methods
+    DeclarativeBase
+):
     """Base class for tables that track TIC ID selection."""
 
 
-# pylint: enable=too-few-public-methods
+class JobGroup(SelectTICIDBase):  # pylint: disable=too-few-public-methods
+    """The group of jobs used to sample a collection of TICs."""
+
+    __tablename__ = "job_groups"
+
+    id: Mapped[int] = mapped_column(
+        primary_key=True,
+        doc="Unique identifier for the job collection",
+    )
+    select_tic_table: Mapped[str] = mapped_column(
+        nullable=False,
+        doc="The table of TICs this job group is sampling from.",
+    )
+    hpc: Mapped[str] = mapped_column(
+        nullable=False,
+        doc="The HPC system this job collection is/was running on.",
+    )
+    nodes_per_job: Mapped[int] = mapped_column(
+        doc="The number of nodes each job of this collection uses."
+    )
+    num_jobs: Mapped[int] = mapped_column(
+        nullable=False, doc="The number of jobs in the job collection."
+    )
+    description: Mapped[str | None] = mapped_column(
+        doc="User supplied description of the job group."
+    )
+    timestamp: Mapped[datetime] = mapped_column(
+        TIMESTAMP,
+        nullable=False,
+        default=func.now(),  # pylint: disable=not-callable
+        onupdate=func.now(),  # pylint: disable=not-callable
+        doc="When record was last changed",
+    )
+
+
+if not inspect(db_engine).has_table(JobGroup.__tablename__):
+    JobGroup.__table__.create(db_engine)
 
 
 def get_ticids(plot_dir):
@@ -28,7 +75,9 @@ def get_ticids(plot_dir):
             yield int(parsed["tic"]), plot_fname
 
 
-def get_ticid_select_table(tablename, plot_dirs=(), require_all=False):
+def get_ticid_select_table(
+    tablename, plot_dirs=(), require_all=False, must_exist=False
+):
     """Create a table for tracking TIC ID selection with given name."""
 
     # pylint: disable=too-few-public-methods
@@ -48,7 +97,11 @@ def get_ticid_select_table(tablename, plot_dirs=(), require_all=False):
             ),
             Column("rendered", Integer, doc="1 - rendered, 0 - not"),
             Column(
-                "hpc", String, doc="The HPC system this TIC is assigned to."
+                "job_group",
+                Integer,
+                ForeignKey(
+                    "job_groups.id", onupdate="CASCADE", ondelete="RESTRICT"
+                ),
             ),
             Column(
                 "job_id",
@@ -69,6 +122,9 @@ def get_ticid_select_table(tablename, plot_dirs=(), require_all=False):
     # pylint: enable=too-few-public-methods
 
     if not inspect(db_engine).has_table(tablename):
+        assert (
+            not must_exist
+        ), f"Table {tablename} must already exist, not creating!"
         assert plot_dirs is not None
         Result.__table__.create(db_engine)
         plot_tic_ids = None
