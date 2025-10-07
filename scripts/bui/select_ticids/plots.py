@@ -279,6 +279,8 @@ def render_all_plots(config):
                 config.limit_to_statuses
             )
         )
+    if config.skip_rendered:
+        selection = selection.filter_by(rendered=0)
 
     with Session.begin() as db_session:  # pylint: disable=no-member
         # pylint: enable=no-member
@@ -356,6 +358,12 @@ def parse_command_line():
         nargs="+",
         default=False,
         help="Only render objects that have one of the specified statuses.",
+    )
+    parser.add_argument(
+        "--skip-rendered",
+        action="store_true",
+        help="If passed, only attempts to plot TICs which are not flagged as "
+        "rendered.",
     )
     parser.add_argument(
         "--plot-dir",
