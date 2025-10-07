@@ -11,6 +11,7 @@ from configargparse import ArgumentParser, DefaultsFormatter
 from emcee import EnsembleSampler, walkers_independent
 import h5py
 import numpy
+import git.repo
 
 from general_purpose_python_modules.multiprocessing_util import (
     setup_process,
@@ -25,6 +26,7 @@ from paths import results_dir, samples as samples_fname_pattern
 from find_starting_positions import FindStartingPositions
 
 _logger = logging.getLogger(__name__)
+_git_hash = git.repo.Repo(path.dirname(path.dirname(__file__))).commit()
 
 default_logging_format = (
     "%(levelname)s %(asctime)s %(name)s: %(message)s | "
@@ -205,6 +207,12 @@ def parse_command_line():
         help="If passed, the specified cache will be re-computed and "
         "overwritten.",
     )
+    parser.add_argument(
+        "--ignore-git-hash",
+        action="store_true",
+        help="If specified the current git hash is not checked against what is "
+        "in the file.",
+    )
 
     return parser.parse_args()
 
@@ -221,6 +229,11 @@ def get_backend(samples_fname, config):
 
     backend = HDFBackend(samples_fname)
     if path.exists(samples_fname):
+        with h5py.File(samples_fname, "r") as samples_file:
+            assert (
+                config.ignore_git_hash
+                or samples_file.attrs["GitHash"] == _git_hash
+            ), f"Git commit hash changed since {samples_fname!r} was created"
         _logger.info(
             "Existing chain with %d samples found for TIC ID: %d. Extending.",
             backend.iteration,
@@ -236,6 +249,7 @@ def get_backend(samples_fname, config):
         )
         with h5py.File(samples_fname, "a") as samples_file:
             samples_file.attrs["TICID"] = config.tic_id
+            samples_file.attrs["GitHash"] = _git_hash
         _logger.info(
             "Starting new chain for TIC ID: %d.",
             config.tic_id,
