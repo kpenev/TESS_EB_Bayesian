@@ -11,6 +11,7 @@ mastDownload
 *.fits
 *.csv
 *.db
+TESS_EBs.db*
 *.mp4
 *.png
 *.pdf
