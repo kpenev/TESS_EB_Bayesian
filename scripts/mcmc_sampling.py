@@ -26,7 +26,7 @@ from paths import results_dir, samples as samples_fname_pattern
 from find_starting_positions import FindStartingPositions
 
 _logger = logging.getLogger(__name__)
-_git_hash = git.repo.Repo(path.dirname(path.dirname(__file__))).commit()
+_git_hash = str(git.repo.Repo(path.dirname(path.dirname(__file__))).commit())
 
 default_logging_format = (
     "%(levelname)s %(asctime)s %(name)s: %(message)s | "
