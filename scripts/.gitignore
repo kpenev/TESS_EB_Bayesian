@@ -15,7 +15,6 @@ mastDownload
 *.png
 *.pdf
 *.sqlite
-*.txt
 *.dat
 pylauncher*
 queuestate
