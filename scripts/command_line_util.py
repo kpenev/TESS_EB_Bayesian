@@ -17,7 +17,7 @@ def identify_hpc():
 
     host = gethostname()
     for candidate in tic_per_node:
-        if candidate in host.split("."):
+        if candidate in host.split(".") + host.split("-"):
             return candidate
     return None
 
