@@ -148,11 +148,17 @@ def get_file_makers(group_id, config):
     }
 
 
-def create_job(group_id, job_id, config, make_file, db_session):
-    """Create a single job in the given group and return slurm filename."""
+def get_priority_tics(fname):
+    """Read high priority TICs from the given file."""
 
-    SelectTICTable = get_ticid_select_table(config.tic_table, must_exist=True)
-    num_tics = config.nodes_per_job * tic_per_node[config.hpc]
+    with open(fname, "r", encoding="utf-8") as priority_file:
+        return set((int(tic_str) for tic_str in priority_file.read().split()))
+
+
+def get_pending_tics(
+    config, SelectTICTable, db_session  # pylint: disable=invalid-name
+):
+    """Return ordered list of all TIC IDs for which sampling is pending."""
 
     ticid_select = select(
         SelectTICTable.id  # pylint: disable=no-member
@@ -168,7 +174,23 @@ def create_job(group_id, job_id, config, make_file, db_session):
             SelectTICTable.status > 0  # pylint: disable=no-member
         )
 
-    job_tic_ids = db_session.scalars(ticid_select.limit(num_tics)).all()
+    pending = db_session.scalars(ticid_select).all()
+    if config.priority_tic_file:
+        priority_tics = get_priority_tics(config.priority_tic_file)
+        pending = set(pending)
+        pending = list(pending & priority_tics) + list(pending - priority_tics)
+    return pending
+
+
+def create_job(  # pylint: disable=too-many-arguments, too-many-positional-arguments
+    group_id,
+    job_id,
+    job_tic_ids,
+    make_file,
+    db_session,
+    SelectTICTable,  # pylint: disable=invalid-name
+):
+    """Create a single job in the given group and return slurm filename."""
 
     db_session.execute(
         update(SelectTICTable),
@@ -189,6 +211,8 @@ def create_job(group_id, job_id, config, make_file, db_session):
 def create_job_group(config):
     """Create the new job group and return its slurm files."""
 
+    SelectTICTable = get_ticid_select_table(config.tic_table, must_exist=True)
+    num_tics = config.nodes_per_job * tic_per_node[config.hpc]
     with Session.begin() as db_session:  # pylint: disable=no-member
         job_group = JobGroup(
             select_tic_table=config.tic_table,
@@ -200,8 +224,17 @@ def create_job_group(config):
         db_session.add(job_group)
         db_session.flush()
         make_file = get_file_makers(job_group.id, config)
+        pending_tics = get_pending_tics(config, SelectTICTable, db_session)
+        assert len(pending_tics) > num_tics * config.num_jobs
         return [
-            create_job(job_group.id, job_id, config, make_file, db_session)
+            create_job(
+                job_group.id,
+                job_id,
+                pending_tics[num_tics * job_id : num_tics * (job_id + 1)],
+                make_file,
+                db_session,
+                SelectTICTable,
+            )
             for job_id in range(config.num_jobs)
         ]
 

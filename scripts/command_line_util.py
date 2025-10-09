@@ -63,3 +63,9 @@ def add_slurm_config(parser):
         help="The template for the launcher commands file. Should include "
         "at least ``{hpc}`` and ``{job_name}`` substitutions.",
     )
+    parser.add_argument(
+        "--priority-tic-file",
+        default=None,
+        help="Specify a file with list of TIC IDs that should get priority for "
+        "sampling.",
+    )

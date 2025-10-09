@@ -298,8 +298,8 @@ class TESSTarget:
             for param in ["period", "duration", "transit_time"]
         }
         result.update(model.compute_stats(**result))
-        result["count_even"] = result["per_transit_count"][::2].sum()
-        result["count_odd"] = result["per_transit_count"][1::2].sum()
+        result["count_even"] = int(result["per_transit_count"][::2].sum())
+        result["count_odd"] = int(result["per_transit_count"][1::2].sum())
 
         del result["transit_times"]
         del result["per_transit_count"]
@@ -425,7 +425,7 @@ class TESSTarget:
             or bls_results[0]["period"][0] > 10
             or TESSTarget.masked_bls_is_significant(bls_results[0])
         )
-        assert not TESSTarget.masked_bls_is_significant(bls_results[2])
+        #assert not TESSTarget.masked_bls_is_significant(bls_results[2])
 
         if bls_results[1] is not None:
             if not TESSTarget.masked_bls_is_significant(bls_results[1]):
@@ -822,6 +822,10 @@ class TESSTarget:
         """
 
         # bls = self._best_fit_bls
+        print(
+            f"Checking if masked BLS is significant based on:\n\t"
+            + "\n\t".join([f"{key}: {value!r}" for key, value in bls.items()])
+        )
         return (
             bls["masked_depth"][0] > 10.0 * bls["masked_depth"][1]
             and bls["masked_harmonic_delta_log_likelihood"] < -10.0

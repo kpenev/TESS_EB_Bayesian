@@ -10,7 +10,7 @@ from command_line_util import (
     add_slurm_config,
     tic_per_node,
 )
-from new_sampling import get_file_makers
+from new_sampling import get_file_makers, get_priority_tics
 
 # False positive
 # pylint: disable=import-error
@@ -65,11 +65,60 @@ def parse_command_line():
     return parser.parse_args()
 
 
-def update_job(
+def get_pending_tics(
+    config, SelectTICTable, db_session  # pylint: disable=invalid-name
+):
+    """
+    Return ordered TICs to fill gaps with split by status.
+
+    Returns:
+        dict:
+            ``"continue"``: TICs for which sampling should continue if it has
+                            already started.
+
+            ``"restart"``: TICs for which sampling should restart (i.e.
+                           likelihood changed).
+    """
+
+    select_pending = select(SelectTICTable).filter_by(
+        job_group=None, job_id=None
+    )
+    if (
+        config.continue_statuses is None
+        and config.changed_likelihood_statuses is None
+    ):
+        pending = db_session.scalars(
+            select_pending.where(
+                SelectTICTable.status > 0  # pylint: disable=no-member
+            )
+        ).all()
+    else:
+        pending = (
+            db_session.scalars(
+                select_pending.where(
+                    SelectTICTable.status.in_(  # pylint: disable=no-member
+                        (config.continue_statuses or [])
+                        + config.changed_likelihood_statuses
+                    )
+                )
+            ).all(),
+        )
+
+    if config.priority_tic_file:
+        priority_tics = get_priority_tics(config.priority_tic_file)
+        return [
+            entry for entry in pending if entry in priority_tics
+        ] + [entry for entry in pending if entry not in priority_tics]
+    return pending
+
+
+def update_job( #pylint: disable=too-many-arguments
+    *,
     group_id,
     job_id,
     config,
     make_file,
+    pending,
     SelectTICTable,  # pylint: disable=invalid-name
     db_session,
 ):
@@ -78,28 +127,12 @@ def update_job(
     job_entries = db_session.scalars(
         select(SelectTICTable).filter_by(job_group=group_id, job_id=job_id)
     ).all()
-    expected_num_jobs = config.nodes_per_job * tic_per_node[config.hpc]
-    assert len(job_entries) == expected_num_jobs, (
-        f"Got {len(job_entries)} instead of {expected_num_jobs} for job group "
+    expected_num_tics = config.nodes_per_job * tic_per_node[config.hpc]
+    assert len(job_entries) == expected_num_tics, (
+        f"Got {len(job_entries)} instead of {expected_num_tics} for job group "
         f"{group_id} on {config.hpc}"
     )
     cmd_substitutions = []
-
-    select_replacement = select(SelectTICTable).filter_by(
-        job_group=None, job_id=None
-    )
-    if config.continue_statuses is None:
-        select_replacement = select_replacement.where(
-            SelectTICTable.status > 0  # pylint: disable=no-member
-        )
-    else:
-        select_replacement = select_replacement.where(
-            SelectTICTable.status.in_(  # pylint: disable=no-member
-                (config.continue_statuses or [])
-                + config.changed_likelihood_statuses
-            )
-        )
-    select_replacement = select_replacement.limit(1)
 
     for entry in job_entries:
         substitution = {"job_id": job_id, "ticid": entry.id}
@@ -113,7 +146,7 @@ def update_job(
         else:
             entry.job_id = None
             entry.job_group = None
-            replacement = db_session.scalar(select_replacement)
+            replacement = pending.pop(0)
             replacement.job_group = group_id
             replacement.job_id = job_id
             substitution["ticid"] = replacement.id
@@ -143,15 +176,17 @@ def update_job_group(config):
         config.hpc = job_group.hpc
         config.nodes_per_job = job_group.nodes_per_job
         make_file = get_file_makers(job_group.id, config)
+        pending_tics = get_pending_tics(config, SelectTICTable, db_session)
 
         for job_id in range(job_group.num_jobs):
             update_job(
-                job_group.id,
-                job_id,
-                config,
-                make_file,
-                SelectTICTable,
-                db_session,
+                group_id=job_group.id,
+                job_id=job_id,
+                config=config,
+                make_file=make_file,
+                pending=pending_tics,
+                SelectTICTable=SelectTICTable,
+                db_session=db_session,
             )
 
 
