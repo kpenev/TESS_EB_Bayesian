@@ -309,7 +309,11 @@ def get_chain_expressions(plot_data, chain_expressions):
         plot_data = {}
         ranges = {}
         for expression in chain_expressions:
-            value_expression, range_expression = expression.split(":", 1)
+            if ':' in expression:
+                value_expression, range_expression = expression.split(":", 1)
+            else:
+                value_expression = expression
+                range_expression = "1.0"
             name, value_expression = value_expression.split("=")
             plot_data[name] = evaluate(value_expression)
             ranges[name] = tuple(
@@ -583,6 +587,7 @@ def get_model_binaries(config, raw_data, log_prob, include, log_likelihood):
 
     result = []
     for selection in getattr(config, 'show_model_with_lc', []):
+        print(f"Plotting selection: {selection!r}")
         sample_params = None
         assert selection.strip().startswith("-1") or raw_data is not None
 
@@ -601,7 +606,11 @@ def get_model_binaries(config, raw_data, log_prob, include, log_likelihood):
             sample_params = [SampleParams(*sample) for sample in selection]
         elif selection != "bls":
             sample_params = get_walker_step_params(
-                raw_data, selection, config, log_likelihood, log_prob.shape[1]
+                raw_data, 
+                selection, 
+                config, 
+                log_likelihood, 
+                None if selection == "-1" else log_prob.shape[1]
             )
             if selection.startswith("-1,") and top_params is not None:
                 sample_params = [top_params] + sample_params

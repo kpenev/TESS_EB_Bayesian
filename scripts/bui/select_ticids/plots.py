@@ -11,7 +11,7 @@ from itertools import count
 
 from multiprocessing import Pool
 import matplotlib
-from sqlalchemy import select, update
+from sqlalchemy import select, update, or_, and_
 from configargparse import ArgumentParser, DefaultsFormatter
 import numpy
 from numpy.random import randint, seed
@@ -132,7 +132,7 @@ def starting(tic_id, fname=None):
                 " [sed, zoom_masked]]",
             ],
             remove_lc_trend="moving_median",
-            show_model_with_lc="-1",
+            show_model_with_lc=["-1"],
             data_on_top=True,
             samples_fname=samples_fname,
             chain_name=chain_name,
@@ -160,7 +160,7 @@ def best(tic_id, fname=None):
                 " [folded,       folded,      zoom_secondary],"
                 " [folded_diff,  folded_diff, sed]]",
             ],
-            show_model_with_lc="top1",
+            show_model_with_lc=["top1"],
             data_on_top=False,
             samples_fname=samples_fname_template.format(tic_id=tic_id),
             chain_name="mcmc",
@@ -261,8 +261,22 @@ def render_one(tic_id, tablename, plot_func, render_dir, samples_template):
     print("Finished rendering ", tic_id)
 
 
-def render_all_plots(config):
-    """Render the lightcurves plots for a list of TIC IDs for faster review."""
+def get_tics_to_render(config):
+    """Select from DB the TIC IDs for which plots should be generated."""
+
+    def get_job_clause(job_str):
+        """Return SQL condition to match the given job."""
+
+        job_group, job_id = job_str.split(':')
+        job_group = int(job_group)
+        if job_id:
+            job_id = int(job_id)
+            return and_(
+                SelectTICIDs.job_group == job_group,
+                SelectTICIDs.job_id == job_id,
+            )
+        else:
+            return SelectTICIDs.job_group == job_group
 
     # That's the whole point
     # pylint: disable=no-member
@@ -279,6 +293,10 @@ def render_all_plots(config):
                 config.limit_to_statuses
             )
         )
+    if config.limit_to_jobs:
+        selection = selection.where(
+            or_(*[get_job_clause(job_str) for job_str in config.limit_to_jobs])
+        )
     if config.skip_rendered:
         selection = selection.filter_by(rendered=0)
 
@@ -291,8 +309,15 @@ def render_all_plots(config):
         )[config.start :]
 
     if config.count is not None:
-        tic_id_list = tic_id_list[: config.count]
+        return tic_id_list[: config.count]
 
+    return tic_id_list
+
+
+def render_all_plots(config):
+    """Render the lightcurves plots for a list of TIC IDs for faster review."""
+
+    tic_id_list = get_tics_to_render(config)
     print(f"Rendering {len(tic_id_list)} plots for {config.table_name}.")
 
     render_func = partial(
@@ -358,6 +383,14 @@ def parse_command_line():
         nargs="+",
         default=False,
         help="Only render objects that have one of the specified statuses.",
+    )
+    parser.add_argument(
+        "--limit-to-jobs",
+        metavar="JOBGRP:[JOB]",
+        nargs="+",
+        default=False,
+        help="Only render objects sampled in the given jobs specified as "
+        "{job group}:{job}. Omit job to select all jobs from a group.",
     )
     parser.add_argument(
         "--skip-rendered",
