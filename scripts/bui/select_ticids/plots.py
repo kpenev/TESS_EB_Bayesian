@@ -35,7 +35,7 @@ from exclude_data import exclude_data
 from bui.db_interface import Session
 
 # pylint: enable=import-error
-from bui.select_ticids.data_model import get_ticid_select_table
+from bui.select_ticids.data_model import get_ticid_select_tables
 
 matplotlib.use("Agg")
 
@@ -138,10 +138,10 @@ def starting(tic_id, fname=None):
             chain_name=chain_name,
             burn_in=-1,
             thin=1,
-            sample_condition=(
-                "(bls_porb - 5 * bls_duration < per) & "
-                "(per < bls_porb + 5 * bls_duration)"
-            ),
+            #            sample_condition=(
+            #                "(bls_porb - 5 * bls_duration < per) & "
+            #                "(per < bls_porb + 5 * bls_duration)"
+            #            ),
         ),
         fname,
     )
@@ -240,7 +240,7 @@ def render_one(tic_id, tablename, plot_func, render_dir, samples_template):
     # pylint: disable=no-member
     # This is actually a class
     # pylint: disable=invalid-name
-    SelectTICIDs = get_ticid_select_table(tablename)
+    Rendered = get_ticid_select_tables(tablename)[1]
     # pylint: enable=no-member
     # pylint: enable=invalid-name
 
@@ -250,9 +250,7 @@ def render_one(tic_id, tablename, plot_func, render_dir, samples_template):
             # pylint: disable=no-member
             with Session.begin() as db_session:
                 # pylint: enable=no-member
-                db_session.execute(
-                    update(SelectTICIDs).filter_by(id=tic_id).values(rendered=1)
-                )
+                db_session.add(Rendered(tic_id=tic_id, plot=plot_func.__name__))
     # The point is to avoid crashes at all costs
     # pylint: disable=bare-except
     except:
@@ -267,22 +265,22 @@ def get_tics_to_render(config):
     def get_job_clause(job_str):
         """Return SQL condition to match the given job."""
 
-        job_group, job_id = job_str.split(':')
+        job_group, job_id = job_str.split(":")
         job_group = int(job_group)
         if job_id:
             job_id = int(job_id)
             return and_(
-                SelectTICIDs.job_group == job_group,
-                SelectTICIDs.job_id == job_id,
+                SelectTICIDs.job_group  # pylint: disable=no-member
+                == job_group,
+                SelectTICIDs.job_id == job_id,  # pylint: disable=no-member
             )
-        else:
-            return SelectTICIDs.job_group == job_group
+        return SelectTICIDs.job_group == job_group  # pylint: disable=no-member
 
     # That's the whole point
     # pylint: disable=no-member
     # This is actually a class
     # pylint: disable=invalid-name
-    SelectTICIDs = get_ticid_select_table(config.table_name)
+    SelectTICIDs = get_ticid_select_tables(config.table_name)[0]
     # pylint: enable=no-member
     # pylint: enable=invalid-name
 

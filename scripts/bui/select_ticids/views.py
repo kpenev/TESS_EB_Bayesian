@@ -7,7 +7,7 @@ from base64 import b64encode
 sys.path.append(path.dirname(path.dirname(__file__)))
 
 # pylint: disable=wrong-import-position
-from sqlalchemy import select, update, delete, func
+from sqlalchemy import select, update, delete, func, and_
 from django.shortcuts import render, redirect
 from django.views import View
 from django.template.defaultfilters import slugify
@@ -21,7 +21,7 @@ from download_lcs import get_available_sectors
 from exclude_data import exclude_data
 from cache_interface import CacheSession, CachedBLS
 
-from .data_model import get_ticid_select_table
+from .data_model import get_ticid_select_tables
 from .path_util import get_render_dir
 from . import plots
 
@@ -74,106 +74,65 @@ class TICIdSelectorView(View):
             ],
         }
 
-    def get(
-        self, request, sort_state="pending", displayed_ticid=None, decision=None
+    def _join_rendered(
+        self,
+        select_stmt,
+        SelectTICIDs,  # pylint: disable=invalid-name
+        RenderedTable,  # pylint: disable=invalid-name
     ):
-        """Allow user to review LCs from Villanova catalog and select some."""
+        """Join the given select with RenderedTable to match plot type."""
 
-        state_slugs = ["pending"] + [slugify(state) for state in self.states]
-        print(f"State slugs: {state_slugs!r}")
-        # That's the whole point
-        # pylint: disable=no-member
-        # This is actually a class
-        # pylint: disable=invalid-name
-        SelectTICIDs = get_ticid_select_table(
-            self.tablename, tuple(e[0] for e in self.plot_dirs)
+        return select_stmt.outerjoin(
+            RenderedTable,
+            and_(
+                SelectTICIDs.id == RenderedTable.id,
+                RenderedTable.plot
+                == self.reviewing[  # pylint: disable=unsubscriptable-object
+                    len(self.tablename) + 1 :
+                ],
+            ),
         )
-        # pylint: enable=no-member
-        # pylint: enable=invalid-name
 
-        # False positive
-        # pylint: disable=no-member
-        with Session.begin() as db_session:
-            if displayed_ticid is None:
-                sort_state_index = state_slugs.index(sort_state)
-            else:
-                sort_state_index = db_session.scalar(
-                    select(SelectTICIDs.status).filter_by(id=displayed_ticid)
-                )
-                sort_state = state_slugs[sort_state_index]
+    def _get_context(  # pylint: disable=too-many-positional-arguments, too-many-arguments
+        self,
+        displayed_ticid,
+        sort_state,
+        SelectTICIDs,  # pylint: disable=invalid-name
+        Rendered,  # pylint: disable=invalid-name
+        db_session,
+    ):
+        """Return the context to render the view with."""
 
-            if decision is not None:
-                assert displayed_ticid is not None
-                if decision == "skip":
-                    status = sort_state_index
-                else:
-                    status = state_slugs.index(decision)
-                if status:
-                    db_session.execute(
-                        update(SelectTICIDs)
-                        .filter_by(id=displayed_ticid)
-                        .values(status=status)
-                    )
-                displayed_ticid = db_session.scalar(
-                    select(SelectTICIDs.id)
-                    .filter_by(status=sort_state_index, rendered=1)
-                    .where(SelectTICIDs.id > displayed_ticid)
-                    .order_by(SelectTICIDs.id)
-                )
-
-            rendered_progress = dict(
-                db_session.execute(
-                    select(
-                        # False positive
-                        # pylint: disable=not-callable
-                        SelectTICIDs.rendered,
-                        func.count(SelectTICIDs.id),
-                        # pylint: enable=not-callable
-                    ).group_by(SelectTICIDs.rendered)
-                ).all()
+        select_expr = self._join_rendered(
+            select(SelectTICIDs.id, Rendered.id != None), SelectTICIDs, Rendered
+        )
+        if self.rendered_only:
+            select_expr = select_expr.where(
+                Rendered.id != None  # pylint: disable=singleton-comparison
             )
 
-            select_expr = select(SelectTICIDs.id, SelectTICIDs.rendered)
-            if self.rendered_only:
-                select_expr = select_expr.filter_by(rendered=1)
-            context = {
-                "review_table": self.tablename,
-                "sort_state": sort_state,
-                "by_state": [
-                    (
-                        state_index,
-                        db_session.execute(
-                            select_expr.where(
-                                SelectTICIDs.status == state
-                            ).order_by(SelectTICIDs.id)
-                        ).all(),
-                    )
-                    for state, state_index in enumerate(
-                        ("pending",) + self.states
-                    )
-                ],
-                "decisions": self.states + ("skip",),
-                "review": self.reviewing,
-                "mode": self.reviewing.rsplit("_", 1)[1],
-                "grid": self.grid,
-                "images": [],
-            }
-            # pylint: enable=no-member
-
-        if displayed_ticid is None:
-            displayed_ticid = dict(context["by_state"])[
+        context = {
+            "review_table": self.tablename,
+            "sort_state": sort_state,
+            "by_state": [
                 (
-                    self.states[sort_state_index - 1]
-                    if sort_state_index
-                    else "pending"
+                    state_index,
+                    db_session.execute(
+                        select_expr.where(
+                            SelectTICIDs.status == state
+                        ).order_by(SelectTICIDs.id)
+                    ).all(),
                 )
-            ]
-            if len(displayed_ticid) == 0:
-                redirect(
-                    f"{review_table}_lightcurve_jump", sort_state="pending"
-                )
-            else:
-                displayed_ticid = displayed_ticid[0][0]
+                for state, state_index in enumerate(("pending",) + self.states)
+            ],
+            "decisions": self.states + ("skip",),
+            "review": self.reviewing,
+            "mode": self.reviewing.rsplit("_", 1)[1],
+            "grid": self.grid,
+            "images": [],
+        }
+        # pylint: enable=no-member
+
         with CacheSession.begin() as cache:  # pylint: disable=no-member
             context["needs_replot"] = (
                 cache.scalar(
@@ -199,11 +158,103 @@ class TICIdSelectorView(View):
                         )
                     )
 
+        rendered_progress = dict(
+            db_session.execute(
+                select(
+                    # False positive
+                    # pylint: disable=not-callable
+                    SelectTICIDs.rendered,
+                    func.count(SelectTICIDs.id),
+                    # pylint: enable=not-callable
+                ).group_by(SelectTICIDs.rendered)
+            ).all()
+        )
+
         context["render_progress"] = (
             rendered_progress.get(1, 0),
             rendered_progress.get(0, 0) + rendered_progress.get(1, 0),
         )
+        return context
 
+    def get(self, request, **kwargs):
+        """Allow user to review LCs from Villanova catalog and select some."""
+
+        print(f"Select TIC ID view with kwargs: {kwargs}")
+        if "sort_state" not in kwargs:
+            kwargs["sort_state"] = "pending"
+
+        state_slugs = ["pending"] + [slugify(state) for state in self.states]
+        print(f"State slugs: {state_slugs!r}")
+        # That's the whole point
+        # pylint: disable=no-member
+        # This is actually a class
+        # pylint: disable=invalid-name
+        SelectTICIDs, Rendered = get_ticid_select_tables(
+            self.tablename,
+            tuple(e[0] for e in self.plot_dirs),
+            refresh_rendered=kwargs.get("update_rendered", False),
+        )
+        # pylint: enable=no-member
+        # pylint: enable=invalid-name
+
+        # False positive
+        # pylint: disable=no-member
+        with Session.begin() as db_session:
+            if "displayed_ticid" not in kwargs:
+                sort_state_index = state_slugs.index(kwargs["sort_state"])
+            else:
+                sort_state_index = db_session.scalar(
+                    select(SelectTICIDs.status).filter_by(
+                        id=kwargs["displayed_ticid"]
+                    )
+                )
+                kwargs["sort_state"] = state_slugs[sort_state_index]
+
+            if "decision" in kwargs:
+                assert "displayed_ticid" in kwargs
+                if kwargs["decision"] == "skip":
+                    status = sort_state_index
+                else:
+                    status = state_slugs.index(kwargs["decision"])
+                if status:
+                    db_session.execute(
+                        update(SelectTICIDs)
+                        .filter_by(id=kwargs["displayed_ticid"])
+                        .values(status=status)
+                    )
+            if "displayed_ticid" not in kwargs or "decision" in kwargs:
+                select_ticid = (
+                    self._join_rendered(
+                        select(SelectTICIDs.id), SelectTICIDs, Rendered
+                    )
+                    .where(SelectTICIDs.status == sort_state_index)
+                    .where(
+                        Rendered.id  # pylint: disable=singleton-comparison
+                        != None
+                    )
+                )
+                if "displayed_ticid" in kwargs:
+                    select_ticid = select_ticid.where(
+                        SelectTICIDs.id > kwargs["displayed_ticid"]
+                    )
+
+                kwargs["displayed_ticid"] = db_session.scalar(
+                    select_ticid.order_by(SelectTICIDs.id)
+                ) or db_session.scalar(
+                    select(SelectTICIDs.id).where(
+                        SelectTICIDs.status == sort_state_index
+                    )
+                )
+
+                print(f"Selected TIC ID: {kwargs['displayed_ticid']}")
+
+            context = self._get_context(
+                kwargs["displayed_ticid"],
+                kwargs["sort_state"],
+                SelectTICIDs,
+                Rendered,
+                db_session,
+            )
         return render(request, "select_ticids/index.html", context)
 
 

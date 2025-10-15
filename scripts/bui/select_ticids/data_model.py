@@ -6,18 +6,17 @@ from os import path
 from datetime import datetime
 
 from sqlalchemy import (
-    Table,
-    Column,
-    Integer,
     TIMESTAMP,
-    text,
     inspect,
     ForeignKey,
     func,
+    delete,
+    insert,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from bui.db_interface import db_engine, Session
+from .path_util import parse_render_dir
 
 
 class SelectTICIDBase(  # pylint: disable=too-few-public-methods
@@ -25,16 +24,24 @@ class SelectTICIDBase(  # pylint: disable=too-few-public-methods
 ):
     """Base class for tables that track TIC ID selection."""
 
+    id: Mapped[int] = mapped_column(
+        primary_key=True,
+        doc="Unique identifier for the job collection",
+    )
+    timestamp: Mapped[datetime] = mapped_column(
+        TIMESTAMP,
+        nullable=False,
+        default=func.now(),  # pylint: disable=not-callable
+        onupdate=func.now(),  # pylint: disable=not-callable
+        doc="When record was last changed",
+    )
+
 
 class JobGroup(SelectTICIDBase):  # pylint: disable=too-few-public-methods
     """The group of jobs used to sample a collection of TICs."""
 
     __tablename__ = "job_groups"
 
-    id: Mapped[int] = mapped_column(
-        primary_key=True,
-        doc="Unique identifier for the job collection",
-    )
     select_tic_table: Mapped[str] = mapped_column(
         nullable=False,
         doc="The table of TICs this job group is sampling from.",
@@ -52,13 +59,6 @@ class JobGroup(SelectTICIDBase):  # pylint: disable=too-few-public-methods
     description: Mapped[str | None] = mapped_column(
         doc="User supplied description of the job group."
     )
-    timestamp: Mapped[datetime] = mapped_column(
-        TIMESTAMP,
-        nullable=False,
-        default=func.now(),  # pylint: disable=not-callable
-        onupdate=func.now(),  # pylint: disable=not-callable
-        doc="When record was last changed",
-    )
 
 
 if not inspect(db_engine).has_table(JobGroup.__tablename__):
@@ -72,51 +72,69 @@ def get_ticids(plot_dir):
     for plot_fname in glob(path.join(plot_dir, "*")):
         parsed = plot_name_rex.match(path.basename(plot_fname))
         if parsed and parsed["ext"] in ("png", "jpg", "jpeg", "pdf"):
-            yield int(parsed["tic"]), plot_fname
+            yield int(parsed["tic"])
 
 
-def get_ticid_select_table(
-    tablename, plot_dirs=(), require_all=False, must_exist=False
+def set_rendered(RenderedTable, plot_dirs):  # pylint: disable=invalid-name
+    """Update the rendered to match the plots available."""
+
+    with Session.begin() as db_session:  # pylint: disable=no-member
+        db_session.execute(delete(RenderedTable))
+
+        for plot_dir in plot_dirs:
+            db_session.execute(
+                insert(RenderedTable),
+                [
+                    {"id": tic_id, "plot": parse_render_dir(plot_dir)[1]}
+                    for tic_id in get_ticids(plot_dir)
+                ],
+            )
+
+
+def get_ticid_select_tables(
+    tablename, plot_dirs=(), must_exist=False, refresh_rendered=False
 ):
     """Create a table for tracking TIC ID selection with given name."""
 
     # pylint: disable=too-few-public-methods
-    class Result(SelectTICIDBase):
+    class SelectTable(SelectTICIDBase):
         """The table for tracking TIC ID selection."""
 
-        __table__ = Table(
-            tablename,
-            SelectTICIDBase.metadata,
-            Column(
-                "id", Integer, primary_key=True, doc="The TIC ID to consider."
+        __tablename__ = tablename
+        __table_args__ = {"extend_existing": True}
+
+        status: Mapped[int] = mapped_column(
+            doc="Status assigned to the TIC ID (selection dependent).",
+        )
+        rendered: Mapped[int] = mapped_column(doc="1 - rendered, 0 - not")
+
+        job_group: Mapped[int] = mapped_column(
+            ForeignKey(
+                "job_groups.id", onupdate="CASCADE", ondelete="RESTRICT"
             ),
-            Column(
-                "status",
-                Integer,
-                doc="Status assigned to the TIC ID (selection dependent).",
-            ),
-            Column("rendered", Integer, doc="1 - rendered, 0 - not"),
-            Column(
-                "job_group",
-                Integer,
-                ForeignKey(
-                    "job_groups.id", onupdate="CASCADE", ondelete="RESTRICT"
-                ),
-            ),
-            Column(
-                "job_id",
-                Integer,
-                doc="The ID of the job this TIC is assigned to.",
-            ),
-            Column(
-                "timestamp",
-                TIMESTAMP,
-                SelectTICIDBase.metadata,
-                nullable=False,
-                server_default=text("CURRENT_TIMESTAMP"),
-                doc="When record was last changed",
-            ),
-            keep_existing=True,
+        )
+
+        job_id: Mapped[int] = mapped_column(
+            doc="The ID of the job this TIC is assigned to.",
+        )
+
+        def __str__(self):
+            # pylint: disable=no-member
+            return (
+                f"{self.id}: status={self.status}, job grp={self.job_group}, "
+                f"job={self.job_id} ({self.timestamp})"
+            )
+            # pylint: enable=no-member
+
+    class RenderedTable(SelectTICIDBase):
+        """The table tracking which plots are available."""
+
+        __tablename__ = tablename + "_rendered"
+        __table_args__ = {"extend_existing": True}
+
+        plot: Mapped[str] = mapped_column(
+            primary_key=True,
+            doc="The type of plot available for this TIC",
         )
 
     # pylint: enable=too-few-public-methods
@@ -126,22 +144,12 @@ def get_ticid_select_table(
             not must_exist
         ), f"Table {tablename} must already exist, not creating!"
         assert plot_dirs is not None
-        Result.__table__.create(db_engine)
-        plot_tic_ids = None
-        for plot_dir in plot_dirs:
-            if plot_tic_ids is None:
-                plot_tic_ids = set(tic_id for tic_id, _ in get_ticids(plot_dir))
-            else:
-                getattr(
-                    plot_tic_ids,
-                    "intersection_update" if require_all else "update",
-                )(set(tic_id for tic_id, _ in get_ticids(plot_dir)))
-        if plot_tic_ids is not None:
-            # False positive
-            # pylint: disable=no-member
-            with Session.begin() as db_session:
-                # pylint: enable=no-member
-                for tic_id in plot_tic_ids:
-                    db_session.add(Result(id=tic_id, status=0, rendered=1))
+        SelectTable.__table__.create(db_engine)
 
-    return Result
+    if not inspect(db_engine).has_table(RenderedTable.__tablename__):
+        RenderedTable.__table__.create(db_engine)
+        refresh_rendered = True
+    if refresh_rendered:
+        set_rendered(RenderedTable, plot_dirs)
+
+    return SelectTable, RenderedTable

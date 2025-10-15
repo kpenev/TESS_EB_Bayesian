@@ -35,17 +35,21 @@
                     </div>
                 </div>
             </div>
-            {% if needs_replot %}
+
             <div style="width: min-content">
+                {% if needs_replot %}
                 <a href="{% url 'replotlc' ticid=displayed_ticid review_table=review_table %}" 
                     class="replot">
                     Data selection changed: click to replot
                 </a>
                 <input class="replot" id="TICId" type="text" value="{{ displayed_ticid }}">
+                {% else %}
+                <a class="replot" href="{% url review|add:'_update_rendered' displayed_ticid=displayed_ticid %}">
+                    Update rendered
+                </a>
+                <input id="TICId" type="text" value="{{ displayed_ticid }}">
+                {% endif %}
             </div>
-            {% else %}
-            <input id="TICId" type="text" value="{{ displayed_ticid }}">
-            {% endif %}
         </div>
         <div class="main">
             <div class="img-parent" style="grid-template-columns: {{ grid.columns }}; grid-template-rows: {{ grid.rows }};">
