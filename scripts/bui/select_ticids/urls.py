@@ -71,6 +71,7 @@ urlpatterns = sum(
                 "old_ls6_sampling",
                 "old_juno_sampling",
                 "changed_likelihood",
+                "finished",
             ),
         )
         for plot_type in ["starting", "best", "convergence", "sampling"]

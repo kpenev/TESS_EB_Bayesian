@@ -289,7 +289,7 @@ def toggle_data(_, ticid, selection, review_table, mode):
 
     if mode in ["starting", "best", "convergence", "sampling"]:
         return redirect(
-            f"{review_table}_{mode}",
+            f"{review_table}_{mode}_decision",
             sort_state="continue",
             decision="changed_likelihood",
             displayed_ticid=ticid,

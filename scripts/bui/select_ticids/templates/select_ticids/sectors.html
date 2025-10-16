@@ -1,4 +1,4 @@
-{% url 'toggle_data' ticid=displayed_ticid selection=provenance review_table=review_table mode=mode as toggle_url %}
+{% url 'toggle_data' ticid=displayed_ticid selection=provenance review_table=review_table mode=mode as toggle_prov_url %}
 <ul style="width: 100%">
     <li
             {% if provenance in enabled_prov %}
@@ -7,18 +7,19 @@
             class="disabled"
             {% endif %}
             >
-            <a href="{{ toggle_url }}">
+            <a href="{{ toggle_prov_url }}">
                 {{ provenance }}: 
             </a>
     </li>
     {% for sector in sector_list %}
+    {% url 'toggle_data' ticid=displayed_ticid selection=sector.1 review_table=review_table mode=mode as toggle_sector_url %}
     <li  
         {% if sector.0%} 
         class="enabled" 
         {% else %}
         class="disabled" 
         {% endif %}> 
-        <a href="{{ toggle_url }}">
+        <a href="{{ toggle_sector_url }}">
             {{sector.1}}
         </a> 
     </li>
