@@ -553,6 +553,8 @@ class LightCurvePlotter:
 
         subfigures = self._setup_figure(len(log_likelihood.lcs))
         for (header, lightcurve), subfig in zip(log_likelihood.lcs, subfigures):
+            if lightcurve.size <= 10:
+                continue
             lightcurve = numpy.copy(lightcurve)
             lightcurve["flux"] /= numpy.median(lightcurve["flux"])
 
