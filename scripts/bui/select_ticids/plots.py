@@ -250,7 +250,7 @@ def render_one(tic_id, tablename, plot_func, render_dir, samples_template):
             # pylint: disable=no-member
             with Session.begin() as db_session:
                 # pylint: enable=no-member
-                db_session.add(Rendered(tic_id=tic_id, plot=plot_func.__name__))
+                db_session.add(Rendered(id=tic_id, plot=plot_func.__name__))
     # The point is to avoid crashes at all costs
     # pylint: disable=bare-except
     except:
@@ -305,6 +305,15 @@ def get_tics_to_render(config):
                 selection.order_by(SelectTICIDs.id)  # pylint: disable=no-member
             ).scalars()
         )[config.start :]
+
+    if config.plot_type in ["starting", "best", "convergence"]:
+        print("Restricting TIC IDs to existing samples files.")
+        tic_id_list = [
+            tic_id
+            for tic_id in tic_id_list
+            if path.exists(config.samples_fname_template.format(tic_id=tic_id))
+        ]
+        print(f"{len(tic_id_list)} surviving TICs")
 
     if config.count is not None:
         return tic_id_list[: config.count]

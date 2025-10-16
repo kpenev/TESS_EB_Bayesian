@@ -360,8 +360,7 @@ class LogLikelihood(TESSTarget):
                 self._lcs = []
                 overwrite_cache = True
 
-        if "OOE" in tic_exclude:
-            self._add_eclipse_flags(0.4)
+        self._add_eclipse_flags(0.4)
 
         return overwrite_cache
 

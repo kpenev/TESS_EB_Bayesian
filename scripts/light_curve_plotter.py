@@ -7,6 +7,7 @@ from asteval import Interpreter
 from tess_target import get_bls_eclipse_mask, get_bls_model
 from log_likelihood import LogLikelihood
 
+
 class LightCurvePlotter:
     """Plot lightcurves, models, and detrndeing of TESS targets."""
 
@@ -306,42 +307,27 @@ class LightCurvePlotter:
         for eclipse in (
             ["primary", "secondary"] if zoom.startswith("ooe") else [zoom]
         ):
-            half_xrange = None
             while binary_ind < len(binaries):
                 assert binaries is not None
                 if eclipse == "secondary":
                     binaries[binary_ind].swap_components()
-                period = binaries[binary_ind].per
                 time_reference = binaries[binary_ind].t0
                 ooe_timeref += time_reference
-                eval_t = numpy.linspace(
-                    time_reference - period / 2,
-                    time_reference + period / 2,
-                    100,
-                )
-                eclipse_lc = binaries[binary_ind].eclipse(eval_t)
-                eclipsed = (eval_t[eclipse_lc < 1] - time_reference) / period
-                if eclipse == "secondary":
-                    binaries[binary_ind].swap_components()
-                if eclipsed.size == 0:
-                    binary_ind += 1
-                    print(
-                        f"No {eclipse} eclipse found, trying binary "
-                        f"{binary_ind}"
-                    )
-                    continue
-                print(f"Found {eclipse} eclipse for binary {binary_ind}")
-                half_xrange = max(abs(eclipsed.min()), eclipsed.max())
-                break
-            if half_xrange is None:
-                raise RuntimeError()
-            if zoom.startswith("ooe"):
-                phase = self._get_phase(lightcurve, period, time_reference)
-                ooe_mask = numpy.logical_and(
-                    ooe_mask,
-                    numpy.logical_or(phase < -half_xrange, phase > half_xrange),
-                )
+                if (
+                    binaries[binary_ind].eclipse(numpy.array([time_reference]))[
+                        0
+                    ]
+                    < 1
+                ):
+                    period = binaries[binary_ind].per
+                    print(f"Found {eclipse} eclipse for binary {binary_ind}")
+                    break
 
+                binary_ind += 1
+                print(
+                    f"No {eclipse} eclipse found, trying binary "
+                    f"{binary_ind}"
+                )
         if zoom.startswith("ooe"):
             ooe_timeref /= 2
             phase = self._get_phase(lightcurve, period, ooe_timeref)
@@ -353,10 +339,16 @@ class LightCurvePlotter:
                 "Time [d]" if zoom == "ooe" else "Phase",
             )
         else:
-            half_xrange *= 1.5
-            pyplot.xlim(-half_xrange, half_xrange)
+            mask = (
+                lightcurve["eclipse_flags"] > 0
+                if zoom == "primary"
+                else lightcurve["eclipse_flags"] < 0
+            )
             self._plot_phase_zoomed(
-                lightcurve, time_reference, period, model_lcs
+                lightcurve[mask],
+                time_reference,
+                period,
+                [lc[mask] for lc in model_lcs],
             )
 
     def plot_zoomed_bls(self, zoom, lightcurve, model_lcs, bls):
