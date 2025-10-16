@@ -9,7 +9,7 @@ from .path_util import get_render_dir
 def get_review_urls(mode, table_name, states):
     """Return a list of URL patterns."""
 
-    if mode in ["lightcurve", "starting"]:
+    if mode in ["lightcurve", "starting", "best", "convergence"]:
         plot_dirs = (
             (
                 get_render_dir(table_name, mode),
@@ -18,9 +18,12 @@ def get_review_urls(mode, table_name, states):
         )
     elif mode == "sampling":
         plot_dirs = (
-            (get_render_dir(table_name, "best"), "1 / 1 / 2 / 2"),
-            (get_render_dir(table_name, "convergence"), "1 / 2 / 2 / 3"),
-            # (get_render_dir(table_name, "starting"), "2 / 2 / 3 / 3"),
+            (get_render_dir(table_name, "best"), "1 / 1 / span 1 / span 1"),
+            (
+                get_render_dir(table_name, "convergence"),
+                "1 / 2 / span 1 / span 1",
+            ),
+            (get_render_dir(table_name, "starting"), "1 / 3 / span 1 / span 1"),
         )
     return [
         path(
@@ -55,7 +58,23 @@ def get_review_urls(mode, table_name, states):
     ]
 
 
-urlpatterns = (
+urlpatterns = sum(
+    (
+        get_review_urls(
+            plot_type,
+            "sample_prsa",
+            (
+                "bad",
+                "continue",
+                "fix",
+                "old_finished",
+                "old_ls6_sampling",
+                "old_juno_sampling",
+                "changed_likelihood",
+            ),
+        )
+        for plot_type in ["starting", "best", "convergence", "sampling"]
+    ),
     get_review_urls(
         "lightcurve",
         "sample_prsa",
@@ -68,33 +87,9 @@ urlpatterns = (
             "old_juno_sampling",
         ),
     )
-    + get_review_urls(
-        "starting",
-        "sample_prsa",
-        (
-            "bad",
-            "continue",
-            "fix",
-            "old_finished",
-            "old_ls6_sampling",
-            "old_juno_sampling",
-        ),
-    )
-    + get_review_urls(
-        "sampling",
-        "sample_prsa",
-        (
-            "selected",
-            "running_ls6",
-            "running_juno",
-            "restart",
-            "stop",
-            "finished",
-        ),
-    )
     + [
         path(
-            "toggle_data/<int:ticid>/<slug:selection>/<slug:review_table>",
+            "toggle_data/<int:ticid>/<slug:selection>/<slug:review_table>/<slug:mode>",
             toggle_data,
             name="toggle_data",
         ),
@@ -103,5 +98,5 @@ urlpatterns = (
             replotlc,
             name="replotlc",
         ),
-    ]
+    ],
 )

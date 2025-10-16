@@ -7,7 +7,7 @@ from base64 import b64encode
 sys.path.append(path.dirname(path.dirname(__file__)))
 
 # pylint: disable=wrong-import-position
-from sqlalchemy import select, update, delete, func, and_
+from sqlalchemy import select, update, delete, func, and_, or_
 from django.shortcuts import render, redirect
 from django.views import View
 from django.template.defaultfilters import slugify
@@ -82,14 +82,23 @@ class TICIdSelectorView(View):
     ):
         """Join the given select with RenderedTable to match plot type."""
 
+        mode = self.reviewing[  # pylint: disable=unsubscriptable-object
+            len(self.tablename) + 1 :
+        ]
+        if mode == 'sampling':
+            match_plot = or_(
+                *(
+                    RenderedTable.plot == plot_type
+                    for plot_type in ['best', 'convergence', 'starting']
+                )
+            )
+        else:
+            match_plot = RenderedTable.plot == mode
         return select_stmt.outerjoin(
             RenderedTable,
             and_(
                 SelectTICIDs.id == RenderedTable.id,
-                RenderedTable.plot
-                == self.reviewing[  # pylint: disable=unsubscriptable-object
-                    len(self.tablename) + 1 :
-                ],
+                match_plot,
             ),
         )
 
@@ -104,7 +113,12 @@ class TICIdSelectorView(View):
         """Return the context to render the view with."""
 
         select_expr = self._join_rendered(
-            select(SelectTICIDs.id, Rendered.id != None), SelectTICIDs, Rendered
+            select(
+                SelectTICIDs.id,
+                Rendered.id != None,  # pylint: disable=singleton-comparison
+            ),
+            SelectTICIDs,
+            Rendered,
         )
         if self.rendered_only:
             select_expr = select_expr.where(
@@ -120,7 +134,7 @@ class TICIdSelectorView(View):
                     db_session.execute(
                         select_expr.where(
                             SelectTICIDs.status == state
-                        ).order_by(SelectTICIDs.id)
+                        ).group_by(SelectTICIDs.id)
                     ).all(),
                 )
                 for state, state_index in enumerate(("pending",) + self.states)
@@ -258,7 +272,7 @@ class TICIdSelectorView(View):
         return render(request, "select_ticids/index.html", context)
 
 
-def toggle_data(_, ticid, selection, review_table):
+def toggle_data(_, ticid, selection, review_table, mode):
     """Switch the state (enabled/disabled) for given data for given TIC ID."""
 
     excluded = exclude_data[ticid]
@@ -273,8 +287,17 @@ def toggle_data(_, ticid, selection, review_table):
     else:
         excluded.add(selection)
 
-    with CacheSession.begin() as cache:  # pylint: disable=no-member
-        cache.execute(delete(CachedBLS).filter_by(tic_id=ticid))
+    if mode in ["starting", "best", "convergence", "sampling"]:
+        return redirect(
+            f"{review_table}_{mode}",
+            sort_state="continue",
+            decision="changed_likelihood",
+            displayed_ticid=ticid,
+        )
+
+    if mode == "lightcurve":
+        with CacheSession.begin() as cache:  # pylint: disable=no-member
+            cache.execute(delete(CachedBLS).filter_by(tic_id=ticid))
 
     return redirect(
         f"{review_table}_lightcurve_jump",
