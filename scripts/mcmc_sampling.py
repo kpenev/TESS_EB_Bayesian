@@ -215,6 +215,13 @@ def parse_command_line():
         help="If specified the current git hash is not checked against what is "
         "in the file.",
     )
+    parser.add_argument(
+        "--update-git-hash",
+        action="store_true",
+        help="If specified the current git hash is not checked against what is "
+        "in the file.",
+    )
+
 
     return parser.parse_args()
 
@@ -232,6 +239,8 @@ def get_backend(samples_fname, config):
     backend = HDFBackend(samples_fname)
     if path.exists(samples_fname):
         with h5py.File(samples_fname, "r") as samples_file:
+            if config.update_git_hash:
+                samples_file.attrs["GitHash"] = _git_hash
             assert (
                 config.ignore_git_hash
                 or samples_file.attrs["GitHash"] == _git_hash
