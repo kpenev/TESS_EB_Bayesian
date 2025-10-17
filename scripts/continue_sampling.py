@@ -17,7 +17,7 @@ from new_sampling import get_file_makers, get_priority_tics
 from bui.db_interface import Session
 
 # pylint: enable=import-error
-from bui.select_ticids.data_model import JobGroup, get_ticid_select_table
+from bui.select_ticids.data_model import JobGroup, get_ticid_select_tables
 
 
 def parse_command_line():
@@ -183,9 +183,9 @@ def update_job_group(config):
         job_group = db_session.scalar(
             select(JobGroup).filter_by(id=config.job_group)
         )
-        SelectTICTable = get_ticid_select_table(
+        SelectTICTable = get_ticid_select_tables(
             job_group.select_tic_table, must_exist=True
-        )
+        )[0]
         config.hpc = job_group.hpc
         config.nodes_per_job = job_group.nodes_per_job
         make_file = get_file_makers(job_group.id, config)

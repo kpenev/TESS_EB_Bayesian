@@ -5,7 +5,7 @@ import os
 from sqlalchemy import update, select
 
 from bui.db_interface import Session
-from bui.select_ticids.data_model import JobGroup, get_ticid_select_table
+from bui.select_ticids.data_model import JobGroup, get_ticid_select_tables
 from paths import slurm_fname
 from command_line_util import (
     create_parser,
@@ -211,7 +211,9 @@ def create_job(  # pylint: disable=too-many-arguments, too-many-positional-argum
 def create_job_group(config):
     """Create the new job group and return its slurm files."""
 
-    SelectTICTable = get_ticid_select_table(config.tic_table, must_exist=True)
+    SelectTICTable = get_ticid_select_tables(config.tic_table, must_exist=True)[
+        0
+    ]
     num_tics = config.nodes_per_job * tic_per_node[config.hpc]
     with Session.begin() as db_session:  # pylint: disable=no-member
         job_group = JobGroup(
