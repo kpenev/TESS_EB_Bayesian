@@ -62,6 +62,17 @@ def parse_command_line():
         help="If passed, and the script is running on a cluster, the generated "
         "jobs are automatically submitted.",
     )
+    parser.add_argument(
+        "--ignore-git-hash",
+        action="store_true",
+        help="If specified the current git hash is not checked against what is "
+        "in the file.",
+    )
+    parser.add_argument(
+        "--update-git-hash",
+        action="store_true",
+        help="If specified the current git hash relpaces what is in the file.",
+    )
     return parser.parse_args()
 
 
@@ -150,11 +161,13 @@ def update_job( #pylint: disable=too-many-arguments
             replacement.job_group = group_id
             replacement.job_id = job_id
             substitution["ticid"] = replacement.id
-            substitution["extra_cmdline"] = (
-                "--changed-likelihood"
-                if replacement.status in config.changed_likelihood_statuses
-                else ""
-            )
+            substitution["extra_cmdline"] = ""
+            if replacement.status in config.changed_likelihood_statuses
+                substitution["extra_cmdline"] += " --changed-likelihood"
+            if config.ignore_git_hash:
+                substitution["extra_cmdline"] += " --ignore-git-hash"
+            elif config.update_git_hash:
+                substitution["extra_cmdline"] += " --update-git-hash"
 
         cmd_substitutions.append(substitution)
     launcher_cmd = make_file["launcher_cmd"](cmd_substitutions)

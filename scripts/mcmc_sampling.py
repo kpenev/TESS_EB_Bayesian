@@ -218,8 +218,7 @@ def parse_command_line():
     parser.add_argument(
         "--update-git-hash",
         action="store_true",
-        help="If specified the current git hash is not checked against what is "
-        "in the file.",
+        help="If specified the current git hash relpaces what is in the file.",
     )
 
 
