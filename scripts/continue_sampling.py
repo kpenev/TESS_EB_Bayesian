@@ -162,7 +162,7 @@ def update_job( #pylint: disable=too-many-arguments
             replacement.job_id = job_id
             substitution["ticid"] = replacement.id
             substitution["extra_cmdline"] = ""
-            if replacement.status in config.changed_likelihood_statuses
+            if replacement.status in config.changed_likelihood_statuses:
                 substitution["extra_cmdline"] += " --changed-likelihood"
             if config.ignore_git_hash:
                 substitution["extra_cmdline"] += " --ignore-git-hash"
