@@ -118,8 +118,8 @@ def get_pending_tics(
     if config.priority_tic_file:
         priority_tics = get_priority_tics(config.priority_tic_file)
         return [
-            entry for entry in pending if entry in priority_tics
-        ] + [entry for entry in pending if entry not in priority_tics]
+            entry for entry in pending if entry.id in priority_tics
+        ] + [entry for entry in pending if entry.id not in priority_tics]
     return pending
 
 
