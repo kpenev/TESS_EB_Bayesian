@@ -104,26 +104,25 @@ def get_pending_tics(
             )
         ).all()
     else:
-        pending = (
-            db_session.scalars(
-                select_pending.where(
-                    SelectTICTable.status.in_(  # pylint: disable=no-member
-                        (config.continue_statuses or [])
-                        + config.changed_likelihood_statuses
-                    )
+        pending = db_session.scalars(
+            select_pending.where(
+                SelectTICTable.status.in_(  # pylint: disable=no-member
+                    (config.continue_statuses or [])
+                    + config.changed_likelihood_statuses
                 )
-            ).all(),
-        )
+            )
+        ).all()
 
     if config.priority_tic_file:
         priority_tics = get_priority_tics(config.priority_tic_file)
-        return [
-            entry for entry in pending if entry.id in priority_tics
-        ] + [entry for entry in pending if entry.id not in priority_tics]
+        print(f"Pending: {pending!r}")
+        return [entry for entry in pending if entry.id in priority_tics] + [
+            entry for entry in pending if entry.id not in priority_tics
+        ]
     return pending
 
 
-def update_job( #pylint: disable=too-many-arguments
+def update_job(  # pylint: disable=too-many-arguments
     *,
     group_id,
     job_id,
@@ -164,10 +163,10 @@ def update_job( #pylint: disable=too-many-arguments
             substitution["extra_cmdline"] = ""
             if replacement.status in config.changed_likelihood_statuses:
                 substitution["extra_cmdline"] += " --changed-likelihood"
-            if config.ignore_git_hash:
-                substitution["extra_cmdline"] += " --ignore-git-hash"
-            elif config.update_git_hash:
-                substitution["extra_cmdline"] += " --update-git-hash"
+        if config.ignore_git_hash:
+            substitution["extra_cmdline"] += " --ignore-git-hash"
+        elif config.update_git_hash:
+            substitution["extra_cmdline"] += " --update-git-hash"
 
         cmd_substitutions.append(substitution)
     launcher_cmd = make_file["launcher_cmd"](cmd_substitutions)

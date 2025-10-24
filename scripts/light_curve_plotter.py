@@ -312,7 +312,8 @@ class LightCurvePlotter:
                 if eclipse == "secondary":
                     binaries[binary_ind].swap_components()
                 time_reference = binaries[binary_ind].t0
-                ooe_timeref += time_reference
+                if eclipse == "secondary":
+                    binaries[binary_ind].swap_components()
                 if (
                     binaries[binary_ind].eclipse(numpy.array([time_reference]))[
                         0
@@ -320,6 +321,7 @@ class LightCurvePlotter:
                     < 1
                 ):
                     period = binaries[binary_ind].per
+                    ooe_timeref += time_reference
                     print(f"Found {eclipse} eclipse for binary {binary_ind}")
                     break
 
@@ -328,6 +330,11 @@ class LightCurvePlotter:
                     f"No {eclipse} eclipse found, trying binary "
                     f"{binary_ind}"
                 )
+        if ooe_timeref == 0:
+            time_reference = binaries[0].t0
+            period = binaries[0].per
+            ooe_timeref += time_reference
+
         if zoom.startswith("ooe"):
             ooe_timeref /= 2
             phase = self._get_phase(lightcurve, period, ooe_timeref)
