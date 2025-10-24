@@ -319,6 +319,8 @@ class TESSTarget:
             f"Fitting BLS for {periods.size} periods:\n{periods} and "
             f"Durations:\n{durations}"
         )
+        if lightcurve["time"].size < 10:
+            return None
         assert numpy.isfinite(lightcurve["flux"]).all()
         assert numpy.isfinite(lightcurve["time"]).all()
         model = BoxLeastSquares(
