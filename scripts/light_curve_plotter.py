@@ -309,6 +309,24 @@ class LightCurvePlotter:
 
         return "even" if zoom == "primary" else "odd"
 
+    @staticmethod
+    def _fix_eclipse_flags(lightcurve, log_likelihood, binary):
+        """Ensure that both primary and secondary eclipse are flagged."""
+
+        for sign in [-1, 1]:
+            if (lightcurve["eclipse_flags"] * sign > 0).sum() == 0:
+                assert (lightcurve["eclipse_flags"] * sign < 0).sum() > 0
+                if sign == -1:
+                    binary.swap_components()
+                eclipse_flags = log_likelihood.get_binary_near_eclipse_flags(
+                    lightcurve["time"], binary, 1.5
+                )
+                lightcurve["eclipse_flags"][eclipse_flags != 0] = (
+                    sign * eclipse_flags
+                )
+                if sign == -1:
+                    binary.swap_components()
+
     def plot_zoomed_binary(self, zoom, lightcurve, model_lcs, binaries):
         """Create zoomed plot on primary or secondary eclipse per binary."""
 
@@ -563,6 +581,8 @@ class LightCurvePlotter:
                 continue
             lightcurve = numpy.copy(lightcurve)
             lightcurve["flux"] /= numpy.median(lightcurve["flux"])
+            if binaries:
+                self._fix_eclipse_flags(lightcurve, log_likelihood, binaries[0])
 
             model_lcs = self._get_model_lcs(
                 header, lightcurve, binaries, log_likelihood
