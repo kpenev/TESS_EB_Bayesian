@@ -318,12 +318,17 @@ class LightCurvePlotter:
                 assert (lightcurve["eclipse_flags"] * sign < 0).sum() > 0
                 if sign == -1:
                     binary.swap_components()
-                eclipse_flags = log_likelihood.get_binary_near_eclipse_flags(
-                    lightcurve["time"], binary, 1.5
-                )
-                lightcurve["eclipse_flags"][eclipse_flags != 0] = (
-                    sign * eclipse_flags
-                )
+                try:
+                    eclipse_flags = (
+                        log_likelihood.get_binary_near_eclipse_flags(
+                            lightcurve["time"], binary, 1.5
+                        )
+                    )
+                    lightcurve["eclipse_flags"][eclipse_flags != 0] = (
+                        sign * eclipse_flags
+                    )
+                except ValueError:
+                    pass
                 if sign == -1:
                     binary.swap_components()
 
