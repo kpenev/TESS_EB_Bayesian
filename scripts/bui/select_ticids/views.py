@@ -213,6 +213,7 @@ class TICIdSelectorView(View):
 
         # False positive
         # pylint: disable=no-member
+        status = 0
         with Session.begin() as db_session:
             if "displayed_ticid" not in kwargs:
                 sort_state_index = state_slugs.index(kwargs["sort_state"])
@@ -258,6 +259,13 @@ class TICIdSelectorView(View):
                     select(SelectTICIDs.id).where(
                         SelectTICIDs.status == sort_state_index
                     )
+                ) or db_session.scalar(
+                    select(SelectTICIDs.id).where(
+                        SelectTICIDs.status == status
+                    ).where(
+                        Rendered.id  # pylint: disable=singleton-comparison
+                        != None
+                    ).order_by(SelectTICIDs.id)
                 )
 
                 print(f"Selected TIC ID: {kwargs['displayed_ticid']}")

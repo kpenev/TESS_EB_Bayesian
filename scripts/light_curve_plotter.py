@@ -265,7 +265,18 @@ class LightCurvePlotter:
     def _plot_phase_zoomed(self, lightcurve, time_reference, period, model_lcs):
         """Create zoomed plot on primary on secondary eclipse per binary."""
 
+        if lightcurve.size == 0:
+            return
         phase = self._get_phase(lightcurve, period, time_reference)
+        offset_phase = phase % 1
+        print(f"Phase ({phase.max()} - {phase.min()}): {phase}")
+        print(
+            f"Phase offset by 0.5 ({offset_phase.max()} - "
+            f"{offset_phase.min()}): {offset_phase}"
+        )
+        if offset_phase.max() - offset_phase.min() < phase.max() - phase.min():
+            print("Using offset phase")
+            phase = offset_phase
         self.plot_vs_phase(
             lightcurve, phase, model_lcs, xlabel=r"$\Delta$Phase"
         )
@@ -309,11 +320,7 @@ class LightCurvePlotter:
         ):
             while binary_ind < len(binaries):
                 assert binaries is not None
-                if eclipse == "secondary":
-                    binaries[binary_ind].swap_components()
                 time_reference = binaries[binary_ind].t0
-                if eclipse == "secondary":
-                    binaries[binary_ind].swap_components()
                 if (
                     binaries[binary_ind].eclipse(numpy.array([time_reference]))[
                         0
