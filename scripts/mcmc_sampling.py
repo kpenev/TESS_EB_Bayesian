@@ -237,7 +237,7 @@ def get_backend(samples_fname, config):
 
     backend = HDFBackend(samples_fname)
     if path.exists(samples_fname):
-        with h5py.File(samples_fname, "r") as samples_file:
+        with h5py.File(samples_fname, "r+" if config.update_git_hash else "r") as samples_file:
             if config.update_git_hash:
                 samples_file.attrs["GitHash"] = _git_hash
             assert (
