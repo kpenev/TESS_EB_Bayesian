@@ -8,7 +8,7 @@ from glob import glob
 import logging
 from itertools import repeat
 
-from matplotlib import pyplot, rcParams
+from matplotlib import pyplot, rcParams, use
 
 try:
     from matplotlib import colormaps
@@ -309,7 +309,7 @@ def get_chain_expressions(plot_data, chain_expressions):
         plot_data = {}
         ranges = {}
         for expression in chain_expressions:
-            if ':' in expression:
+            if ":" in expression:
                 value_expression, range_expression = expression.split(":", 1)
             else:
                 value_expression = expression
@@ -586,7 +586,7 @@ def get_model_binaries(config, raw_data, log_prob, include, log_likelihood):
         top_params = None
 
     result = []
-    for selection in getattr(config, 'show_model_with_lc', []):
+    for selection in getattr(config, "show_model_with_lc", []):
         print(f"Plotting selection: {selection!r}")
         sample_params = None
         assert selection.strip().startswith("-1") or raw_data is not None
@@ -606,16 +606,15 @@ def get_model_binaries(config, raw_data, log_prob, include, log_likelihood):
             sample_params = [SampleParams(*sample) for sample in selection]
         elif selection != "bls":
             sample_params = get_walker_step_params(
-                raw_data, 
-                selection, 
-                config, 
-                log_likelihood, 
-                None if selection == "-1" else log_prob.shape[1]
+                raw_data,
+                selection,
+                config,
+                log_likelihood,
+                None if selection == "-1" else log_prob.shape[1],
             )
             if selection.startswith("-1,") and top_params is not None:
                 sample_params = [top_params] + sample_params
         result.extend(get_param_binaries(sample_params))
-
 
     return result
 
@@ -629,11 +628,13 @@ def get_plot_data(config, backend, log_likelihood):
     selected = None
 
     if num_iterations > 0:
-        raw_data = backend.get_blobs()
-        log_prob = backend.get_log_prob()
         if config.burn_in >= 0:
+            raw_data = backend.get_blobs(discard=config.burn_in, thin=config.thin)
+            log_prob = backend.get_log_prob(
+                discard=config.burn_in, thin=config.thin
+            )
             plot_data = pandas.DataFrame(
-                raw_data[config.burn_in : num_iterations : config.thin, :, :]
+                raw_data[: num_iterations // config.thin, :, :]
                 .flatten()
                 .reshape(
                     (
@@ -646,7 +647,7 @@ def get_plot_data(config, backend, log_likelihood):
                 columns=SampleParams._fields,
             )
             sub_log_prob = log_prob[
-                config.burn_in : num_iterations : config.thin, :
+                : num_iterations // config.thin, :
             ].flatten()
             sub_log_prob -= sub_log_prob[numpy.isfinite(sub_log_prob)].min()
             plot_data.insert(
@@ -751,9 +752,12 @@ def main(config):
                 log_likelihood,
             )
         else:
+            raw_data = backend.get_blobs()
+            log_prob = backend.get_log_prob()
+
             binaries = []
 
-        if "bls" in getattr(config, 'show_model_with_lc', []):
+        if "bls" in getattr(config, "show_model_with_lc", []):
             binaries.append("bls")
 
         LightCurvePlotter(config)(config.tic_id, binaries)

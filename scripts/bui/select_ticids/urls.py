@@ -23,7 +23,7 @@ def get_review_urls(mode, table_name, states):
                 get_render_dir(table_name, "convergence"),
                 "1 / 2 / span 1 / span 1",
             ),
-            (get_render_dir(table_name, "starting"), "1 / 3 / span 1 / span 1"),
+            # (get_render_dir(table_name, "starting"), "1 / 3 / span 1 / span 1"),
         )
     return [
         path(

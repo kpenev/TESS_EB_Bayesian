@@ -1,5 +1,5 @@
 {% url 'toggle_data' ticid=displayed_ticid selection=provenance review_table=review_table mode=mode as toggle_prov_url %}
-<ul style="width: 100%">
+<ul style="width: 100%; overflow-x: scroll; overflow-y: hidden; display: inline-flex; flex-direction: row">
     <li
             {% if provenance in enabled_prov %}
             class="enabled"

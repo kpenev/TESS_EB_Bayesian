@@ -185,18 +185,18 @@ def get_ooe_variability(
         ooe_mask = numpy.logical_and(ooe_mask, new_ooe_mask)
         _logger.debug("Re-fitting trend on %d OOE points.", ooe_mask.sum())
 
-    try:
-        pyplot.plot(lightcurve["time"], lightcurve["flux"], ".k")
-        pyplot.plot(masked_time, masked_flux, ".r")
-        pyplot.plot(masked_time[ooe_mask], masked_flux[ooe_mask], ".g")
-        pyplot.plot(lightcurve["time"], ooe_model, ".b")
-        pyplot.title(
-            ("Spline" if spline_nodes.size > 3 else "Polynomial")
-            + " detrending"
-        )
-        pyplot.show()
-    except:  # pylint: disable=bare-except
-        pass
+    #try:
+    #    pyplot.plot(lightcurve["time"], lightcurve["flux"], ".k")
+    #    pyplot.plot(masked_time, masked_flux, ".r")
+    #    pyplot.plot(masked_time[ooe_mask], masked_flux[ooe_mask], ".g")
+    #    pyplot.plot(lightcurve["time"], ooe_model, ".b")
+    #    pyplot.title(
+    #        ("Spline" if spline_nodes.size > 3 else "Polynomial")
+    #        + " detrending"
+    #    )
+    #    pyplot.show()
+    #except:  # pylint: disable=bare-except
+    #    pass
 
     discard_left, discard_right = ooe_ends_to_discard(mask)
     ooe_model[:discard_left] = numpy.nan
