@@ -154,27 +154,37 @@ class Green19Correction:
                 _logger.warning(message)
             else:
                 raise RuntimeError(message)
-        return {
-            "dm": (5.0 * numpy.log10(distance) - 5.0),
-            "E": numpy.array(
-                [
-                    -(
+        if numpy.isfinite(reddening[1, 1]) or not self._tic_fallback:
+            reddening = (
+                numpy.array(
+                    [
+                        -(
+                            (
+                                (reddening[0, 1] - reddening[1, 1]) ** 2
+                                + (reddening[1, 0] - reddening[1, 1]) ** 2
+                            )
+                            ** 0.5
+                        ),
+                        0.0,
                         (
-                            (reddening[0, 1] - reddening[1, 1]) ** 2
-                            + (reddening[1, 0] - reddening[1, 1]) ** 2
+                            (reddening[2, 1] - reddening[1, 1]) ** 2
+                            + (reddening[1, 2] - reddening[1, 1]) ** 2
                         )
-                        ** 0.5
-                    ),
-                    0.0,
-                    (
-                        (reddening[2, 1] - reddening[1, 1]) ** 2
-                        + (reddening[1, 2] - reddening[1, 1]) ** 2
-                    )
-                    ** 0.5,
-                ],
+                        ** 0.5,
+                    ],
+                )
+                + reddening[1, 1]
             )
-            + reddening[1, 1],
+        else:
+            reddening = (
+                numpy.array([-tic_entry["e_ebv"], 0.0, tic_entry["e_ebv"]])
+                + tic_entry["ebv"]
+            )
+        result = {
+            "dm": (5.0 * numpy.log10(distance) - 5.0),
+            "E": reddening,
         }
+        return result
 
     def _get_magnitudes(self, tic_entry):
         """Return the magnitudes and uncertainties for the given TIC entry."""
@@ -258,8 +268,20 @@ class Green19Correction:
         # )
         # pylint: enable=line-too-long
 
-    def __init__(self, ignore_flags=False):
-        """Prepare to query the Green et. al. (2019) data."""
+    def __init__(self, ignore_flags=False, tic_fallback=True):
+        """
+        Prepare to query the Green et. al. (2019) data.
+
+        Args:
+            ignore_flags (bool): If True, warn instead of raising errors when
+                convergence and reliability flags of the Bayestar map are False.
+
+            tic_fallback (bool): If True, use TIC E(B-V) values to infer
+                reddening when Bayestar map is undefined.
+
+        Returns:
+            None
+        """
 
         self._last_healpix = numpy.array(
             [
@@ -286,6 +308,7 @@ class Green19Correction:
         self._1sigma_pct = 100.0 * norm.cdf([-1, 0, 1])
         self._bayestar = BayestarQuery(version="bayestar2019")
         self._ignore_flags = ignore_flags
+        self._tic_fallback = tic_fallback
 
     def get_map_data(self, tic_ids):
         """Return all info from Green et. al. (2019) for the given TIC."""
