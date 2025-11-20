@@ -26,6 +26,10 @@ jktebob = {
     "fitlcfname": path.join(results_dir, "tess{tic_id}_jktebob_{mode}.fit"),
 }
 samples = path.join(results_dir, "tess{tic_id:d}_samples.h5")
+archived = path.join(results_dir, "archived", "tess{tic_id:d}_archived.h5")
+convergence_pickle = path.join(
+    results_dir, "archived", "tess{tic_id:d}_archived.pkl"
+)
 
 slurm_fname = path.join(
     path.dirname(data_dir), "slurm", "{hpc}", "{mode}_{job_name}.slurm"
