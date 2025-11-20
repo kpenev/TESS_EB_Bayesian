@@ -29,7 +29,7 @@ render() {
     conda run -n py311 python3 -u \
         ${source_dir}/bui/select_ticids/plots.py "${plot_mode}" \
 	--limit-to-statuses 2 7 \
-        --limit-to-jobs 2: \
+        --limit-to-jobs 2: 3: \
 	--samples-fname-template \
 	/scratch/juno/kxp174430/TESS_EBs/juno/samples/tess{tic_id:d}_samples.h5 \
         --num-parallel 8 \
@@ -48,8 +48,8 @@ render() {
 source ~/module_load_order.sh
 source ~/set_environment.sh
 
-#render sample_prsa starting
 render sample_prsa best
-#render sample_prsa convergence
+render sample_prsa convergence
+render sample_prsa starting
 
 wait
