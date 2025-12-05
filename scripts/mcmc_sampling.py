@@ -220,7 +220,13 @@ def parse_command_line():
         action="store_true",
         help="If specified the current git hash relpaces what is in the file.",
     )
-
+    parser.add_argument(
+        "--max-mcmc-steps",
+        type=int,
+        default=None,
+        help="The maximum number of steps the MCMC sampler is allowed to add. "
+        "If specified, restarting to eliminate bad local minima is disabled.",
+    )
 
     return parser.parse_args()
 
@@ -237,7 +243,9 @@ def get_backend(samples_fname, config):
 
     backend = HDFBackend(samples_fname)
     if path.exists(samples_fname):
-        with h5py.File(samples_fname, "r+" if config.update_git_hash else "r") as samples_file:
+        with h5py.File(
+            samples_fname, "r+" if config.update_git_hash else "r"
+        ) as samples_file:
             if config.update_git_hash:
                 samples_file.attrs["GitHash"] = _git_hash
             assert (
@@ -402,7 +410,8 @@ def main(config):
                 *backend.shape, log_likelihood, backend=backend, pool=pool
             ).run_mcmc(
                 initial_state,
-                nsteps=(
+                nsteps=config.max_mcmc_steps
+                or (
                     1024**2
                     if final_run
                     else (
