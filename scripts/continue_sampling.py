@@ -213,7 +213,6 @@ def update_job_group(config):
         )
         if config.add_nodes_per_job:
             job_group.nodes_per_job += config.add_nodes_per_job
-            db_session.commit()
         SelectTICTable = get_ticid_select_tables(
             job_group.select_tic_table, must_exist=True
         )[0]
