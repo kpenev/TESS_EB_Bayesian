@@ -168,7 +168,7 @@ def update_job(  # pylint: disable=too-many-arguments
     if config.add_nodes_per_job:
         db_session.execute(
             update(JobGroup)
-            .filter_by(job_group=group_id)
+            .filter_by(id=group_id)
             .values(
                 nodes_per_job=config.nodes_per_job + config.add_nodes_per_job
             )
