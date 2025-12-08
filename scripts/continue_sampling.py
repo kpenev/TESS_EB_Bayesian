@@ -152,7 +152,7 @@ def update_job(  # pylint: disable=too-many-arguments
     ).all()
     expected_num_tics = config.nodes_per_job * tic_per_node[config.hpc]
 
-    if config.fill_partial_jobs:
+    if config.fill_partial_jobs or config.add_nodes_per_job:
         assert len(job_entries) <= expected_num_tics, (
             f"Got {len(job_entries)} TICS instead of {expected_num_tics} or "
             f"fewer entries for job group {group_id}, job {job_id} on "
@@ -165,17 +165,6 @@ def update_job(  # pylint: disable=too-many-arguments
             f" job group {group_id}, job {job_id} on {config.hpc}"
         )
     cmd_substitutions = []
-    if config.add_nodes_per_job:
-        db_session.execute(
-            update(JobGroup)
-            .filter_by(id=group_id)
-            .values(
-                nodes_per_job=config.nodes_per_job + config.add_nodes_per_job
-            )
-        )
-        job_entries.extend(
-            (config.add_nodes_per_job * tic_per_node[config.hpc]) * [None]
-        )
 
     for entry in job_entries:
         substitution = {"job_id": job_id, "ticid": getattr(entry, "id", None)}
@@ -222,6 +211,9 @@ def update_job_group(config):
         job_group = db_session.scalar(
             select(JobGroup).filter_by(id=config.job_group)
         )
+        if config.add_nodes_per_job:
+            job_group.nodes_per_job += config.add_nodes_per_job
+            db_session.commit()
         SelectTICTable = get_ticid_select_tables(
             job_group.select_tic_table, must_exist=True
         )[0]
