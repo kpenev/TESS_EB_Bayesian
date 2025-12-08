@@ -2,7 +2,7 @@
 
 """Use templates to make fully funcional slurm files."""
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from command_line_util import (
     identify_hpc,
@@ -73,6 +73,19 @@ def parse_command_line():
         action="store_true",
         help="If specified the current git hash relpaces what is in the file.",
     )
+    parser.add_argument(
+        "--add-nodes-per-job",
+        type=int,
+        default=0,
+        help="Set a new number of nodes for each job in the given job group.",
+    )
+    parser.add_argument(
+        "--fill-partial-jobs",
+        action="store_true",
+        help="If passed, jobs are not expected to already contain the correct "
+        "number of tics. Instead they should contain no more than that. Extra "
+        "TIC IDs will be selected for sampling to fill any missing slots.",
+    )
     return parser.parse_args()
 
 
@@ -138,24 +151,50 @@ def update_job(  # pylint: disable=too-many-arguments
         select(SelectTICTable).filter_by(job_group=group_id, job_id=job_id)
     ).all()
     expected_num_tics = config.nodes_per_job * tic_per_node[config.hpc]
-    assert len(job_entries) == expected_num_tics, (
-        f"Got {len(job_entries)} instead of {expected_num_tics} for job group "
-        f"{group_id} on {config.hpc}"
-    )
+
+    if config.fill_partial_jobs:
+        assert len(job_entries) <= expected_num_tics, (
+            f"Got {len(job_entries)} TICS instead of {expected_num_tics} or "
+            f"fewer for job group {group_id} on {config.hpc}"
+        )
+        job_entries.extend((expected_num_tics - len(job_entries)) * [None])
+    else:
+        assert len(job_entries) == expected_num_tics, (
+            f"Got {len(job_entries)} instead of {expected_num_tics} for job "
+            f"group {group_id} on {config.hpc}"
+        )
     cmd_substitutions = []
+    if config.add_nodes_per_job:
+        db_session.execute(
+            update(JobGroup)
+            .filter_by(job_group=group_id)
+            .values(
+                nodes_per_job=config.nodes_per_job + config.add_nodes_per_job
+            )
+        )
+        job_entries.extend(
+            (config.add_nodes_per_job * tic_per_node[config.hpc]) * [None]
+        )
 
     for entry in job_entries:
         substitution = {"job_id": job_id, "ticid": entry.id}
-        if entry.status in config.changed_likelihood_statuses:
+        if (
+            entry is not None
+            and entry.status in config.changed_likelihood_statuses
+        ):
             substitution["extra_cmdline"] = "--changed-likelihood"
-        elif (config.continue_statuses is None and entry.status > 0) or (
-            config.continue_statuses is not None
-            and entry.status in config.continue_statuses
+        elif entry is not None and (
+            (config.continue_statuses is None and entry.status > 0)
+            or (
+                config.continue_statuses is not None
+                and entry.status in config.continue_statuses
+            )
         ):
             substitution["extra_cmdline"] = ""
         else:
-            entry.job_id = None
-            entry.job_group = None
+            if entry is not None:
+                entry.job_id = None
+                entry.job_group = None
             replacement = pending.pop(0)
             replacement.job_group = group_id
             replacement.job_id = job_id
