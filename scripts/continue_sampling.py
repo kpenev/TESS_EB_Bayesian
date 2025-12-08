@@ -178,7 +178,7 @@ def update_job(  # pylint: disable=too-many-arguments
         )
 
     for entry in job_entries:
-        substitution = {"job_id": job_id, "ticid": entry.id}
+        substitution = {"job_id": job_id, "ticid": getattr(entry, "id", None)}
         if (
             entry is not None
             and entry.status in config.changed_likelihood_statuses
