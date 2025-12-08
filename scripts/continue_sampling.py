@@ -155,13 +155,14 @@ def update_job(  # pylint: disable=too-many-arguments
     if config.fill_partial_jobs:
         assert len(job_entries) <= expected_num_tics, (
             f"Got {len(job_entries)} TICS instead of {expected_num_tics} or "
-            f"fewer for job group {group_id} on {config.hpc}"
+            f"fewer entries for job group {group_id}, job {job_id} on "
+            f"{config.hpc}"
         )
         job_entries.extend((expected_num_tics - len(job_entries)) * [None])
     else:
         assert len(job_entries) == expected_num_tics, (
-            f"Got {len(job_entries)} instead of {expected_num_tics} for job "
-            f"group {group_id} on {config.hpc}"
+            f"Got {len(job_entries)} instead of {expected_num_tics} entries for"
+            f" job group {group_id}, job {job_id} on {config.hpc}"
         )
     cmd_substitutions = []
     if config.add_nodes_per_job:
