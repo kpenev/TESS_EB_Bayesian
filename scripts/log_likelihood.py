@@ -94,6 +94,7 @@ class LogLikelihood(TESSTarget):
                             none_to_nan(cached_sed.w2_err),
                         ]
                     ),
+                    (cached_sed.bad_sed_threshold, cached_sed.bad_sed_penalty),
                 )
 
             if cached_bls:
@@ -120,7 +121,7 @@ class LogLikelihood(TESSTarget):
         return sed, bls
 
     def _cache(self, tic_id):
-        """Add the SED ind best fit BLS to cache (overwriting if necessary)."""
+        """Add the SED and best fit BLS to cache (overwriting if necessary)."""
 
         # False positive
         # pylint: disable=no-member
@@ -148,6 +149,8 @@ class LogLikelihood(TESSTarget):
                     },
                     w1_err=self._sed[1][8],
                     w2_err=self._sed[1][9],
+                    bad_sed_threshold=self._sed[2][0],
+                    bad_sed_penalty=self._sed[2][1],
                 )
             )
             cache_session.add(
@@ -413,7 +416,7 @@ class LogLikelihood(TESSTarget):
         if self._sed is None or "SED" in overwrite_cache:
             self._sed = Green19Correction(
                 ignore_extinction_flags
-            ).get_absolute_magnitudes(tic_id)[0]
+            ).get_absolute_magnitudes(tic_id)[0] + (0, 0)
         if "BLS" in overwrite_cache:
             self._best_fit_bls = None
 
@@ -894,15 +897,16 @@ class LogLikelihood(TESSTarget):
 
         finite = numpy.isfinite(self._sed[0])
         sed_sq_errors = self._sed[1][finite] ** 2 + sed_sys_err**2
-
         result = (
-            -(
-                (self._sed[0][finite] - binary.absmag[finite]) ** 2
-                / sed_sq_errors
-                + numpy.log(sed_sq_errors)
-            ).sum()
-            / 2
-        )
+            self._sed[0][finite] - binary.absmag[finite]
+        ) ** 2 / sed_sq_errors + numpy.log(sed_sq_errors)
+        if self._sed[2][1]:
+            nsigma = numpy.abs(
+                self._sed[0][finite] - binary.absmag[finite]
+            ) / numpy.maximum(self._sed[1][finite], 0.01)
+            bad_sed = nsigma > self._sed[2][0]
+            result[bad_sed] *= 10.0 ** (self._sed[2][1] * nsigma[bad_sed])
+        result = -result.sum() / 2
         self._logger.debug("SED log-likelihood: %s", result)
         return result
 

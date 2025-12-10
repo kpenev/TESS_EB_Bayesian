@@ -4,16 +4,17 @@
 import os.path
 import pickle
 
-import scipy
+from matplotlib import pyplot
+import scipy.stats
 import numpy
 import pandas
 from configargparse import ArgumentParser, DefaultsFormatter
 
-from general_purpose_python_modules.emcee_quantile_convergence import (
-    find_quantile_burnin,
-    diagnose_emcee_quantile,
-)
-from general_purpose_python_modules import ensure_directory
+# from general_purpose_python_modules.emcee_quantile_convergence import (
+#    find_quantile_burnin,
+#    diagnose_emcee_quantile,
+# )
+# from general_purpose_python_modules import ensure_directory
 
 from hacked_emcee_hdf5_backend import HDFBackend
 from sample_params import SampleParams
@@ -38,16 +39,28 @@ def parse_command_line():
         help="List of TIC IDs whose sample files to prepare for archiving.",
     )
     parser.add_argument(
+        "--samples-fname-pattern",
+        default=paths.samples,
+        help="The filename where to save samples. If the file already exists, "
+        "sampling continues, adding more points to the existing chain.",
+    )
+    parser.add_argument(
         "--chain-name",
         default="mcmc",
         help="The name of the HDF5 group containin the MCMC chain to "
         "visualize.",
     )
     parser.add_argument(
+        "--num-archive-steps",
+        type=int,
+        default=256,
+        help="How many steps to include in the archive.",
+    )
+    parser.add_argument(
         "--use-samples",
         action="store_true",
         help="If passed, the burn-in and thinning are determined based on the "
-        "MCMC samples instead of the blobs.",
+        "MCMC samples instead of the blobs. NOT IMPLEMENTED!!!",
     )
     parser.add_argument(
         "--cdf-tolerance",
@@ -80,19 +93,14 @@ def parse_command_line():
     return parser.parse_args()
 
 
-def get_raw_data(samples_fname, config):
+def get_raw_data(samples_fname, config, nsamples, thin):
     """Return the samples in the given file as pandas DataFrame."""
 
     backend = HDFBackend(samples_fname, name=config.chain_name, read_only=True)
 
-    if config.use_samples:
-        raw_data = backend.get_chain()
-    else:
-        raw_data = backend.get_blobs()
-
-    return (
-        pandas.DataFrame(
-            raw_data.flatten().reshape(
+    def format_result(data):
+        return pandas.DataFrame(
+            data.flatten().reshape(
                 backend.iteration * backend.shape[0], backend.shape[1]
             ),
             columns=(
@@ -100,7 +108,15 @@ def get_raw_data(samples_fname, config):
                 if config.use_samples
                 else SampleParams._fields
             ),
-        ),
+        )
+
+    raw_data = backend.get_blobs(
+        discard=backend.iteration - 2 * nsamples * thin, thin=thin
+    )
+
+    return (
+        format_result(raw_data[nsamples:]),
+        format_result(raw_data[:nsamples]),
         backend.shape[0],
     )
 
@@ -166,17 +182,82 @@ def get_archive_burnin(raw_data, quantile_burnin, config, num_walkers):
                 )
             )
 
-def get_archive_samples(raw_data, quantile_burnin, config):
+
+def validate_selection(raw_data, thin, config):
+    """Return True iff the given burnin and thinning are suitable."""
+
+    archive = raw_data[-config.num_archive_steps * thin :, :, :]
+    compare = raw_data[
+        -2 * config.num_archive_steps * thin : -config.num_archive_steps * thin,
+        :,
+        :,
+    ]
+    for quantity in ["mtotal", "mratio", "age_gyr", "meh", "ecc"]:
+        quantity_i = SampleParams._fields.index(quantity)
+        ks_test = scipy.stats.anderson_ksamp(
+            (archive[:, :, quantity_i].flatten(),
+            compare[:, :, quantity_i].flatten()),
+            #method="asymp",
+        )
+        pyplot.hist(
+            archive[:, :, quantity_i].flatten(),
+            bins=100,
+            facecolor='none',
+            edgecolor='r',
+            density=True
+        )
+        pyplot.hist(
+            compare[:, :, quantity_i].flatten(),
+            bins=100,
+            facecolor='none',
+            edgecolor='b',
+            density=True
+        )
+        pyplot.show()
+
+        if ks_test.statistic > config.cdf_tolerance:
+            return False
+    return True
+
+
+def find_best_thinning(raw_data, config):
     """Select the samples to include in the archive to preserve distrbutions."""
+
+    thin_upper = 1
+    while validate_selection(raw_data, thin_upper, config):
+        thin_lower = thin_upper
+        print(f"{thin_lower} <= thin < {thin_upper}")
+        thin_upper *= 2
+    while thin_upper > thin_lower + 1:
+        thin_try = (thin_upper + thin_lower) // 2
+        if validate_selection(raw_data, thin_try, config):
+            thin_lower = thin_try
+        else:
+            thin_upper = thin_try
+    return thin_lower
 
 
 def main(config):
     """Avoid global variables."""
 
-    data, num_walkers = get_raw_data(
-        paths.samples.format(tic_id=config.tic_ids[0]), config
-    )
-    print(data)
+    for tic_id in config.tic_ids:
+        backend = HDFBackend(
+            config.samples_fname_pattern.format(tic=tic_id),
+            name=config.chain_name,
+            read_only=True,
+        )
+        raw_data = backend.get_blobs()
+
+        thin = find_best_thinning(raw_data, config)
+        print(
+            f"Keeping final {thin * config.num_archive_steps} steps, "
+            f"discarding {backend.iteration - thin * config.num_archive_steps} "
+            f"with thinning {thin}."
+        )
+
+        raw_data = raw_data[-config.num_archive_steps * thin_lower :, :, :]
+    return
+
     convergence_pickle = paths.convergence_pickle.format(
         tic_id=config.tic_ids[0]
     )

@@ -106,6 +106,16 @@ class CachedSED(DataModelBase):  # pylint: disable=too-few-public-methods
     w2_err = mapped_column(
         Float, doc="The WISE W2 filter magnitude uncertainty of the EB"
     )
+    bad_sed_threshold = mapped_column(
+        Float,
+        doc="How many sigma away should model be from measured SED before the "
+        "bad SED penalty kicks in.",
+    )
+    bad_sed_penalty = mapped_column(
+        Float,
+        doc="The factor by which to enhance the SED error bar when the "
+        "threshold is exceeded."
+    )
 
     def __str__(self):
         return (
