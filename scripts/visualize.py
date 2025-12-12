@@ -8,7 +8,7 @@ from glob import glob
 import logging
 from itertools import repeat
 
-from matplotlib import pyplot, rcParams, use
+from matplotlib import pyplot, rcParams, colormaps
 
 try:
     from matplotlib import colormaps
@@ -25,6 +25,7 @@ from general_purpose_python_modules.emcee_util import load_initial_positions
 from general_purpose_python_modules.emcee_quantile_convergence import (
     find_emcee_quantiles,
 )
+from general_purpose_python_modules.multi_pickle import MultiPickle
 
 from hacked_emcee_hdf5_backend import HDFBackend
 from sample_params import SampleParams
@@ -89,6 +90,12 @@ def parse_command_line():
         "expression of the sample variables at fixed iteration. Thinning and "
         "burn-in control which iterations are included as frames. Can use "
         "``{tic_id}`` substitution in filename.",
+    )
+    parser.add_argument(
+        "--plot-quantiles",
+        nargs="+",
+        metavar=("FILENAME", "CDF1"),
+        help=create_quantile_plot.__doc__,
     )
     parser.add_argument(
         "--plot-lightcurve",
@@ -346,8 +353,34 @@ def create_corner_plot(plot_data, config):
 def get_convergence_data(plot_data, config, num_walkers):
     """Prepare the data needed for the convergence plot."""
 
+    pickler = MultiPickle(
+        "convergence_data.pickle",
+        (
+            "samples_fname_pattern",
+            "samples_fname",
+            "corner_plot_fname",
+            "plot_expressions",
+            "expression_movie",
+            "histogram_movie",
+            "plot_lightcurve",
+            "show_model_with_lc",
+            "show_lc_detrending",
+            "eclipse_model_only",
+            "plot_convergence",
+            "sample_condition",
+            "x_range",
+            "y_range",
+            "histogram_resolution",
+            "histogram_range",
+            "data_on_top",
+        ),
+    )
     num_steps = plot_data.shape[0] // num_walkers
     assert num_walkers * num_steps == plot_data.shape[0]
+    config.num_steps = num_steps
+    pickled = pickler.check_for_pickled(config)
+    if pickled is not None:
+        return pickled[0]
 
     num_entries = len(plot_data.columns) * len(config.diagnostic_quantiles)
     print(f"Initializing convergence data with {num_entries} entries")
@@ -374,6 +407,8 @@ def get_convergence_data(plot_data, config, num_walkers):
             convergence_data["burnin"][result_ind] = quantile_info[4]
 
             result_ind += 1
+    pickler.discard_result(config, "num_steps")
+    pickler.add_result(config, convergence_data)
 
     return convergence_data
 
@@ -510,6 +545,46 @@ def create_histogram_movie(plot_data, config, num_walkers):
             movie.add_frame()
 
 
+def hex_color(color_tuple):
+    """Return string of hex color give tuple of 0-1 float values."""
+
+    return "#" + "".join(
+        [f"{int(numpy.round(c * 255)):02x}" for c in color_tuple[:3]]
+    )
+
+
+def create_quantile_plot(plot_data, config, num_walkers):
+    """Make a plot showing the evolution of quantile(s) of chain expressions."""
+
+    num_steps = plot_data.shape[0] // num_walkers
+    plot_x = numpy.arange(num_steps)
+    plot_data = get_chain_expressions(plot_data, config.chain_expression)[0]
+    cmap = colormaps.get_cmap("tab10")
+    pyplot.figure(
+        figsize=(
+            rcParams["figure.figsize"][0],
+            rcParams["figure.figsize"][1] * len(plot_data.columns),
+        )
+    )
+    for color, column in enumerate(plot_data.columns):
+        pyplot.subplot(len(plot_data.columns), 1, color + 1)
+        pyplot.title(column)
+        color = hex_color(cmap(color % cmap.N))
+        for cdf_value in map(float, config.plot_quantiles[1:]):
+            assert 0.0 <= cdf_value <= 1.0
+            column_data = (
+                plot_data[column].to_numpy().reshape(num_steps, num_walkers)
+            )
+            pyplot.plot(
+                plot_x,
+                numpy.quantile(column_data, cdf_value, axis=1),
+                color=color,
+                label=f"q={cdf_value}",
+            )
+        pyplot.legend()
+    pyplot.savefig(config.plot_quantiles[0])
+
+
 def get_param_binaries(sample_params):
     """Convert the given sample parameters to binaries for plotting."""
 
@@ -629,7 +704,9 @@ def get_plot_data(config, backend, log_likelihood):
 
     if num_iterations > 0:
         if config.burn_in >= 0:
-            raw_data = backend.get_blobs(discard=config.burn_in, thin=config.thin)
+            raw_data = backend.get_blobs(
+                discard=config.burn_in, thin=config.thin
+            )
             log_prob = backend.get_log_prob(
                 discard=config.burn_in, thin=config.thin
             )
@@ -777,6 +854,9 @@ def main(config):
     if getattr(config, "plot_convergence", False):
         print("Creating convergence plot")
         create_convergence_plot(plot_data, config, backend.shape[0])
+    if getattr(config, "plot_quantiles", False):
+        print("Creating quantile plot")
+        create_quantile_plot(plot_data, config, backend.shape[0])
 
 
 if __name__ == "__main__":
