@@ -821,7 +821,9 @@ class LogLikelihood(TESSTarget):
         )
         return max(sys_err, 1e-10)
 
-    def calc_lc_log_likelihood(self, binary, lc_sys_err, bls_eclipse_only=()):
+    def calc_lc_log_likelihood(  # pylint: disable=too-many-branches
+        self, binary, lc_sys_err, bls_eclipse_only=(), return_residuals=False
+    ):
         """
         Return log-likelihood of observing the TESS LCs for given binary.
 
@@ -845,11 +847,16 @@ class LogLikelihood(TESSTarget):
 
                 * masked: Points near the eclipses reported in the masked BLS
                   are considered
+
+            return_residuals(bool):    If True, return the residuals of between
+                the model and LC (e.g. for use in least squares fit). WARNING:
+                the correction term for ``lc_sys_err`` is not included in the
+                residuals.
         """
 
         if binary.a < 1 + binary.rp or binary.out_of_range:
             return -numpy.inf
-        result = 0.0
+        result = numpy.array([]) if return_residuals else 0.0
         for header, lightcurve in self._lcs:
             if lightcurve["good"].sum() < 10:
                 continue
@@ -880,33 +887,40 @@ class LogLikelihood(TESSTarget):
                 continue
             else:
                 observed_lc = lightcurve["flux"][mask]
-            result -= (
-                (observed_lc - model_lc) ** 2 / lc_sq_errors
-                + numpy.log(lc_sq_errors)
-            ).sum()
+            sq_residuals = (observed_lc - model_lc) ** 2 / lc_sq_errors
+            if return_residuals:
+                result = numpy.concatenate((result, sq_residuals**0.5))
+            else:
+                result -= (sq_residuals + numpy.log(lc_sq_errors)).sum()
             self._logger.debug("Log likelihood now: %s", repr(result / 2))
 
-        if not numpy.isfinite(result):
+        if not numpy.isfinite(result).all():
             self._logger.error(
                 "Non-finite log-likelihood for binary: %s", binary
             )
-        return result / 2
+        if not return_residuals:
+            result /= 2
+        return result
 
-    def calc_sed_log_likelihood(self, binary, sed_sys_err):
+    def calc_sed_log_likelihood(
+        self, binary, sed_sys_err, return_residuals=False
+    ):
         """Return log-likelihood of observed SED for given binary."""
 
         finite = numpy.isfinite(self._sed[0])
         sed_sq_errors = self._sed[1][finite] ** 2 + sed_sys_err**2
         result = (
             self._sed[0][finite] - binary.absmag[finite]
-        ) ** 2 / sed_sq_errors + numpy.log(sed_sq_errors)
+        ) ** 2 / sed_sq_errors
         if self._sed[2][1]:
             nsigma = numpy.abs(
                 self._sed[0][finite] - binary.absmag[finite]
             ) / numpy.maximum(self._sed[1][finite], 0.01)
             bad_sed = nsigma > self._sed[2][0]
             result[bad_sed] *= 10.0 ** (self._sed[2][1] * nsigma[bad_sed])
-        result = -result.sum() / 2
+        if return_residuals:
+            return result**0.5
+        result = -(result + numpy.log(sed_sq_errors)).sum() / 2
         self._logger.debug("SED log-likelihood: %s", result)
         return result
 

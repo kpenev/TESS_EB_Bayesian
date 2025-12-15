@@ -898,3 +898,66 @@ def create_jktebob_inputs(log_likelihood):
             )
         )
         outf.write(template.read().format_map(values))
+
+
+def fit_least_squares(log_likelihood, initial_mcmc_sample):
+    """
+    Find least squares MCMC sample starting from given position.
+
+    Args:
+        initial_mcmc_sample(array):    Initial guess for the MCMC sample
+            values. Omit the last two entiers (corresponding to `lc_sys` and
+            `sed_sys`) to keep those fixed at zero during the fit.
+
+    Returns:
+        OptimizeResult:
+            The result of the optimization containing the best fit
+            parameters in the `x` attribute. See
+            `scipy.optimize.least_squares`.
+    """
+
+    def residuals(x, num_residuals):
+        """Return array of residuals (LC and SED) for given MCMC sample."""
+
+        residuals.num_eval += 1
+        print(f"Function evaluation {residuals.num_eval}")
+        if x.size < len(SampleParams._fields):
+            x = numpy.concatenate(x, [0.0, 0.0])
+            assert x.size == len(SampleParams._fields)
+        sample_params = log_likelihood.get_sample_params(x)
+        try:
+            binary = Binary(from_mcmc=sample_params)
+        except ValueError:
+            return numpy.full(num_residuals, numpy.inf)
+        return numpy.concatenate(
+            (
+                log_likelihood.calc_lc_log_likelihood(
+                    binary, sample_params.lc_sys, return_residuals=True
+                ),
+                log_likelihood.calc_sed_log_likelihood(
+                    binary, sample_params.sed_sys, return_residuals=True
+                ),
+            )
+        )
+
+
+    residuals.num_eval = 0
+    initial_resdiuals = residuals(initial_mcmc_sample, 0)
+    print(
+        "Initial residuals evaluated at MCMC sample\n"
+        f"{initial_mcmc_sample!r}:\n{initial_resdiuals!r}"
+    )
+    assert (
+        initial_resdiuals.size > 0 and numpy.isfinite(initial_resdiuals).all()
+    ), (
+        "Likelihood must be defined at initial residuals for least squares "
+        "fit."
+    )
+    return optimize.least_squares(
+        residuals,
+        initial_mcmc_sample,
+        args=(initial_resdiuals.size,),
+        method="lm",
+        xtol=1e-5,
+        max_nfev=300 * initial_mcmc_sample.size,
+    )

@@ -8,7 +8,7 @@ from glob import glob
 import logging
 from itertools import repeat
 
-from matplotlib import pyplot, rcParams, colormaps
+from matplotlib import pyplot, rcParams
 
 try:
     from matplotlib import colormaps
@@ -30,6 +30,7 @@ from general_purpose_python_modules.multi_pickle import MultiPickle
 from hacked_emcee_hdf5_backend import HDFBackend
 from sample_params import SampleParams
 from log_likelihood import LogLikelihood
+from find_starting_positions import fit_least_squares
 from paths import samples as samples_fname
 from binary import Binary
 from light_curve_plotter import LightCurvePlotter
@@ -96,6 +97,18 @@ def parse_command_line():
         nargs="+",
         metavar=("FILENAME", "CDF1"),
         help=create_quantile_plot.__doc__,
+    )
+    parser.add_argument(
+        "--quantile-plot-show-burnin",
+        action="store_true",
+        help="If specified, the quantile plot shows the burn-in estimate as "
+        "change in line width.",
+    )
+    parser.add_argument(
+        "--show-lstsq",
+        action="store_true",
+        help="If specified, the generated plots also shows the least-squares "
+        "fit to the highest likelihood sample.",
     )
     parser.add_argument(
         "--plot-lightcurve",
@@ -306,55 +319,11 @@ class MovieMaker:
         self._frame_ind += 1
 
 
-def get_chain_expressions(plot_data, chain_expressions):
-    """Evaluate the chain expressions specified on the command line."""
+def get_pickler(filename):
+    """Return a MultiPickle instance for the given filename."""
 
-    if "selected" in plot_data:
-        plot_data = plot_data[plot_data["selected"]]
-    if chain_expressions:
-        evaluate = Interpreter(user_symbols=plot_data)
-        plot_data = {}
-        ranges = {}
-        for expression in chain_expressions:
-            if ":" in expression:
-                value_expression, range_expression = expression.split(":", 1)
-            else:
-                value_expression = expression
-                range_expression = "1.0"
-            name, value_expression = value_expression.split("=")
-            plot_data[name] = evaluate(value_expression)
-            ranges[name] = tuple(
-                evaluate(v) for v in range_expression.split(":")
-            )
-    print(f"Plot data: {plot_data!r}")
-    plot_data = pandas.DataFrame(plot_data)
-    ranges = [ranges[col] for col in plot_data.columns]
-    return plot_data, ranges
-
-
-def create_corner_plot(plot_data, config):
-    """Create and save a corner plot."""
-
-    plot_data, ranges = get_chain_expressions(
-        plot_data, config.chain_expression
-    )
-    make_corner_plot(
-        plot_data,
-        corner_plot_fname=config.corner_plot_fname,
-        plot_contours=True,
-        bins=30,
-        labelpad=0.08,
-        range=ranges,
-    )
-    pyplot.cla()
-    pyplot.clf()
-
-
-def get_convergence_data(plot_data, config, num_walkers):
-    """Prepare the data needed for the convergence plot."""
-
-    pickler = MultiPickle(
-        "convergence_data.pickle",
+    return MultiPickle(
+        filename,
         (
             "samples_fname_pattern",
             "samples_fname",
@@ -375,6 +344,81 @@ def get_convergence_data(plot_data, config, num_walkers):
             "data_on_top",
         ),
     )
+
+
+def get_chain_expressions(plot_data, chain_expressions):
+    """Evaluate the chain expressions specified on the command line."""
+
+    if "selected" in plot_data:
+        plot_data = plot_data[plot_data["selected"]]
+    if chain_expressions:
+        evaluate = Interpreter(user_symbols=plot_data)
+        plot_data = {}
+        ranges = {}
+        for expression in chain_expressions:
+            if ":" in expression:
+                value_expression, range_expression = expression.split(":", 1)
+                plot_range = tuple(
+                    evaluate(v) for v in range_expression.split(":")
+                )
+            else:
+                value_expression = expression
+                plot_range = 1.0
+            name, value_expression = value_expression.split("=")
+            plot_data[name] = evaluate(value_expression)
+            ranges[name] = plot_range
+    for value in plot_data.values():
+        if numpy.atleast_1d(value).size > 1:
+            print(f"Plot data: {plot_data!r}")
+            plot_data = pandas.DataFrame(plot_data)
+            ranges = [ranges[col] for col in plot_data.columns]
+            return plot_data, ranges
+    return plot_data
+
+
+def create_corner_plot(plot_data, config, _, lstsq_data):
+    """Create and save a corner plot."""
+
+    plot_data, ranges = get_chain_expressions(
+        plot_data, config.chain_expression
+    )
+    print(f"Ranges: {ranges!r}")
+    figure = make_corner_plot(
+        plot_data,
+        corner_plot_fname=None,
+        plot_contours=True,
+        bins=30,
+        labelpad=0.08,
+        range=ranges,
+    )
+    if lstsq_data:
+        lstsq_values = get_chain_expressions(
+            lstsq_data["lstsq_params"]._asdict(), config.chain_expression
+        )
+        print(f"Least Squares values: {lstsq_values!r}")
+        ndim = len(plot_data.columns)
+        axes = numpy.array(figure.axes).reshape((ndim, ndim))
+        for yi, y_column in enumerate(plot_data.columns):
+            ax = axes[yi, yi]
+            y_lstsq = lstsq_values[y_column]
+            ax.axvline(y_lstsq, color="g")
+
+            for xi in range(yi):
+                x_lstsq = lstsq_values[plot_data.columns[xi]]
+                ax = axes[yi, xi]
+                ax.axvline(x_lstsq, color="g")
+                ax.axhline(y_lstsq, color="g")
+                ax.plot(x_lstsq, y_lstsq, "sg")
+
+    pyplot.savefig(config.corner_plot_fname)
+    pyplot.cla()
+    pyplot.clf()
+
+
+def get_convergence_data(plot_data, config, num_walkers):
+    """Prepare the data needed for the convergence plot."""
+
+    pickler = get_pickler("convergence_data.pickle")
     num_steps = plot_data.shape[0] // num_walkers
     assert num_walkers * num_steps == plot_data.shape[0]
     config.num_steps = num_steps
@@ -385,7 +429,8 @@ def get_convergence_data(plot_data, config, num_walkers):
     num_entries = len(plot_data.columns) * len(config.diagnostic_quantiles)
     print(f"Initializing convergence data with {num_entries} entries")
     convergence_data = {
-        "burnin": numpy.empty(num_entries, dtype=float),
+        "value": numpy.empty(num_entries, dtype=float),
+        "burnin": numpy.empty(num_entries, dtype=int),
         "stdev": numpy.empty(num_entries, dtype=float),
         "thin": numpy.empty(num_entries, dtype=int),
         "num_steps": num_steps,
@@ -402,9 +447,12 @@ def get_convergence_data(plot_data, config, num_walkers):
                 max(1, num_steps // 10),
             )
             print(f"Quantile info: {quantile_info}")
+            convergence_data["value"][result_ind] = quantile_info[0]
             convergence_data["stdev"][result_ind] = quantile_info[2]
             convergence_data["thin"][result_ind] = quantile_info[3] or 0
-            convergence_data["burnin"][result_ind] = quantile_info[4]
+            convergence_data["burnin"][result_ind] = (
+                quantile_info[4] if quantile_info[4] > 0 else 2 * num_steps
+            )
 
             result_ind += 1
     pickler.discard_result(config, "num_steps")
@@ -559,28 +607,69 @@ def create_quantile_plot(plot_data, config, num_walkers):
     num_steps = plot_data.shape[0] // num_walkers
     plot_x = numpy.arange(num_steps)
     plot_data = get_chain_expressions(plot_data, config.chain_expression)[0]
-    cmap = colormaps.get_cmap("tab10")
     pyplot.figure(
         figsize=(
             rcParams["figure.figsize"][0],
             rcParams["figure.figsize"][1] * len(plot_data.columns),
         )
     )
-    for color, column in enumerate(plot_data.columns):
-        pyplot.subplot(len(plot_data.columns), 1, color + 1)
+    plot_quantiles = [float(q) for q in config.plot_quantiles[1:]]
+    if config.quantile_plot_show_burnin:
+        orig_quantiles = config.diagnostic_quantiles
+        config.diagnostic_quantiles = plot_quantiles
+        convergence_data = get_convergence_data(plot_data, config, num_walkers)
+        convergence_data = iter(
+            [
+                (
+                    convergence_data["burnin"][i],
+                    convergence_data["value"][i],
+                )
+                for i in range(len(convergence_data["value"]))
+            ]
+        )
+        config.diagnostic_quantiles = orig_quantiles
+    for column_i, column in enumerate(plot_data.columns):
+        pyplot.subplot(len(plot_data.columns), 1, column_i + 1)
         pyplot.title(column)
-        color = hex_color(cmap(color % cmap.N))
-        for cdf_value in map(float, config.plot_quantiles[1:]):
+        yrange = numpy.inf, -numpy.inf
+        for cdf_value in plot_quantiles:
             assert 0.0 <= cdf_value <= 1.0
-            column_data = (
-                plot_data[column].to_numpy().reshape(num_steps, num_walkers)
+            plot_y = numpy.quantile(
+                plot_data[column].to_numpy().reshape(num_steps, num_walkers),
+                cdf_value,
+                axis=1,
             )
-            pyplot.plot(
-                plot_x,
-                numpy.quantile(column_data, cdf_value, axis=1),
-                color=color,
-                label=f"q={cdf_value}",
-            )
+
+            if config.quantile_plot_show_burnin:
+                burnin, quantile = next(convergence_data)
+                print(
+                    f"For {column!r} q={cdf_value} burnin: {burnin}, "
+                    f"quantile: {quantile}"
+                )
+                color = pyplot.plot(
+                    plot_x[:burnin],
+                    plot_y[:burnin],
+                    linewidth=1,
+                )[0].get_color()
+                pyplot.plot(
+                    plot_x[burnin:],
+                    plot_y[burnin:],
+                    linewidth=3,
+                    color=color,
+                    label=f"q={cdf_value}",
+                )
+                pyplot.axhline(y=quantile, color=color, linestyle="--")
+                yrange = (min(yrange[0], quantile), max(yrange[1], quantile))
+
+            else:
+                pyplot.plot(
+                    plot_x,
+                    plot_y,
+                    label=f"q={cdf_value}",
+                )
+        pyplot.ylim(
+            1.2 * yrange[0] - 0.2 * yrange[1], 1.2 * yrange[1] - 0.2 * yrange[0]
+        )
         pyplot.legend()
     pyplot.savefig(config.plot_quantiles[0])
 
@@ -642,7 +731,41 @@ def get_walker_step_params(
     return sample_params
 
 
-def get_model_binaries(config, raw_data, log_prob, include, log_likelihood):
+def get_lstsq(backend, log_likelihood):
+    """Max likelihood mcmc sample, parameters, log prob and LSQ fit versions."""
+
+    pickler = MultiPickle("lstsq_data.pickle")
+    pickler_config = {
+        "samples_fname": backend.filename,
+        "num_steps": backend.iteration,
+    }
+    pickled = pickler.check_for_pickled(pickler_config)
+    if pickled is not None:
+        return pickled[0]
+
+    log_prob = backend.get_log_prob()
+    best_index = numpy.unravel_index(numpy.nanargmax(log_prob), log_prob.shape)
+    best_mcmc = backend.get_chain()[best_index]
+    best_params = backend.get_blobs()[best_index]
+    lstsq_result = fit_least_squares(log_likelihood, best_mcmc)
+    print(f"Least squares fit result: {lstsq_result!r}")
+
+    result = {
+        "best_mcmc": best_mcmc,
+        "best_params": best_params,
+        "best_logprob": log_prob[best_index],
+        "lstsq_mcmc": lstsq_result.x,
+        "lstsq_params": log_likelihood.get_sample_params(lstsq_result.x),
+        "lstsq_logprob": log_likelihood(lstsq_result.x),
+    }
+    pickler.discard_result(pickler_config, "num_steps")
+    pickler.add_result(pickler_config, result)
+    return result
+
+
+def get_model_binaries(
+    config, raw_data, log_prob, include, log_likelihood, lstsq_data=None
+):
     """Return fully set-up binaries per ``--show-model-with-lc``."""
 
     if raw_data is not None:
@@ -660,7 +783,11 @@ def get_model_binaries(config, raw_data, log_prob, include, log_likelihood):
     else:
         top_params = None
 
-    result = []
+    result = (
+        get_param_binaries([lstsq_data["lstsq_params"]])
+        if config.show_lstsq
+        else []
+    )
     for selection in getattr(config, "show_model_with_lc", []):
         print(f"Plotting selection: {selection!r}")
         sample_params = None
@@ -779,12 +906,13 @@ def main(config):
     """Avoid polluting global namespace."""
 
     config.highlight_first_model = False
-    logging.basicConfig(level=logging.DEBUG)
+    logging.basicConfig(level=logging.INFO)
     log_likelihood = None
     print(
         f"Reading plot data from {config.samples_fname}/"
         f"{getattr(config, 'chain_name', '')}"
     )
+    lstsq_data = None
     if path.exists(config.samples_fname) and getattr(
         config, "chain_name", False
     ):
@@ -801,6 +929,8 @@ def main(config):
             backend,
             log_likelihood,
         )
+        if config.show_lstsq:
+            lstsq_data = get_lstsq(backend, log_likelihood)
     else:
         plot_data = None
         raw_data = None
@@ -827,6 +957,7 @@ def main(config):
                     else None
                 ),
                 log_likelihood,
+                lstsq_data,
             )
         else:
             raw_data = backend.get_blobs()
@@ -839,24 +970,16 @@ def main(config):
 
         LightCurvePlotter(config)(config.tic_id, binaries)
 
-    if getattr(config, "corner_plot_fname", False):
-        print("Creating corner plot")
-        create_corner_plot(plot_data, config)
-
-    if getattr(config, "plot_expressions", False):
-        print("Creating expressions plot")
-        create_expressions_plot(plot_data, config, backend.shape[0])
-
-    if getattr(config, "histogram_movie", False):
-        print("Creating histogram movie")
-        create_histogram_movie(plot_data, config, backend.shape[0])
-
-    if getattr(config, "plot_convergence", False):
-        print("Creating convergence plot")
-        create_convergence_plot(plot_data, config, backend.shape[0])
-    if getattr(config, "plot_quantiles", False):
-        print("Creating quantile plot")
-        create_quantile_plot(plot_data, config, backend.shape[0])
+    for attr, plot_func in (
+        ("corner_plot_fname", create_corner_plot),
+        ("plot_expressions", create_expressions_plot),
+        ("histogram_movie", create_histogram_movie),
+        ("plot_convergence", create_convergence_plot),
+        ("plot_quantiles", create_quantile_plot),
+    ):
+        if getattr(config, attr, False):
+            print(f"Creating {attr.replace('_', ' ')}")
+            plot_func(plot_data, config, backend.shape[0], lstsq_data)
 
 
 if __name__ == "__main__":
