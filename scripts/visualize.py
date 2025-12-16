@@ -8,7 +8,7 @@ from glob import glob
 import logging
 from itertools import repeat
 
-from matplotlib import pyplot, rcParams
+from matplotlib import pyplot, rcParams, legend_handler
 
 try:
     from matplotlib import colormaps
@@ -346,7 +346,7 @@ def get_pickler(filename):
     )
 
 
-def get_chain_expressions(plot_data, chain_expressions):
+def get_chain_expressions(plot_data, chain_expressions, lstsq_data=None):
     """Evaluate the chain expressions specified on the command line."""
 
     if "selected" in plot_data:
@@ -376,6 +376,21 @@ def get_chain_expressions(plot_data, chain_expressions):
     return plot_data
 
 
+def include_in_axis(ax, x, y):
+    """Ensure that the given x and y values are included in the given axis."""
+
+    for val, direction in [(x, "x"), (y, "y")]:
+        if val is None:
+            continue
+        ax_min, ax_max = getattr(ax, f"get_{direction}lim")()
+        if val < ax_min:
+            getattr(ax, f"set_{direction}lim")(val - 0.05 * (ax_max - val))
+        elif val > ax_max:
+            getattr(ax, f"set_{direction}lim")(
+                None, val + 0.05 * (val - ax_min)
+            )
+
+
 def create_corner_plot(plot_data, config, _, lstsq_data):
     """Create and save a corner plot."""
 
@@ -395,20 +410,36 @@ def create_corner_plot(plot_data, config, _, lstsq_data):
         lstsq_values = get_chain_expressions(
             lstsq_data["lstsq_params"]._asdict(), config.chain_expression
         )
+        maxlike_values = get_chain_expressions(
+            lstsq_data["best_params"]._asdict(), config.chain_expression
+        )
         print(f"Least Squares values: {lstsq_values!r}")
         ndim = len(plot_data.columns)
         axes = numpy.array(figure.axes).reshape((ndim, ndim))
         for yi, y_column in enumerate(plot_data.columns):
             ax = axes[yi, yi]
-            y_lstsq = lstsq_values[y_column]
-            ax.axvline(y_lstsq, color="g")
+            mark_y = {
+                "lstsq": lstsq_values[y_column],
+                "maxlike": maxlike_values[y_column],
+            }
+            ax.axvline(mark_y["maxlike"], color="r")
+            ax.axvline(mark_y["lstsq"], color="g")
+
+            include_in_axis(ax, mark_y["lstsq"], None)
 
             for xi in range(yi):
-                x_lstsq = lstsq_values[plot_data.columns[xi]]
+                mark_x = {
+                    "lstsq": lstsq_values[plot_data.columns[xi]],
+                    "maxlike": maxlike_values[plot_data.columns[xi]],
+                }
                 ax = axes[yi, xi]
-                ax.axvline(x_lstsq, color="g")
-                ax.axhline(y_lstsq, color="g")
-                ax.plot(x_lstsq, y_lstsq, "sg")
+                ax.axvline(mark_x["maxlike"], color="r")
+                ax.axvline(mark_x["lstsq"], color="g")
+                ax.axhline(mark_y["maxlike"], color="r")
+                ax.axhline(mark_y["lstsq"], color="g")
+                ax.plot(mark_x["maxlike"], mark_y["maxlike"], "sr")
+                ax.plot(mark_x["lstsq"], mark_y["lstsq"], "sg")
+                include_in_axis(ax, mark_x["lstsq"], mark_y["lstsq"])
 
     pyplot.savefig(config.corner_plot_fname)
     pyplot.cla()
@@ -461,7 +492,7 @@ def get_convergence_data(plot_data, config, num_walkers):
     return convergence_data
 
 
-def create_convergence_plot(plot_data, config, num_walkers):
+def create_convergence_plot(plot_data, config, num_walkers, _):
     """Create a figure to gauge convergence of the chain per Raftery-Lewis."""
 
     plot_data = get_chain_expressions(plot_data, config.chain_expression)[0]
@@ -527,44 +558,126 @@ def create_convergence_plot(plot_data, config, num_walkers):
     pyplot.savefig(config.plot_convergence[0])
 
 
-def create_expressions_plot(plot_data, config, num_walkers=None):
+def get_lstsq_interpreters(lstsq_data):
+    """Return interpreters for least-squares and max-likelihood samples."""
+
+    return {
+        "lstsq": Interpreter(
+            {
+                "logprob": lstsq_data["lstsq_logprob"],
+                **lstsq_data["lstsq_params"]._asdict(),
+            }
+        ),
+        "maxlike": Interpreter(
+            {
+                "logprob": lstsq_data["best_logprob"],
+                **lstsq_data["best_params"]._asdict(),
+            }
+        ),
+    }
+
+
+def create_expressions_plot(
+    plot_data, config, num_walkers=None, lstsq_data=None
+):
     """Plot expressions inolving sampling vars vs common x."""
+
+    def add_lstsq(colors):
+        """Add least-squares fit and max likelihood points to the plot."""
+
+        if not hasattr(add_lstsq, "data"):
+            interp = get_lstsq_interpreters(lstsq_data)
+            add_lstsq.data = {
+                "lstsq_x": interp["lstsq"](config.plot_expressions[1]),
+                "lstsq_y": [
+                    interp["lstsq"](y_expression)
+                    for y_expression in config.plot_expressions[2:]
+                ],
+                "maxlike_x": interp["maxlike"](config.plot_expressions[1]),
+                "maxlike_y": [
+                    interp["maxlike"](y_expression)
+                    for y_expression in config.plot_expressions[2:]
+                ],
+            }
+
+        for point, label in [
+            ("lstsq", "Least-Squares"),
+            ("maxlike", "Max Likelihood"),
+        ]:
+            plot_x = [add_lstsq.data[f"{point}_x"]] * len(
+                add_lstsq.data[f"{point}_y"]
+            )
+            pyplot.scatter(
+                plot_x,
+                add_lstsq.data[f"{point}_y"],
+                marker="s" if point == "lstsq" else "*",
+                c=colors,
+                edgecolors="black",
+                s=150,
+                label=label,
+                zorder=100,
+            )
+
+    def fix_legend(handle, orig):
+        handle.update_from(orig)
+        handle.set_marker("o")
 
     assert len(config.plot_expressions) >= 3
     evaluate = Interpreter(user_symbols=plot_data)
-    plot_x = evaluate(config.plot_expressions[1])
+    plot_x = evaluate(config.plot_expressions[1]).to_numpy()
     plot_y = [
-        evaluate(y_expression) for y_expression in config.plot_expressions[2:]
+        evaluate(y_expression).to_numpy()
+        for y_expression in config.plot_expressions[2:]
     ]
-    selected = plot_data["selected"].array if "selected" in plot_data else None
+    selected = (
+        plot_data["selected"].to_numpy()
+        if "selected" in plot_data
+        else slice(None)
+    )
 
     if config.expression_movie:
         assert num_walkers is not None
         shape = (plot_x.size // num_walkers, num_walkers)
         plot_x = plot_x.reshape(shape)
         plot_y = [y.reshape(shape) for y in plot_y]
-        if selected:
+        if "selected" in plot_data:
             selected = selected.reshape(shape)
         with MovieMaker(config.plot_expressions[0], plot_x.shape[0]) as movie:
             for frame_ind in range(plot_x.shape[0]):
                 frame_selected = (
-                    None if selected is None else selected[frame_ind]
+                    selected[frame_ind] if "selected" in plot_data else None
                 )
-                for y, label in zip(plot_y, config.plot_expressions[2:]):
+                colors = [
                     pyplot.plot(
                         plot_x[frame_ind][frame_selected],
                         y[frame_ind][frame_selected],
                         ".",
                         label=label,
-                    )
+                    )[0].get_color()
+                    for y, label in zip(plot_y, config.plot_expressions[2:])
+                ]
+                if lstsq_data:
+                    add_lstsq(colors)
+
                 pyplot.legend()
                 pyplot.xlim(config.x_range)
                 pyplot.ylim(config.y_range)
                 movie.add_frame()
     else:
-        for y, label in zip(plot_y[selected], config.plot_expressions[2:]):
-            pyplot.plot(plot_x[selected], y, ",", label=label)
-        pyplot.legend()
+        colors = [
+            pyplot.plot(plot_x[selected], y, ",", label=label)[0].get_color()
+            for y, label in zip(plot_y[selected], config.plot_expressions[2:])
+        ]
+        if lstsq_data:
+            add_lstsq(colors)
+
+        pyplot.legend(
+            handler_map={
+                pyplot.Line2D: legend_handler.HandlerLine2D(
+                    update_func=fix_legend
+                )
+            }
+        )
         pyplot.xlim(config.x_range)
         pyplot.ylim(config.y_range)
         pyplot.savefig(config.plot_expressions[0])
@@ -572,11 +685,18 @@ def create_expressions_plot(plot_data, config, num_walkers=None):
         pyplot.clf()
 
 
-def create_histogram_movie(plot_data, config, num_walkers):
+def create_histogram_movie(plot_data, config, num_walkers, lstsq_data=None):
     """See `--histogram-movie` command line argument description."""
 
-    values = Interpreter(user_symbols=plot_data)(config.histogram_movie[1])
+    values = Interpreter(user_symbols=plot_data)(
+        config.histogram_movie[1]
+    ).to_numpy()
     values = values.reshape(values.size // num_walkers, num_walkers)
+    if lstsq_data:
+        lstsq_interp = get_lstsq_interpreters(lstsq_data)
+        lstsq_value = lstsq_interp["lstsq"](config.histogram_movie[1])
+        maxlike_value = lstsq_interp["maxlike"](config.histogram_movie[1])
+
     selected = (
         plot_data["selected"].array.reshape(values.shape)
         if "selected" in plot_data
@@ -590,6 +710,16 @@ def create_histogram_movie(plot_data, config, num_walkers):
                 range=config.histogram_range,
                 density=True,
             )
+            if lstsq_data:
+                pyplot.axvline(
+                    lstsq_value, color="g", linestyle="-", label="LSTSQ"
+                )
+                pyplot.axvline(
+                    maxlike_value, color="r", linestyle="-", label="ML"
+                )
+                include_in_axis(pyplot.gca(), lstsq_value, None)
+                include_in_axis(pyplot.gca(), maxlike_value, None)
+
             movie.add_frame()
 
 
@@ -601,12 +731,29 @@ def hex_color(color_tuple):
     )
 
 
-def create_quantile_plot(plot_data, config, num_walkers):
+def create_quantile_plot(plot_data, config, num_walkers, lstsq_data=None):
     """Make a plot showing the evolution of quantile(s) of chain expressions."""
 
     num_steps = plot_data.shape[0] // num_walkers
     plot_x = numpy.arange(num_steps)
     plot_data = get_chain_expressions(plot_data, config.chain_expression)[0]
+    if lstsq_data:
+        lstsq_data = {
+            "lstsq": get_chain_expressions(
+                {
+                    "logprob": lstsq_data["lstsq_logprob"],
+                    **lstsq_data["lstsq_params"]._asdict(),
+                },
+                config.chain_expression,
+            ),
+            "maxlike": get_chain_expressions(
+                {
+                    "logprob": lstsq_data["best_logprob"],
+                    **lstsq_data["best_params"]._asdict(),
+                },
+                config.chain_expression,
+            ),
+        }
     pyplot.figure(
         figsize=(
             rcParams["figure.figsize"][0],
@@ -639,7 +786,11 @@ def create_quantile_plot(plot_data, config, num_walkers):
                 cdf_value,
                 axis=1,
             )
-
+            print(
+                f"Marking maxlike and lstsq for column {column} at "
+                f"{lstsq_data['maxlike'][column]} and "
+                f"{lstsq_data['lstsq'][column]} respectively"
+            )
             if config.quantile_plot_show_burnin:
                 burnin, quantile = next(convergence_data)
                 print(
@@ -670,6 +821,17 @@ def create_quantile_plot(plot_data, config, num_walkers):
         pyplot.ylim(
             1.2 * yrange[0] - 0.2 * yrange[1], 1.2 * yrange[1] - 0.2 * yrange[0]
         )
+        if lstsq_data:
+            pyplot.axhline(
+                y=lstsq_data["maxlike"][column], color="r", linestyle=":"
+            )
+            pyplot.axhline(
+                y=lstsq_data["lstsq"][column], color="g", linestyle=":"
+            )
+            include_in_axis(pyplot.gca(), None, lstsq_data["maxlike"][column])
+            include_in_axis(pyplot.gca(), None, lstsq_data["lstsq"][column])
+
+
         pyplot.legend()
     pyplot.savefig(config.plot_quantiles[0])
 
@@ -731,7 +893,7 @@ def get_walker_step_params(
     return sample_params
 
 
-def get_lstsq(backend, log_likelihood):
+def get_lstsq(backend, log_likelihood, config):
     """Max likelihood mcmc sample, parameters, log prob and LSQ fit versions."""
 
     pickler = MultiPickle("lstsq_data.pickle")
@@ -743,20 +905,26 @@ def get_lstsq(backend, log_likelihood):
     if pickled is not None:
         return pickled[0]
 
-    log_prob = backend.get_log_prob()
+    log_prob = backend.get_log_prob(discard=config.burn_in, thin=config.thin)
     best_index = numpy.unravel_index(numpy.nanargmax(log_prob), log_prob.shape)
-    best_mcmc = backend.get_chain()[best_index]
-    best_params = backend.get_blobs()[best_index]
+    best_mcmc = backend.get_chain(discard=config.burn_in, thin=config.thin)[
+        best_index
+    ]
+    best_params = backend.get_blobs(discard=config.burn_in, thin=config.thin)[
+        best_index
+    ]
     lstsq_result = fit_least_squares(log_likelihood, best_mcmc)
     print(f"Least squares fit result: {lstsq_result!r}")
 
+    min_log_prob = log_prob.min()
+
     result = {
         "best_mcmc": best_mcmc,
-        "best_params": best_params,
-        "best_logprob": log_prob[best_index],
+        "best_params": SampleParams(*best_params),
+        "best_logprob": log_prob[best_index] - min_log_prob,
         "lstsq_mcmc": lstsq_result.x,
         "lstsq_params": log_likelihood.get_sample_params(lstsq_result.x),
-        "lstsq_logprob": log_likelihood(lstsq_result.x),
+        "lstsq_logprob": log_likelihood(lstsq_result.x)[0] - min_log_prob,
     }
     pickler.discard_result(pickler_config, "num_steps")
     pickler.add_result(pickler_config, result)
@@ -841,10 +1009,7 @@ def get_plot_data(config, backend, log_likelihood):
                 raw_data[: num_iterations // config.thin, :, :]
                 .flatten()
                 .reshape(
-                    (
-                        (num_iterations - config.burn_in + config.thin - 1)
-                        // config.thin
-                    )
+                    ((num_iterations - config.burn_in) // config.thin)
                     * backend.shape[0],
                     backend.shape[1],
                 ),
@@ -930,7 +1095,7 @@ def main(config):
             log_likelihood,
         )
         if config.show_lstsq:
-            lstsq_data = get_lstsq(backend, log_likelihood)
+            lstsq_data = get_lstsq(backend, log_likelihood, config)
     else:
         plot_data = None
         raw_data = None
