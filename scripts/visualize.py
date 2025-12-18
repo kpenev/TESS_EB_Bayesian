@@ -486,7 +486,6 @@ def get_convergence_data(plot_data, config, num_walkers):
             )
 
             result_ind += 1
-    pickler.discard_result(config, "num_steps")
     pickler.add_result(config, convergence_data)
 
     return convergence_data
@@ -831,7 +830,6 @@ def create_quantile_plot(plot_data, config, num_walkers, lstsq_data=None):
             include_in_axis(pyplot.gca(), None, lstsq_data["maxlike"][column])
             include_in_axis(pyplot.gca(), None, lstsq_data["lstsq"][column])
 
-
         pyplot.legend()
     pyplot.savefig(config.plot_quantiles[0])
 
@@ -860,6 +858,10 @@ def get_walker_step_params(
         )
         if len(selection) != 1:
             initial_positions = [initial_positions[selection[1]]]
+        print(
+            f"Filtering initial positions:\n{initial_positions!r} with "
+            f"condition: {getattr(config, 'sample_condition', 'True')!r}"
+        )
         sample_params = [
             log_likelihood.get_sample_params(sample)
             for sample in initial_positions
@@ -871,8 +873,9 @@ def get_walker_step_params(
                         "bls_duration": log_likelihood.best_fit_bls["duration"],
                     }
                 )
-            )(getattr(config, "sample_condition", "True"))
+            )(config.sample_condition or "True")
         ]
+        print(f"Surviving params: {sample_params!r}")
     else:
         if len(selection) == 1:
             if include is not None:
@@ -916,7 +919,7 @@ def get_lstsq(backend, log_likelihood, config):
     lstsq_result = fit_least_squares(log_likelihood, best_mcmc)
     print(f"Least squares fit result: {lstsq_result!r}")
 
-    min_log_prob = log_prob.min()
+    min_log_prob = log_prob[numpy.isfinite(log_prob)].min()
 
     result = {
         "best_mcmc": best_mcmc,
@@ -926,7 +929,10 @@ def get_lstsq(backend, log_likelihood, config):
         "lstsq_params": log_likelihood.get_sample_params(lstsq_result.x),
         "lstsq_logprob": log_likelihood(lstsq_result.x)[0] - min_log_prob,
     }
-    pickler.discard_result(pickler_config, "num_steps")
+    print(
+        "LSTSQ result: "
+        + "\n\t".join([f"{key}: {value!r}" for key, value in result.items()])
+    )
     pickler.add_result(pickler_config, result)
     return result
 
@@ -953,7 +959,7 @@ def get_model_binaries(
 
     result = (
         get_param_binaries([lstsq_data["lstsq_params"]])
-        if config.show_lstsq
+        if getattr(config, 'show_lstsq', False)
         else []
     )
     for selection in getattr(config, "show_model_with_lc", []):
@@ -1094,7 +1100,7 @@ def main(config):
             backend,
             log_likelihood,
         )
-        if config.show_lstsq:
+        if getattr(config, 'show_lstsq', False):
             lstsq_data = get_lstsq(backend, log_likelihood, config)
     else:
         plot_data = None
