@@ -1131,9 +1131,6 @@ def main(config):
                 lstsq_data,
             )
         else:
-            raw_data = backend.get_blobs()
-            log_prob = backend.get_log_prob()
-
             binaries = []
 
         if "bls" in getattr(config, "show_model_with_lc", []):
