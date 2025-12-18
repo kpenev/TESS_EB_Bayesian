@@ -280,7 +280,9 @@ def get_tics_to_render(config):
     # pylint: disable=no-member
     # This is actually a class
     # pylint: disable=invalid-name
-    SelectTICIDs = get_ticid_select_tables(config.table_name)[0]
+    SelectTICIDs = get_ticid_select_tables(
+        config.table_name, refresh_rendered=not config.skip_rendered
+    )[0]
     # pylint: enable=no-member
     # pylint: enable=invalid-name
 

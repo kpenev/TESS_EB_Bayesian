@@ -625,6 +625,42 @@ class FindStartingPositions:
                         (scenario_ind, norm.rvs(size=len(SampleParams._fields)))
                     )
                     continue
+                lstsq_sample = self._params_to_sample(params)
+                max_loggprob = self._log_likelihood(lstsq_sample)[0]
+                _logger.info(
+                    "Starting least squares optimization from probability: %s",
+                    repr(max_loggprob),
+                )
+                try:
+                    lstsq_sample = fit_least_squares(
+                        self._log_likelihood, lstsq_sample
+                    )
+                    _logger.info(
+                        "Least squares optimization result:\n%s",
+                        lstsq_sample,
+                    )
+                    lstsq_sample = lstsq_sample.x
+                    lstsq_log_likelihood = self._log_likelihood(lstsq_sample)[0]
+                    _logger.info(
+                        "Least squares optimized log-likelihood: %s",
+                        repr(lstsq_log_likelihood),
+                    )
+                    if lstsq_log_likelihood <= max_loggprob:
+                        _logger.warning(
+                            "Least squares optimization did not improve "
+                            "log-likelihood, using pre-optimization sample!"
+                        )
+                    else:
+                        params = self._log_likelihood.get_sample_params(
+                            lstsq_sample
+                        )
+                except AssertionError:
+                    _logger.warning(
+                        "Least squares optimization failed, using "
+                        "pre-optimization sample."
+                    )
+                _logger.info("Least squares optimized parameters:\n%s", params)
+
                 period_tweak = min(
                     self._log_likelihood.best_fit_bls["period"][1] / 4,
                     0.2
@@ -921,25 +957,30 @@ def fit_least_squares(log_likelihood, initial_mcmc_sample):
 
         residuals.num_eval += 1
         print(f"Function evaluation {residuals.num_eval}")
-        if x.size < len(SampleParams._fields):
-            x = numpy.concatenate(x, [0.0, 0.0])
-            assert x.size == len(SampleParams._fields)
+        x = numpy.concatenate((x, [0.0, 0.0]))
+        assert x.size == len(SampleParams._fields)
         sample_params = log_likelihood.get_sample_params(x)
         try:
             binary = Binary(from_mcmc=sample_params)
         except ValueError:
             return numpy.full(num_residuals, numpy.inf)
-        return numpy.concatenate(
-            (
-                log_likelihood.calc_lc_log_likelihood(
-                    binary, sample_params.lc_sys, return_residuals=True
-                ),
-                log_likelihood.calc_sed_log_likelihood(
-                    binary, sample_params.sed_sys, return_residuals=True
-                ),
-            )
+        lc_residuals = log_likelihood.calc_lc_log_likelihood(
+            binary, sample_params.lc_sys, return_residuals=True
         )
+        if not numpy.isfinite(lc_residuals).all():
+            return numpy.full(num_residuals, numpy.inf)
+        sed_residuals = log_likelihood.calc_sed_log_likelihood(
+            binary, sample_params.sed_sys, return_residuals=True
+        )
+        print(
+            f"Contatenating {lc_residuals.size} LC and {sed_residuals.size} "
+            "SED residuals"
+        )
+        return numpy.concatenate((lc_residuals, sed_residuals, x))
 
+    if initial_mcmc_sample.size == len(SampleParams._fields):
+        # Fix lc_sys and sed_sys to zero during least squares fit
+        initial_mcmc_sample = initial_mcmc_sample[:-2]
 
     residuals.num_eval = 0
     initial_resdiuals = residuals(initial_mcmc_sample, 0)
@@ -958,6 +999,6 @@ def fit_least_squares(log_likelihood, initial_mcmc_sample):
         initial_mcmc_sample,
         args=(initial_resdiuals.size,),
         method="lm",
-        xtol=1e-5,
+        xtol=1e-6,
         max_nfev=300 * initial_mcmc_sample.size,
     )

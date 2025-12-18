@@ -887,11 +887,15 @@ class LogLikelihood(TESSTarget):
                 continue
             else:
                 observed_lc = lightcurve["flux"][mask]
-            sq_residuals = (observed_lc - model_lc) ** 2 / lc_sq_errors
             if return_residuals:
-                result = numpy.concatenate((result, sq_residuals**0.5))
+                result = numpy.concatenate(
+                    (result, (observed_lc - model_lc) / lc_sq_errors**0.5)
+                )
             else:
-                result -= (sq_residuals + numpy.log(lc_sq_errors)).sum()
+                result -= (
+                    (observed_lc - model_lc) ** 2 / lc_sq_errors
+                    + numpy.log(lc_sq_errors)
+                ).sum()
             self._logger.debug("Log likelihood now: %s", repr(result / 2))
 
         if not numpy.isfinite(result).all():
@@ -908,10 +912,10 @@ class LogLikelihood(TESSTarget):
         """Return log-likelihood of observed SED for given binary."""
 
         finite = numpy.isfinite(self._sed[0])
-        sed_sq_errors = self._sed[1][finite] ** 2 + sed_sys_err**2
+        sed_errors = (self._sed[1][finite] ** 2 + sed_sys_err**2)**0.5
         result = (
             self._sed[0][finite] - binary.absmag[finite]
-        ) ** 2 / sed_sq_errors
+        ) / sed_errors
         if self._sed[2][1]:
             nsigma = numpy.abs(
                 self._sed[0][finite] - binary.absmag[finite]
@@ -919,8 +923,8 @@ class LogLikelihood(TESSTarget):
             bad_sed = nsigma > self._sed[2][0]
             result[bad_sed] *= 10.0 ** (self._sed[2][1] * nsigma[bad_sed])
         if return_residuals:
-            return result**0.5
-        result = -(result + numpy.log(sed_sq_errors)).sum() / 2
+            return result
+        result = -(result**2 + numpy.log(sed_errors**2)).sum() / 2
         self._logger.debug("SED log-likelihood: %s", result)
         return result
 
