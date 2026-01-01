@@ -1,0 +1,370 @@
+"""Collection of utility functions useful for MCMC init and sampling."""
+
+from multiprocessing import Pool
+import logging
+
+import numpy
+from scipy import optimize
+from scipy.stats import uniform, norm
+
+from general_purpose_python_modules.multiprocessing_util import (
+    setup_process_map,
+)
+
+from sample_params import SampleParams
+from binary import Binary
+
+_logger = logging.getLogger(__name__)
+
+
+def fit_least_squares(log_likelihood, initial_mcmc_sample, fit_sys_err=True):
+    """
+    Find least squares MCMC sample starting from given position.
+
+    Args:
+        initial_mcmc_sample(array):    Initial guess for the MCMC sample
+            values. Omit the last two entiers (corresponding to `lc_sys` and
+            `sed_sys`) to keep those fixed at zero during the fit.
+
+    Returns:
+        OptimizeResult:
+            The result of the optimization containing the best fit
+            parameters in the `x` attribute. See
+            `scipy.optimize.least_squares`.
+    """
+
+    def residuals(x, num_residuals):
+        """Return array of residuals (LC and SED) for given MCMC sample."""
+
+        residuals.num_eval += 1
+        print(f"Function evaluation {residuals.num_eval}")
+        if x.size == len(SampleParams._fields) - 2:
+            x = numpy.concatenate((x, [0.0, 0.0]))
+        assert x.size == len(SampleParams._fields)
+        sample_params = log_likelihood.get_sample_params(x)
+        # sample_params = sample_params._replace(
+        #    lc_sys=0.0, sed_sys=0.0
+        # )
+        try:
+            binary = Binary(from_mcmc=sample_params)
+        except ValueError:
+            return numpy.full(num_residuals, numpy.inf)
+        lc_residuals = log_likelihood.calc_lc_log_likelihood(
+            binary, sample_params.lc_sys, return_residuals=True
+        )
+        if not numpy.isfinite(lc_residuals).all():
+            return numpy.full(num_residuals, numpy.inf)
+        sed_residuals = log_likelihood.calc_sed_log_likelihood(
+            binary, sample_params.sed_sys, return_residuals=True
+        )
+        print(
+            f"Concatenating {lc_residuals.size} LC and {sed_residuals.size} "
+            "SED residuals"
+        )
+        return numpy.concatenate((lc_residuals, sed_residuals, x))
+
+    assert initial_mcmc_sample.size == len(SampleParams._fields)
+    if not fit_sys_err:
+        # Fix lc_sys and sed_sys to zero during least squares fit if instructed
+        initial_mcmc_sample = initial_mcmc_sample[:-2]
+
+    residuals.num_eval = 0
+    initial_resdiuals = residuals(initial_mcmc_sample, 0)
+    print(
+        "Initial residuals evaluated at MCMC sample\n"
+        f"{initial_mcmc_sample!r}:\n{initial_resdiuals!r}"
+    )
+    assert (
+        initial_resdiuals.size > 0 and numpy.isfinite(initial_resdiuals).all()
+    ), (
+        "Likelihood must be defined at initial residuals for least squares "
+        "fit."
+    )
+    return optimize.least_squares(
+        residuals,
+        initial_mcmc_sample,
+        args=(initial_resdiuals.size,),
+        method="lm",
+        xtol=1e-6,
+        max_nfev=300 * initial_mcmc_sample.size,
+    )
+
+
+def tweak_params(
+    params,
+    log_likelihood,
+    abs_tweak_scale=SampleParams(
+        mtotal=3e-4,
+        mratio=0.0,
+        age_gyr=0.0,
+        meh=0.01,
+        per=0.0,
+        ecc=3e-5,
+        w=0.1,
+        primary_impact_param=1e-3,
+        eclipse_time=0.0,
+        primary_limb_dark_1=0.0,
+        primary_limb_dark_2=0.0,
+        secondary_limb_dark_1=0.0,
+        secondary_limb_dark_2=0.0,
+        primary_prot=0.1,
+        secondary_prot=0.1,
+        primary_reflection_coef=0.0,
+        secondary_reflection_coef=0.0,
+        primary_beaming_coef=0.0,
+        secondary_beaming_coef=0.0,
+        lc_sys=0.0,
+        sed_sys=0.0,
+    ),
+    rel_tweak_scale=SampleParams(
+        mtotal=0.0,
+        mratio=0.01,
+        age_gyr=0.05,
+        meh=0.0,
+        per=0.0,
+        ecc=0.0,
+        w=0.0,
+        primary_impact_param=0.0,
+        eclipse_time=0.0,
+        primary_limb_dark_1=0.01,
+        primary_limb_dark_2=0.01,
+        secondary_limb_dark_1=0.01,
+        secondary_limb_dark_2=0.01,
+        primary_prot=0.0,
+        secondary_prot=0.0,
+        primary_reflection_coef=0.01,
+        secondary_reflection_coef=0.01,
+        primary_beaming_coef=0.01,
+        secondary_beaming_coef=0.01,
+        lc_sys=0.1,
+        sed_sys=0.1,
+    ),
+):
+    """Slightly tweak the given parameters to allow MCMC sampling near them."""
+
+    period_tweak = min(
+        log_likelihood.best_fit_bls["period"][1] / 4,
+        0.2
+        * log_likelihood.best_fit_bls["duration"]
+        * log_likelihood.best_fit_bls["period"][0]
+        / (log_likelihood.time_span[1] - log_likelihood.time_span[0]),
+    )
+    tweak_scale = SampleParams(
+        *(
+            abs_tweak + rel_tweak * orig
+            for abs_tweak, rel_tweak, orig in zip(
+                abs_tweak_scale, rel_tweak_scale, params
+            )
+        )
+    )
+    tweak_scale = tweak_scale._replace(
+        per=period_tweak,
+        eclipse_time=0.1 * log_likelihood.best_fit_bls["duration"],
+    )
+    result = SampleParams(
+        *(
+            orig + uniform.rvs(loc=-scale, scale=2 * scale)
+            for orig, scale in zip(params, tweak_scale)
+        )
+    )
+    if result.meh < Binary.meh_range[0]:
+        result = result._replace(
+            meh=Binary.meh_range[0] + uniform.rvs(tweak_scale.meh / 2)
+        )
+    elif result.meh > Binary.meh_range[1]:
+        result = result._replace(
+            meh=Binary.meh_range[1] - uniform.rvs(tweak_scale.meh / 2)
+        )
+    logage_range = _get_logage_range(result, log_likelihood)
+    if result.age_gyr < 10.0 ** logage_range[0]:
+        result.age_gyr = 10.0 ** logage_range[0] + uniform.rvs(
+            tweak_scale.age_gyr
+        )
+    elif result.age_gyr > 10.0 ** logage_range[1]:
+        result.age_gyr = 10.0 ** logage_range[1] - uniform.rvs(
+            tweak_scale.age_gyr
+        )
+
+    result = result._replace(
+        eclipse_time=(
+            result.eclipse_time
+            - (result.per - params.per)
+            * (
+                (log_likelihood.time_span[1] - log_likelihood.time_span[0])
+                / params.per
+                / 2
+            )
+        )
+    )
+
+    return result
+
+
+def _get_logage_range(params, log_likelihood):
+    """Return the valid range for log(age) for the given parameters."""
+
+    mprimary = params.mtotal / (1.0 + params.mratio)
+    primary_log_age_range = Binary.get_star_log_age_range(mprimary, params.meh)
+    secondary_log_age_range = Binary.get_star_log_age_range(
+        mprimary * params.mratio, params.meh
+    )
+    likelihood_log_age_range = log_likelihood.get_range("age_gyr")
+    return (
+        max(
+            likelihood_log_age_range[0],
+            primary_log_age_range[0],
+            secondary_log_age_range[0],
+        ),
+        min(
+            likelihood_log_age_range[1],
+            primary_log_age_range[1],
+            secondary_log_age_range[1],
+        ),
+    )
+
+
+def get_age_fraction(params, log_likelihood):
+    """Return what fraction of the log(age) interval is the current age."""
+
+    min_log_age, max_log_age = _get_logage_range(params, log_likelihood)
+    return (numpy.log10(params.age_gyr) - min_log_age) / (
+        max_log_age - min_log_age
+    )
+
+
+def set_logage_fraction(params, logage_fraction, log_likelihood):
+    """Return params with age set according to ``logage_fraction``."""
+
+    assert (
+        0.0 <= logage_fraction <= 1.0
+    ), f"Log(age) fraction {logage_fraction} is not in [0, 1] range!"
+    min_log_age, max_log_age = _get_logage_range(params, log_likelihood)
+    _logger.debug(
+        "Setting age for params %s, log(age) fraction = %s based on range "
+        "(%s, %s)",
+        params,
+        logage_fraction,
+        repr(min_log_age),
+        repr(max_log_age),
+    )
+    return params._replace(
+        age_gyr=10.0
+        ** (min_log_age + logage_fraction * (max_log_age - min_log_age))
+    )
+
+
+def params_to_sample(params, log_likelihood, reset_sys_err=False):
+    """Initialize non-optimized parameters and return MCMC sample."""
+
+    def get_mcmc_sample(params):
+        """Return the MCMC sample corresponding to the given parameters."""
+
+        return numpy.array(
+            [
+                log_likelihood.inverse_prior(param, value)[1]
+                for param, value in zip(params._fields, params)
+            ]
+        )
+
+    print(f"Converting params to MCMC sample: {params}")
+    mcmc_sample = get_mcmc_sample(params)
+    non_finite = numpy.logical_not(numpy.isfinite(mcmc_sample))
+    tiny = numpy.logical_and(non_finite, mcmc_sample < 0)
+    if reset_sys_err:
+        tiny[SampleParams._fields.index("lc_sys")] = True
+        tiny[SampleParams._fields.index("sed_sys")] = True
+
+    huge = numpy.logical_and(non_finite, mcmc_sample > 0)
+    print(f"Replacing tiny: {tiny}, huge: {huge}")
+
+    mcmc_sample[tiny] = norm.ppf(uniform.rvs(size=tiny.sum(), scale=0.05))
+    mcmc_sample[huge] = norm.ppf(
+        uniform.rvs(size=huge.sum(), loc=0.8, scale=0.2)
+    )
+    print("Replaced MCMC sample:", mcmc_sample)
+    if (
+        non_finite[SampleParams._fields.index("mtotal")]
+        or non_finite[SampleParams._fields.index("mratio")]
+    ):
+        repaired_params = log_likelihood.get_sample_params(mcmc_sample)
+        repaired_params = set_logage_fraction(
+            repaired_params,
+            get_age_fraction(params, log_likelihood),
+            log_likelihood,
+        )
+        mcmc_sample = get_mcmc_sample(repaired_params)
+        assert numpy.isfinite(mcmc_sample).all(), (
+            "Even after fixing params, non-finite sample entries found: "
+            f"{mcmc_sample!r}"
+        )
+
+    assert numpy.isfinite(
+        mcmc_sample
+    ).all(), f"Non-finite sample entries found: {mcmc_sample!r}"
+
+    return mcmc_sample
+
+
+def tweak_sample(sample, log_likelihood, tweak_scale=None):
+    """Slightly tweak the given MCMC sample to allow MCMC sampling near it."""
+
+    params = log_likelihood.get_sample_params(sample)
+    if tweak_scale is None:
+        params = tweak_params(params, log_likelihood)
+    else:
+        params = tweak_params(params, log_likelihood, tweak_scale)
+
+    return params_to_sample(params, log_likelihood)
+
+
+def line_tweak_sample(tweak_from, tweak_toward, max_fraction=0.1):
+    """Slightly tweak parameters from ``tweak_from`` toward ``tweak_toward``."""
+
+    tweak_frac = uniform.rvs(loc=0.0, scale=max_fraction)
+
+    return tweak_from + (tweak_toward - tweak_from) * tweak_frac
+
+
+def process_sample(sample, log_likelihood, callback=None):
+    """Get Least squares optimized s and resulting log-likelihood."""
+
+    lstsq_result = fit_least_squares(log_likelihood, sample)
+    result = (
+        lstsq_result.x,
+        log_likelihood(lstsq_result.x)[0],
+    )
+    if callback is not None:
+        callback(result)
+    return result
+
+
+def lstsq_optimize_samples(samples, log_likelihood, config, callback):
+    """
+    Optimize a list of MCMC samples using least squares fitting.
+
+    Args:
+        samples(2-D array):   MCMC samples to optimize.
+
+        log_likelihood(LogLikelihood): LogLikelihood object used to compute
+            residuals.
+
+        config: The command line configuration for the MCMC (mostly used for I/O
+            redirect).
+
+    Returns:
+        array of OptimizeResult:
+            Least squares optimized version of each input sample.
+    """
+
+    with Pool(
+        config.num_parallel,
+        initializer=setup_process_map,
+        initargs=[vars(config)],
+        maxtasksperchild=1,
+    ) as pool:
+        result = pool.starmap(
+            process_sample,
+            [(s, log_likelihood, callback) for s in samples],
+            chunksize=1,
+        )
+    return tuple(numpy.array(list(e[i] for e in result)) for i in range(2))

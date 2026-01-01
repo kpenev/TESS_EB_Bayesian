@@ -5,6 +5,18 @@ from django.urls import path
 from .views import TICIdSelectorView, toggle_data, replotlc
 from .path_util import get_render_dir
 
+_states = (
+    "bad",
+    "continue",
+    "fix",
+    "old_finished",
+    "old_ls6_sampling",
+    "old_juno_sampling",
+    "changed_likelihood",
+    "finished",
+    "force_restart",
+)
+
 
 def get_review_urls(mode, table_name, states):
     """Return a list of URL patterns."""
@@ -23,7 +35,10 @@ def get_review_urls(mode, table_name, states):
                 get_render_dir(table_name, "convergence"),
                 "1 / 2 / span 1 / span 1",
             ),
-            # (get_render_dir(table_name, "starting"), "1 / 3 / span 1 / span 1"),
+            # (
+            #    get_render_dir(table_name, "starting"),
+            #    "1 / 3 / span 1 / span 1"
+            # ),
         )
     return [
         path(
@@ -63,34 +78,19 @@ urlpatterns = sum(
         get_review_urls(
             plot_type,
             "sample_prsa",
-            (
-                "bad",
-                "continue",
-                "fix",
-                "old_finished",
-                "old_ls6_sampling",
-                "old_juno_sampling",
-                "changed_likelihood",
-                "finished",
-            ),
+            _states,
         )
         for plot_type in ["starting", "best", "convergence", "sampling"]
     ),
     get_review_urls(
         "lightcurve",
         "sample_prsa",
-        (
-            "bad",
-            "sample",
-            "fix",
-            "old_finished",
-            "old_ls6_sampling",
-            "old_juno_sampling",
-        ),
+        _states,
     )
     + [
         path(
-            "toggle_data/<int:ticid>/<slug:selection>/<slug:review_table>/<slug:mode>",
+            "toggle_data/<int:ticid>/<slug:selection>/<slug:review_table>/"
+            "<slug:mode>",
             toggle_data,
             name="toggle_data",
         ),
