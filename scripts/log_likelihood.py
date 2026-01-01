@@ -1,4 +1,4 @@
-"""Define the log-likelihood function to use for MCMC."""
+"""Define the log-likelihood function to use for MCMC."""  # pylint: disable=too-many-lines
 
 import logging
 from functools import partial
@@ -130,6 +130,7 @@ class LogLikelihood(TESSTarget):
             cache_session.execute(delete(CachedSED).filter_by(tic_id=tic_id))
             cache_session.execute(delete(CachedBLS).filter_by(tic_id=tic_id))
 
+            self._logger.debug("Caching SED: %s", repr(self._sed))
             cache_session.add(
                 CachedSED(
                     tic_id=tic_id,
@@ -679,6 +680,8 @@ class LogLikelihood(TESSTarget):
                 )
             )
         if param in self._log_uniform:
+            if value <= 0:
+                return param_ind, -numpy.inf
             value = numpy.log10(value)
         low, high = self.get_range(param)
         self._logger.debug(
@@ -891,6 +894,18 @@ class LogLikelihood(TESSTarget):
                 result = numpy.concatenate(
                     (result, (observed_lc - model_lc) / lc_sq_errors**0.5)
                 )
+                if lc_sys_err > 0:
+                    result = numpy.concatenate(
+                        (
+                            result,
+                            numpy.sqrt(
+                                numpy.log(
+                                    lc_sq_errors
+                                    / (lc_sq_errors - lc_sys_err**2)
+                                )
+                            ),
+                        )
+                    )
             else:
                 result -= (
                     (observed_lc - model_lc) ** 2 / lc_sq_errors
@@ -912,10 +927,8 @@ class LogLikelihood(TESSTarget):
         """Return log-likelihood of observed SED for given binary."""
 
         finite = numpy.isfinite(self._sed[0])
-        sed_errors = (self._sed[1][finite] ** 2 + sed_sys_err**2)**0.5
-        result = (
-            self._sed[0][finite] - binary.absmag[finite]
-        ) / sed_errors
+        sed_errors = (self._sed[1][finite] ** 2 + sed_sys_err**2) ** 0.5
+        result = (self._sed[0][finite] - binary.absmag[finite]) / sed_errors
         if self._sed[2][1]:
             nsigma = numpy.abs(
                 self._sed[0][finite] - binary.absmag[finite]
@@ -923,6 +936,15 @@ class LogLikelihood(TESSTarget):
             bad_sed = nsigma > self._sed[2][0]
             result[bad_sed] *= 10.0 ** (self._sed[2][1] * nsigma[bad_sed])
         if return_residuals:
+            if sed_sys_err > 0:
+                result = numpy.concatenate(
+                    (
+                        result,
+                        numpy.sqrt(
+                            numpy.log(sed_errors**2 / self._sed[1][finite] ** 2)
+                        ),
+                    )
+                )
             return result
         result = -(result**2 + numpy.log(sed_errors**2)).sum() / 2
         self._logger.debug("SED log-likelihood: %s", result)

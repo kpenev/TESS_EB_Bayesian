@@ -4,8 +4,9 @@
 
 from os import path, makedirs
 import logging
-from multiprocessing import Pool
+from multiprocessing import Pool, Process, Queue
 from itertools import count
+from traceback import format_exc
 
 from configargparse import ArgumentParser, DefaultsFormatter
 from emcee import EnsembleSampler, walkers_independent
@@ -17,8 +18,12 @@ from general_purpose_python_modules.multiprocessing_util import (
     setup_process,
     setup_process_map,
 )
-from general_purpose_python_modules.emcee_util import save_initial_position
+from general_purpose_python_modules.emcee_util import (
+    save_initial_position,
+    load_initial_positions,
+)
 
+from utils import fit_least_squares, line_tweak_sample
 from hacked_emcee_hdf5_backend import HDFBackend
 from log_likelihood import SampleParams, LogLikelihood
 from log_likelihood_priors import LogLikelihoodPriorsOnly
@@ -129,10 +134,21 @@ def parse_command_line():
     parser.add_argument(
         "--restart-log-likelihood-range",
         type=float,
-        default=300,
+        default=10,
         help="If the log-likelihood spread between most and least likely "
         "walker at the end of ``--restart-steps`` is less than this, the true "
         "sampling begins.",
+    )
+    parser.add_argument(
+        "--force-restart",
+        action="store_true",
+        help="If passed, the current run will not be considered final.",
+    )
+    parser.add_argument(
+        "--skip-restart-lstsq",
+        action="store_true",
+        help="If passed, the least-squares optimization step when finding "
+        "restart samples is skipped.",
     )
     parser.add_argument(
         "--changed-likelihood",
@@ -243,6 +259,7 @@ def get_backend(samples_fname, config):
 
     backend = HDFBackend(samples_fname)
     if path.exists(samples_fname):
+        print("Found existing samples file:", samples_fname)
         with h5py.File(
             samples_fname, "r+" if config.update_git_hash else "r"
         ) as samples_file:
@@ -277,33 +294,67 @@ def get_backend(samples_fname, config):
         return backend, samples_file["mcmc"].attrs.get("final_run", False)
 
 
-def prepare_restart(backend):
-    """Prepare to restart sampling and return accumulated samples & log-prob."""
+def get_all_samples(backend):
+    """Return merged current and prelim samples and log-prob from backend."""
 
-    log_prob = backend.get_log_prob()
-    samples = backend.get_chain()
-    with h5py.File(backend.filename, "r+") as samples_f:
+    if backend.iteration > 0:
+        log_prob = backend.get_log_prob()
+        samples = backend.get_chain()
+    with h5py.File(backend.filename, "r") as samples_f:
         for prelim in count():
             chain_name = f"prelim_mcmc_{prelim}"
-            if chain_name not in samples_f:
-                samples_f.move("mcmc", chain_name)
+            if chain_name in samples_f:
+                prelim_backend = HDFBackend(
+                    backend.filename, name=chain_name, read_only=True
+                )
+                if prelim_backend.iteration > 0:
+                    if prelim == 0 and backend.iteration == 0:
+                        log_prob = prelim_backend.get_log_prob()
+                        samples = prelim_backend.get_chain()
+                    else:
+                        log_prob = numpy.concatenate(
+                            (log_prob, prelim_backend.get_log_prob())
+                        )
+                        samples = numpy.concatenate(
+                            (samples, prelim_backend.get_chain())
+                        )
+            else:
                 break
-            prelim_backend = HDFBackend(
-                backend.filename, name=chain_name, read_only=True
-            )
-            log_prob = numpy.concatenate(
-                (log_prob, prelim_backend.get_log_prob())
-            )
-            samples = numpy.concatenate((samples, prelim_backend.get_chain()))
-
     return log_prob, samples
 
 
-def restart_sampling(backend, config):
-    """Prepare the next round of sampling."""
+def prepare_restart(backend):
+    """Prepare to restart sampling and return independent samples & log-prob."""
 
-    backend_shape = backend.shape
-    log_prob, samples = prepare_restart(backend)
+    if backend.iteration == 0:
+        with h5py.File(backend.filename, "r") as samples_f:
+            if "starting_positions" in samples_f["mcmc"]:
+                result = (
+                    samples_f["mcmc/seed_log_prob"][:],
+                    samples_f["mcmc/seed_samples"][:],
+                )
+            else:
+                result = None
+        if result:
+            return result + load_initial_positions(
+                backend.filename,
+                num_walkers=backend.shape[0],
+                num_params=backend.shape[1],
+                chain_name="mcmc",
+                blobs_dtype=[("tweaked_log_prob", float)],
+            )
+
+    log_prob = backend.get_log_prob()
+    samples = backend.get_chain()
+
+    if backend.iteration > 0:
+        with h5py.File(backend.filename, "r+") as samples_f:
+            for prelim in count():
+                chain_name = f"prelim_mcmc_{prelim}"
+                if chain_name not in samples_f:
+                    samples_f.move("mcmc", chain_name)
+                break
+
     _logger.info(
         "Restarting sampling. Last step log-likelihood spread: %s. Choosing top"
         "samples from %d.",
@@ -311,12 +362,13 @@ def restart_sampling(backend, config):
         log_prob.size,
     )
     ordered_indices = numpy.unique(log_prob, return_index=True)[1]
-    select_from = backend_shape[0]
+    select_from = backend.shape[0]
 
-    backend.reset(*backend_shape)
+    if backend.iteration > 0:
+        backend.reset(*backend.shape)
     while select_from <= ordered_indices.size:
         top_indices = numpy.random.choice(
-            ordered_indices[-select_from:], backend_shape[0]
+            ordered_indices[-select_from:], backend.shape[0]
         )
         _logger.debug(
             "Top indices (shape: %s): %s", top_indices.shape, top_indices
@@ -324,31 +376,161 @@ def restart_sampling(backend, config):
         top_indices = numpy.unravel_index(top_indices, log_prob.shape)
         initial_state = samples[top_indices]
         if walkers_independent(initial_state):
-            top_log_likelihood = log_prob[top_indices]
-            log_likelihood_spread = (
-                top_log_likelihood.max() - top_log_likelihood.min()
-            )
-            final = log_likelihood_spread < config.restart_log_likelihood_range
-            _logger.info(
-                "Starting %s sampling from random subset of the top %d "
-                "samples. Log-likelihood spread %s (%swithin %s).",
-                "final" if final else "preliminary",
-                select_from,
-                repr(log_likelihood_spread),
-                "" if final else "not ",
-                repr(config.restart_log_likelihood_range),
-            )
             with h5py.File(backend.filename, "r+") as samples_f:
-                samples_f["mcmc"].attrs["final_run"] = final
+                samples_f["mcmc"].create_group("starting_positions")
+                samples_f["mcmc"].create_dataset(
+                    "seed_log_prob", data=log_prob[top_indices]
+                )
+                samples_f["mcmc"].create_dataset(
+                    "seed_samples", data=initial_state
+                )
+            return (
+                log_prob[top_indices],
+                initial_state,
+                numpy.empty(backend.shape, dtype=float),
+                numpy.empty(backend.shape[0], dtype=float),
+                None,
+                numpy.zeros(backend.shape[0], dtype=bool),
+            )
 
-            return backend, initial_state, final
-        select_from += 1
+    return 6 * (None,)
 
-    _logger.warning(
-        "Failed to find a set of independent walkers. Continuing "
-        "preliminary MCMC."
+
+def find_restart_samples(input_queue, output_queue, log_likelihood, config):
+    """Find a restart sample given one of the top samples of the old chain."""
+
+    try:
+        numpy.random.seed()
+        setup_process(task="find_restart_samples", **vars(config))
+        for input_ind, input_sample in iter(input_queue.get, "STOP"):
+            if config.skip_restart_lstsq:
+                lstsq_sample = tweaked_sample = input_sample
+                lstsq_log_likelihood = tweaked_log_likelihood = numpy.nan
+            else:
+                lstsq_result = fit_least_squares(log_likelihood, input_sample)
+                _logger.info(
+                    "Least squares result for index %d: %s",
+                    input_ind,
+                    repr(lstsq_result),
+                )
+                lstsq_sample = lstsq_result.x
+                lstsq_log_likelihood = log_likelihood(lstsq_sample)[0]
+                tweaked_log_likelihood = -numpy.inf
+                while not numpy.isfinite(tweaked_log_likelihood):
+                    _logger.info('Re-tweaking sample for index %d.', input_ind)
+                    tweaked_sample = line_tweak_sample(
+                        lstsq_sample, input_sample
+                    )
+                    tweaked_log_likelihood = log_likelihood(tweaked_sample)[0]
+            _logger.info('Found suitable sample for index %d.', input_ind)
+            output_queue.put(
+                (
+                    input_ind,
+                    lstsq_sample,
+                    tweaked_sample,
+                    lstsq_log_likelihood,
+                    tweaked_log_likelihood,
+                )
+            )
+
+    except:  # pylint: disable=bare-except
+        _logger.critical("Restart sample worker failed:\n%s", format_exc())
+        output_queue.put(None)
+
+
+def restart_sampling(
+    backend, config, log_likelihood
+):  # pylint: disable=too-many-locals
+    """Prepare the next round of sampling."""
+
+    (
+        seed_log_prob,
+        seed_samples,
+        initial_state,
+        _,
+        _,
+        positions_found,
+    ) = prepare_restart(backend)
+    if seed_log_prob is None:
+        assert seed_samples is None
+        _logger.warning(
+            "Failed to find a set of independent walkers. Continuing "
+            "preliminary MCMC."
+        )
+        return backend, None, False
+
+    _logger.debug(
+        "Spread in seed log probabilities: %s",
+        repr(seed_log_prob.max() - seed_log_prob.min()),
     )
-    return backend, None, False
+
+    needed_indices = numpy.flatnonzero(numpy.logical_not(positions_found))
+    input_queue = Queue()
+    for i in needed_indices:
+        input_queue.put((i, seed_samples[i]))
+
+    for _ in range(config.num_parallel):
+        input_queue.put("STOP")
+
+    output_queue = Queue()
+
+    workers = [
+        Process(
+            target=find_restart_samples,
+            args=(input_queue, output_queue, log_likelihood, config),
+        )
+        for _ in range(config.num_parallel)
+    ]
+    for process in workers:
+        process.start()
+    for _ in needed_indices:
+        result = output_queue.get()
+        if result is None:
+            # pylint: disable=invalid-name
+            for w in workers:
+                w.terminate()
+            # pylint: enable=invalid-name
+            raise RuntimeError("Failed to find initial walker positions.")
+        _logger.debug(
+           "Proposed initial position %d:\n%s\n%s\n->\n%s\n%s\n->\n%s\n%s\n"
+           "Log likelihood: %s (%s) -> %s -> %s. ",
+           result[0],
+           seed_samples[result[0]],
+           log_likelihood.get_sample_params(seed_samples[result[0]]),
+           result[1],
+           log_likelihood.get_sample_params(result[1]),
+           result[2],
+           log_likelihood.get_sample_params(result[2]),
+           seed_log_prob[result[0]],
+           log_likelihood(seed_samples[result[0]])[0],
+           result[3],
+           result[4],
+        )
+        start_sample = (
+            result[2]
+            if result[4] > seed_log_prob[result[0]]
+            else seed_samples[result[0]]
+        )
+        _logger.info(
+            "Using %s sample for walker %d:\n%s",
+            "tweaked" if result[4] > seed_log_prob[result[0]] else "original",
+            result[0],
+            start_sample,
+        )
+        save_initial_position(
+            start_sample,
+            backend.filename,
+            nwalkers=backend.shape[0],
+            index=result[0],
+            log_prob_result=result[3:5],
+        )
+        initial_state[result[0]] = start_sample
+    return (
+        backend,
+        initial_state,
+        seed_log_prob[-1].max() - seed_log_prob[-1].min()
+        < config.restart_log_likelihood_range,
+    )
 
 
 def reinitialize_sampling(backend, final_run):
@@ -356,7 +538,7 @@ def reinitialize_sampling(backend, final_run):
 
     _logger.info("Starting sampling from the last step of the existing chain.")
     backend_shape = backend.shape
-    initial_state = prepare_restart(backend)[1][-1]
+    initial_state = prepare_restart(backend)[1]
     backend.reset(*backend_shape)
     assert walkers_independent(initial_state)
     with h5py.File(backend.filename, "r+") as samples_f:
@@ -372,34 +554,44 @@ def main(config):
 
     samples_fname = config.samples_fname_pattern.format(tic_id=config.tic_id)
     backend, final_run = get_backend(samples_fname, config)
+    if config.force_restart:
+        final_run = False
     log_likelihood = (
         LogLikelihoodPriorsOnly if config.priors_only else LogLikelihood
     )(config.tic_id, overwrite_cache=config.overwrite_cache)
 
     initial_state = None
     if backend.iteration == 0:
-        initial_state = FindStartingPositions(log_likelihood)(config)
+        with h5py.File(backend.filename, "r") as samples_file:
+            has_prelim = "prelim_mcmc_0" in samples_file
+        if has_prelim:
+            initial_state = restart_sampling(
+                backend, config, log_likelihood
+            )
+        else:
+            initial_state = FindStartingPositions(log_likelihood)(config)
         _logger.info("Full set of initial positions found. Starting sampling.")
     else:
         if config.changed_likelihood:
             backend, initial_state = reinitialize_sampling(backend, final_run)
+            if initial_state is not None:
+                for pos_ind, pos in enumerate(initial_state):
+                    save_initial_position(
+                        pos,
+                        backend.filename,
+                        nwalkers=backend.shape[0],
+                        index=pos_ind,
+                    )
         elif not final_run and backend.iteration >= config.restart_steps:
             backend, initial_state, final_run = restart_sampling(
-                backend, config
+                backend, config, log_likelihood
             )
-        if initial_state is not None:
-            for pos_ind, pos in enumerate(initial_state):
-                save_initial_position(
-                    pos,
-                    backend.filename,
-                    nwalkers=backend.shape[0],
-                    index=pos_ind,
-                )
 
     if config.starting_positions_only:
         return
 
     while True:
+        _logger.info("Starting%s MCMC run.", " final" if final_run else "")
         with Pool(
             config.num_parallel,
             initializer=setup_process_map,
@@ -423,7 +615,7 @@ def main(config):
             )
             if not final_run:
                 backend, initial_state, final_run = restart_sampling(
-                    backend, config
+                    backend, config, log_likelihood
                 )
 
 

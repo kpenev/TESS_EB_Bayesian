@@ -22,6 +22,7 @@ from sample_params import SampleParams
 from log_likelihood import LogLikelihood
 from binary import Binary
 from binary_parameters import calc_eclipse_phase_diff
+from utils import set_logage_fraction, params_to_sample
 
 _logger = logging.getLogger(__name__)
 
@@ -54,68 +55,6 @@ class FindStartingPositions:
         if bls_info["depth_even"][0] > bls_info["depth_odd"][0]:
             return "even", "odd", single
         return "odd", "even", single
-
-    def _get_logage_range(self, params):
-        """Return the valid range for log(age) for the given parameters."""
-
-        mprimary = params.mtotal / (1.0 + params.mratio)
-        primary_log_age_range = Binary.get_star_log_age_range(
-            mprimary, params.meh
-        )
-        secondary_log_age_range = Binary.get_star_log_age_range(
-            mprimary * params.mratio, params.meh
-        )
-        likelihood_log_age_range = self._log_likelihood.get_range("age_gyr")
-        return (
-            max(
-                likelihood_log_age_range[0],
-                primary_log_age_range[0],
-                secondary_log_age_range[0],
-            ),
-            min(
-                likelihood_log_age_range[1],
-                primary_log_age_range[1],
-                secondary_log_age_range[1],
-            ),
-        )
-
-    def _set_age(self, params, logage_fraction):
-        """Return params with age set according to ``logage_fraction``."""
-
-        assert (
-            0.0 <= logage_fraction <= 1.0
-        ), f"Log(age) fraction {logage_fraction} is not in [0, 1] range!"
-        min_log_age, max_log_age = self._get_logage_range(params)
-        _logger.debug(
-            "Setting age for params %s, log(age) fraction = %s based on range "
-            "(%s, %s)",
-            params,
-            logage_fraction,
-            repr(min_log_age),
-            repr(max_log_age),
-        )
-        return params._replace(
-            age_gyr=10.0
-            ** (min_log_age + logage_fraction * (max_log_age - min_log_age))
-        )
-
-    def _get_age_fraction(self, params):
-        """Return what fraction of the log(age) interval is the current age."""
-
-        min_log_age, max_log_age = self._get_logage_range(params)
-        return (numpy.log10(params.age_gyr) - min_log_age) / (
-            max_log_age - min_log_age
-        )
-
-    def _get_mcmc_sample(self, params):
-        """Return the MCMC sample corresponding to the given parameters."""
-
-        return numpy.array(
-            [
-                self._log_likelihood.inverse_prior(param, value)[1]
-                for param, value in zip(params._fields, params)
-            ]
-        )
 
     def _match_eclipse_times(self, params, randomize_e):
         """Set the eccentricity to match the eclipse phases."""
@@ -279,8 +218,10 @@ class FindStartingPositions:
             try:
                 binary = Binary(
                     from_mcmc=self._match_deeper_eclipse_depth(
-                        self._set_age(
-                            params._replace(mratio=mratio), logage_fraction
+                        set_logage_fraction(
+                            params._replace(mratio=mratio),
+                            logage_fraction,
+                            self._log_likelihood,
                         )
                     )
                 )
@@ -318,9 +259,10 @@ class FindStartingPositions:
         assert result.success, f"Failed to optimize mass ratio: {result!r}!"
         _logger.debug("Matching both depths solution: %s", repr(result))
         return self._match_deeper_eclipse_depth(
-            self._set_age(
+            set_logage_fraction(
                 params._replace(mratio=min(max(result.x, min_mratio), 1.0)),
                 logage_fraction,
+                self._log_likelihood,
             )
         )
 
@@ -336,8 +278,10 @@ class FindStartingPositions:
         def to_minimize(mtotal, lc_tuned_params):
             try:
                 binary = Binary(
-                    from_mcmc=self._set_age(
-                        lc_tuned_params._replace(mtotal=mtotal), logage_fraction
+                    from_mcmc=set_logage_fraction(
+                        lc_tuned_params._replace(mtotal=mtotal),
+                        logage_fraction,
+                        self._log_likelihood,
                     )
                 )
             except ValueError:
@@ -365,8 +309,10 @@ class FindStartingPositions:
             )
 
             if get_params:
-                return self._set_age(
-                    lc_tuned_params._replace(mtotal=result.x), logage_fraction
+                return set_logage_fraction(
+                    lc_tuned_params._replace(mtotal=result.x),
+                    logage_fraction,
+                    self._log_likelihood,
                 )
             if abs(result.x - mtotal) < 1e-3 * mtotal:
                 raise GoodEnough("eclipses_and_sed", mtotal)
@@ -552,50 +498,6 @@ class FindStartingPositions:
         )
         return result
 
-    def _params_to_sample(self, params):
-        """Initialize non-optimized parameters and return MCMC sample."""
-
-        mcmc_sample = self._get_mcmc_sample(params)
-        non_finite = numpy.logical_not(numpy.isfinite(mcmc_sample))
-        tiny = numpy.logical_and(non_finite, mcmc_sample < 0)
-        tiny[SampleParams._fields.index("lc_sys")] = True
-        tiny[SampleParams._fields.index("sed_sys")] = True
-
-        huge = numpy.logical_and(non_finite, mcmc_sample > 0)
-
-        mcmc_sample[tiny] = norm.ppf(uniform.rvs(size=tiny.sum(), scale=0.2))
-        mcmc_sample[huge] = norm.ppf(
-            uniform.rvs(size=huge.sum(), loc=0.8, scale=0.2)
-        )
-        if (
-            non_finite[SampleParams._fields.index("mtotal")]
-            or non_finite[SampleParams._fields.index("mratio")]
-        ):
-            tweaked_params = self._log_likelihood.get_sample_params(mcmc_sample)
-            tweaked_params = self._set_age(
-                tweaked_params, self._get_age_fraction(params)
-            )
-            mcmc_sample = self._get_mcmc_sample(tweaked_params)
-            assert numpy.isfinite(mcmc_sample).all(), (
-                "Even after fixing params, non-finite sample entries found: "
-                f"{mcmc_sample!r}"
-            )
-
-        _logger.info(
-            "Generated optimized sample:\n%s",
-            mcmc_sample,
-        )
-        params = self._log_likelihood.get_sample_params(mcmc_sample)
-        _logger.info("Above sample corresponds to parameters:\n%s", params)
-        _logger.info(
-            "Above corresponds to binary:\n%s", Binary(from_mcmc=params)
-        )
-        assert numpy.isfinite(
-            mcmc_sample
-        ).all(), f"Non-finite sample entries found: {mcmc_sample!r}"
-
-        return mcmc_sample
-
     def _find_initial_samples(self, scenario_queue, optimized_queue, config):
         """Executed in worker threads to find optimal initial positions."""
 
@@ -625,41 +527,6 @@ class FindStartingPositions:
                         (scenario_ind, norm.rvs(size=len(SampleParams._fields)))
                     )
                     continue
-                lstsq_sample = self._params_to_sample(params)
-                max_loggprob = self._log_likelihood(lstsq_sample)[0]
-                _logger.info(
-                    "Starting least squares optimization from probability: %s",
-                    repr(max_loggprob),
-                )
-                try:
-                    lstsq_sample = fit_least_squares(
-                        self._log_likelihood, lstsq_sample
-                    )
-                    _logger.info(
-                        "Least squares optimization result:\n%s",
-                        lstsq_sample,
-                    )
-                    lstsq_sample = lstsq_sample.x
-                    lstsq_log_likelihood = self._log_likelihood(lstsq_sample)[0]
-                    _logger.info(
-                        "Least squares optimized log-likelihood: %s",
-                        repr(lstsq_log_likelihood),
-                    )
-                    if lstsq_log_likelihood <= max_loggprob:
-                        _logger.warning(
-                            "Least squares optimization did not improve "
-                            "log-likelihood, using pre-optimization sample!"
-                        )
-                    else:
-                        params = self._log_likelihood.get_sample_params(
-                            lstsq_sample
-                        )
-                except AssertionError:
-                    _logger.warning(
-                        "Least squares optimization failed, using "
-                        "pre-optimization sample."
-                    )
-                _logger.info("Least squares optimized parameters:\n%s", params)
 
                 period_tweak = min(
                     self._log_likelihood.best_fit_bls["period"][1] / 4,
@@ -692,9 +559,22 @@ class FindStartingPositions:
                     per=params.per + period_tweak,
                 )
 
-                optimized_queue.put(
-                    (scenario_ind, self._params_to_sample(params))
+                scenario_sample = params_to_sample(
+                    params, self._log_likelihood, True
                 )
+                _logger.info(
+                    "Generated optimized sample:\n%s",
+                    scenario_sample,
+                )
+                params = self._log_likelihood.get_sample_params(scenario_sample)
+                _logger.info(
+                    "Above sample corresponds to parameters:\n%s", params
+                )
+                _logger.info(
+                    "Above corresponds to binary:\n%s", Binary(from_mcmc=params)
+                )
+
+                optimized_queue.put((scenario_ind, scenario_sample))
             _logger.info("Position optimization process finished.")
         # pylint: disable=bare-except
         except:
@@ -737,7 +617,7 @@ class FindStartingPositions:
     def optimize(self, logage_or_mass_fraction, meh, w, randomize_e):
         """Find a local maximum in log-likelihood for given parameters."""
 
-        params = self._set_age(
+        params = set_logage_fraction(
             SampleParams(
                 mtotal=2.0,
                 mratio=1.0,
@@ -762,6 +642,7 @@ class FindStartingPositions:
                 ),
             ),
             logage_or_mass_fraction,
+            self._log_likelihood,
         )
 
         _logger.debug("Starting params: %s", params)
@@ -934,71 +815,3 @@ def create_jktebob_inputs(log_likelihood):
             )
         )
         outf.write(template.read().format_map(values))
-
-
-def fit_least_squares(log_likelihood, initial_mcmc_sample):
-    """
-    Find least squares MCMC sample starting from given position.
-
-    Args:
-        initial_mcmc_sample(array):    Initial guess for the MCMC sample
-            values. Omit the last two entiers (corresponding to `lc_sys` and
-            `sed_sys`) to keep those fixed at zero during the fit.
-
-    Returns:
-        OptimizeResult:
-            The result of the optimization containing the best fit
-            parameters in the `x` attribute. See
-            `scipy.optimize.least_squares`.
-    """
-
-    def residuals(x, num_residuals):
-        """Return array of residuals (LC and SED) for given MCMC sample."""
-
-        residuals.num_eval += 1
-        print(f"Function evaluation {residuals.num_eval}")
-        x = numpy.concatenate((x, [0.0, 0.0]))
-        assert x.size == len(SampleParams._fields)
-        sample_params = log_likelihood.get_sample_params(x)
-        try:
-            binary = Binary(from_mcmc=sample_params)
-        except ValueError:
-            return numpy.full(num_residuals, numpy.inf)
-        lc_residuals = log_likelihood.calc_lc_log_likelihood(
-            binary, sample_params.lc_sys, return_residuals=True
-        )
-        if not numpy.isfinite(lc_residuals).all():
-            return numpy.full(num_residuals, numpy.inf)
-        sed_residuals = log_likelihood.calc_sed_log_likelihood(
-            binary, sample_params.sed_sys, return_residuals=True
-        )
-        print(
-            f"Contatenating {lc_residuals.size} LC and {sed_residuals.size} "
-            "SED residuals"
-        )
-        return numpy.concatenate((lc_residuals, sed_residuals, x))
-
-    if initial_mcmc_sample.size == len(SampleParams._fields):
-        # Fix lc_sys and sed_sys to zero during least squares fit
-        initial_mcmc_sample = initial_mcmc_sample[:-2]
-
-    residuals.num_eval = 0
-    initial_resdiuals = residuals(initial_mcmc_sample, 0)
-    print(
-        "Initial residuals evaluated at MCMC sample\n"
-        f"{initial_mcmc_sample!r}:\n{initial_resdiuals!r}"
-    )
-    assert (
-        initial_resdiuals.size > 0 and numpy.isfinite(initial_resdiuals).all()
-    ), (
-        "Likelihood must be defined at initial residuals for least squares "
-        "fit."
-    )
-    return optimize.least_squares(
-        residuals,
-        initial_mcmc_sample,
-        args=(initial_resdiuals.size,),
-        method="lm",
-        xtol=1e-6,
-        max_nfev=300 * initial_mcmc_sample.size,
-    )

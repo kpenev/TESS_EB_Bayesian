@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3 #pylint: disable=too-many-lines
 
 """Create plots of emcee sampling results or lightcurves."""
 
@@ -30,7 +30,7 @@ from general_purpose_python_modules.multi_pickle import MultiPickle
 from hacked_emcee_hdf5_backend import HDFBackend
 from sample_params import SampleParams
 from log_likelihood import LogLikelihood
-from find_starting_positions import fit_least_squares
+from utils import fit_least_squares
 from paths import samples as samples_fname
 from binary import Binary
 from light_curve_plotter import LightCurvePlotter
@@ -346,7 +346,7 @@ def get_pickler(filename):
     )
 
 
-def get_chain_expressions(plot_data, chain_expressions, lstsq_data=None):
+def get_chain_expressions(plot_data, chain_expressions):
     """Evaluate the chain expressions specified on the command line."""
 
     if "selected" in plot_data:
@@ -422,24 +422,28 @@ def create_corner_plot(plot_data, config, _, lstsq_data):
                 "lstsq": lstsq_values[y_column],
                 "maxlike": maxlike_values[y_column],
             }
-            ax.axvline(mark_y["maxlike"], color="r")
-            ax.axvline(mark_y["lstsq"], color="g")
-
-            include_in_axis(ax, mark_y["lstsq"], None)
+            if mark_y["maxlike"] is not None:
+                ax.axvline(mark_y["maxlike"], color="r")
+            if mark_y["lstsq"] is not None:
+                ax.axvline(mark_y["lstsq"], color="g")
+                include_in_axis(ax, mark_y["lstsq"], None)
 
             for xi in range(yi):
+                if lstsq_values[plot_data.columns[xi]] is None:
+                    continue
                 mark_x = {
                     "lstsq": lstsq_values[plot_data.columns[xi]],
                     "maxlike": maxlike_values[plot_data.columns[xi]],
                 }
                 ax = axes[yi, xi]
-                ax.axvline(mark_x["maxlike"], color="r")
-                ax.axvline(mark_x["lstsq"], color="g")
-                ax.axhline(mark_y["maxlike"], color="r")
-                ax.axhline(mark_y["lstsq"], color="g")
-                ax.plot(mark_x["maxlike"], mark_y["maxlike"], "sr")
-                ax.plot(mark_x["lstsq"], mark_y["lstsq"], "sg")
-                include_in_axis(ax, mark_x["lstsq"], mark_y["lstsq"])
+                for label, color in [('maxlike', 'r'),
+                                     ('lstsq', 'g')]:
+                    if mark_x[label] is None or mark_y[label] is None:
+                        continue
+                    ax.axvline(mark_x[label], color=color)
+                    ax.axhline(mark_y[label], color=color)
+                    ax.plot(mark_x[label], mark_y[label], "s" + color)
+                    include_in_axis(ax, mark_x[label], mark_y[label])
 
     pyplot.savefig(config.corner_plot_fname)
     pyplot.cla()
