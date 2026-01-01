@@ -565,7 +565,7 @@ def main(config):
         with h5py.File(backend.filename, "r") as samples_file:
             has_prelim = "prelim_mcmc_0" in samples_file
         if has_prelim:
-            initial_state = restart_sampling(
+            backend, initial_state, final_run = restart_sampling(
                 backend, config, log_likelihood
             )
         else:
