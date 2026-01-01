@@ -934,7 +934,9 @@ class LogLikelihood(TESSTarget):
                 self._sed[0][finite] - binary.absmag[finite]
             ) / numpy.maximum(self._sed[1][finite], 0.01)
             bad_sed = nsigma > self._sed[2][0]
-            result[bad_sed] *= 10.0 ** (self._sed[2][1] * nsigma[bad_sed])
+            result[bad_sed] *= 10.0 ** (
+                self._sed[2][1] * (nsigma[bad_sed] - self._sed[2][0])
+            )
         if return_residuals:
             if sed_sys_err > 0:
                 result = numpy.concatenate(
