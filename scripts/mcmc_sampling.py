@@ -258,6 +258,7 @@ def get_backend(samples_fname, config):
             raise
 
     backend = HDFBackend(samples_fname)
+    reset = True
     if path.exists(samples_fname):
         print("Found existing samples file:", samples_fname)
         with h5py.File(
@@ -269,12 +270,15 @@ def get_backend(samples_fname, config):
                 config.ignore_git_hash
                 or samples_file.attrs["GitHash"] == _git_hash
             ), f"Git commit hash changed since {samples_fname!r} was created"
-        _logger.info(
-            "Existing chain with %d samples found for TIC ID: %d. Extending.",
-            backend.iteration,
-            config.tic_id,
-        )
-    else:
+            if 'mcmc' in samples_file:
+                reset = False
+        if not reset:
+            _logger.info(
+                "Existing chain with %d samples found for TIC ID: %d. Extending.",
+                backend.iteration,
+                config.tic_id,
+            )
+    if reset:
         backend.reset(
             config.num_random_walkers
             + config.initial_num_ages
@@ -344,8 +348,7 @@ def prepare_restart(backend):
                 blobs_dtype=[("tweaked_log_prob", float)],
             )
 
-    log_prob = backend.get_log_prob()
-    samples = backend.get_chain()
+    log_prob, samples = get_all_samples(backend)
 
     if backend.iteration > 0:
         with h5py.File(backend.filename, "r+") as samples_f:
