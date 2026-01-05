@@ -396,7 +396,7 @@ def prepare_restart(backend):
                 numpy.zeros(backend.shape[0], dtype=bool),
             )
 
-    return 6 * (None,)
+    return (None, samples[0]) + 4 * (None,)
 
 
 def find_restart_samples(input_queue, output_queue, log_likelihood, config):
@@ -460,7 +460,7 @@ def restart_sampling(
             "Failed to find a set of independent walkers. Continuing "
             "preliminary MCMC."
         )
-        return backend, None, False
+        return backend, seed_samples, False
 
     _logger.debug(
         "Spread in seed log probabilities: %s",
