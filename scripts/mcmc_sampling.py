@@ -455,7 +455,7 @@ def restart_sampling(
         positions_found,
     ) = prepare_restart(backend)
     if seed_log_prob is None:
-        assert seed_samples is None
+        assert seed_samples is not None
         _logger.warning(
             "Failed to find a set of independent walkers. Continuing "
             "preliminary MCMC."
