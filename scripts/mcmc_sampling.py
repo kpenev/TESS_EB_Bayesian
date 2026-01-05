@@ -619,6 +619,7 @@ def main(config):
                         - backend.iteration
                     )
                 ),
+                skil_initial_state_check=initial_state is not None,
             )
             if not final_run:
                 backend, initial_state, final_run = restart_sampling(
