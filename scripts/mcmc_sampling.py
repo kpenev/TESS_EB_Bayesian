@@ -270,7 +270,7 @@ def get_backend(samples_fname, config):
                 config.ignore_git_hash
                 or samples_file.attrs["GitHash"] == _git_hash
             ), f"Git commit hash changed since {samples_fname!r} was created"
-            if 'mcmc' in samples_file:
+            if "mcmc" in samples_file:
                 reset = False
         if not reset:
             _logger.info(
@@ -420,12 +420,12 @@ def find_restart_samples(input_queue, output_queue, log_likelihood, config):
                 lstsq_log_likelihood = log_likelihood(lstsq_sample)[0]
                 tweaked_log_likelihood = -numpy.inf
                 while not numpy.isfinite(tweaked_log_likelihood):
-                    _logger.info('Re-tweaking sample for index %d.', input_ind)
+                    _logger.info("Re-tweaking sample for index %d.", input_ind)
                     tweaked_sample = line_tweak_sample(
                         lstsq_sample, input_sample
                     )
                     tweaked_log_likelihood = log_likelihood(tweaked_sample)[0]
-            _logger.info('Found suitable sample for index %d.', input_ind)
+            _logger.info("Found suitable sample for index %d.", input_ind)
             output_queue.put(
                 (
                     input_ind,
@@ -495,19 +495,19 @@ def restart_sampling(
             # pylint: enable=invalid-name
             raise RuntimeError("Failed to find initial walker positions.")
         _logger.debug(
-           "Proposed initial position %d:\n%s\n%s\n->\n%s\n%s\n->\n%s\n%s\n"
-           "Log likelihood: %s (%s) -> %s -> %s. ",
-           result[0],
-           seed_samples[result[0]],
-           log_likelihood.get_sample_params(seed_samples[result[0]]),
-           result[1],
-           log_likelihood.get_sample_params(result[1]),
-           result[2],
-           log_likelihood.get_sample_params(result[2]),
-           seed_log_prob[result[0]],
-           log_likelihood(seed_samples[result[0]])[0],
-           result[3],
-           result[4],
+            "Proposed initial position %d:\n%s\n%s\n->\n%s\n%s\n->\n%s\n%s\n"
+            "Log likelihood: %s (%s) -> %s -> %s. ",
+            result[0],
+            seed_samples[result[0]],
+            log_likelihood.get_sample_params(seed_samples[result[0]]),
+            result[1],
+            log_likelihood.get_sample_params(result[1]),
+            result[2],
+            log_likelihood.get_sample_params(result[2]),
+            seed_log_prob[result[0]],
+            log_likelihood(seed_samples[result[0]])[0],
+            result[3],
+            result[4],
         )
         start_sample = (
             result[2]
@@ -594,7 +594,11 @@ def main(config):
         return
 
     while True:
-        _logger.info("Starting%s MCMC run.", " final" if final_run else "")
+        _logger.info(
+            "Starting%s MCMC run with initial state:\n%s.",
+            " final" if final_run else "",
+            repr(initial_state),
+        )
         with Pool(
             config.num_parallel,
             initializer=setup_process_map,
