@@ -17,7 +17,9 @@ from binary import Binary
 _logger = logging.getLogger(__name__)
 
 
-def fit_least_squares(log_likelihood, initial_mcmc_sample, fit_sys_err=True):
+def fit_least_squares(
+    log_likelihood, initial_mcmc_sample, fit_sys_err=True, **fit_kwargs
+):
     """
     Find least squares MCMC sample starting from given position.
 
@@ -37,14 +39,11 @@ def fit_least_squares(log_likelihood, initial_mcmc_sample, fit_sys_err=True):
         """Return array of residuals (LC and SED) for given MCMC sample."""
 
         residuals.num_eval += 1
-        print(f"Function evaluation {residuals.num_eval}")
+        _logger.debug("LSTSQ Function evaluation %d", residuals.num_eval)
         if x.size == len(SampleParams._fields) - 2:
             x = numpy.concatenate((x, [0.0, 0.0]))
         assert x.size == len(SampleParams._fields)
         sample_params = log_likelihood.get_sample_params(x)
-        # sample_params = sample_params._replace(
-        #    lc_sys=0.0, sed_sys=0.0
-        # )
         try:
             binary = Binary(from_mcmc=sample_params)
         except ValueError:
@@ -57,9 +56,15 @@ def fit_least_squares(log_likelihood, initial_mcmc_sample, fit_sys_err=True):
         sed_residuals = log_likelihood.calc_sed_log_likelihood(
             binary, sample_params.sed_sys, return_residuals=True
         )
-        print(
-            f"Concatenating {lc_residuals.size} LC and {sed_residuals.size} "
-            "SED residuals"
+        _logger.debug(
+            "Concatenating %d LC, %d SED residuals, and %d prior residuals:\n"
+            "%s\n%s\n%s",
+            lc_residuals.size,
+            sed_residuals.size,
+            x.size,
+            repr(lc_residuals),
+            repr(sed_residuals),
+            repr(x),
         )
         return numpy.concatenate((lc_residuals, sed_residuals, x))
 
@@ -70,9 +75,14 @@ def fit_least_squares(log_likelihood, initial_mcmc_sample, fit_sys_err=True):
 
     residuals.num_eval = 0
     initial_resdiuals = residuals(initial_mcmc_sample, 0)
-    print(
-        "Initial residuals evaluated at MCMC sample\n"
-        f"{initial_mcmc_sample!r}:\n{initial_resdiuals!r}"
+    _logger.debug(
+        "Initial residuals evaluated at MCMC sample\n%s:\n%s\nsize: %d, "
+        "num non finite: %d (ind: %s)",
+        repr(initial_mcmc_sample),
+        repr(initial_resdiuals),
+        initial_resdiuals.size,
+        numpy.logical_not(numpy.isfinite(initial_resdiuals)).sum(),
+        numpy.nonzero(numpy.logical_not(numpy.isfinite(initial_resdiuals))),
     )
     assert (
         initial_resdiuals.size > 0 and numpy.isfinite(initial_resdiuals).all()
@@ -80,13 +90,18 @@ def fit_least_squares(log_likelihood, initial_mcmc_sample, fit_sys_err=True):
         "Likelihood must be defined at initial residuals for least squares "
         "fit."
     )
+    for arg, default in [
+        ("method", "lm"),
+        ("xtol", 1e-3),
+        ("max_nfev", 300 * initial_mcmc_sample.size),
+    ]:
+        if arg not in fit_kwargs:
+            fit_kwargs[arg] = default
     return optimize.least_squares(
         residuals,
         initial_mcmc_sample,
         args=(initial_resdiuals.size,),
-        method="lm",
-        xtol=1e-6,
-        max_nfev=300 * initial_mcmc_sample.size,
+        **fit_kwargs,
     )
 
 
@@ -167,6 +182,7 @@ def tweak_params(
             for orig, scale in zip(params, tweak_scale)
         )
     )
+    # pylint: disable=unsubscriptable-object
     if result.meh < Binary.meh_range[0]:
         result = result._replace(
             meh=Binary.meh_range[0] + uniform.rvs(tweak_scale.meh / 2)
@@ -175,6 +191,8 @@ def tweak_params(
         result = result._replace(
             meh=Binary.meh_range[1] - uniform.rvs(tweak_scale.meh / 2)
         )
+    # pylint: enable=unsubscriptable-object
+
     logage_range = _get_logage_range(result, log_likelihood)
     if result.age_gyr < 10.0 ** logage_range[0]:
         result.age_gyr = 10.0 ** logage_range[0] + uniform.rvs(
@@ -200,6 +218,45 @@ def tweak_params(
     return result
 
 
+def find_log_age_bound(params, bad_bound, bound_limit):
+    """
+    Find the smallest(largest) log(age) that makes a binary with a > 1+r2/r1.
+
+    Args:
+        params(SampleParams):   The binary parameters for everything other than
+            age.
+
+        bad_bound(float):   The bad bound value for log(age).
+
+        bound_limit(float):    The limit for the bound search (i.e., the other
+            end of the log(age) range).
+    """
+
+    def to_solve(log_age):
+        """Return a - (1 + r2/r1) for the given log(age)."""
+
+        binary = Binary(from_mcmc=params._replace(age_gyr=10.0**log_age))
+        return binary.a - (1 + binary.rp)
+
+    for try_log_age in numpy.linspace(bad_bound, bound_limit, 32)[1:-1]:
+        binary = Binary(from_mcmc=params._replace(age_gyr=10.0**try_log_age))
+        if binary.a >= 1 + binary.rp:
+            root = optimize.brentq(
+                to_solve,
+                bad_bound,
+                try_log_age,
+                xtol=1e-5,
+            )
+            while to_solve(root) < 0:
+                root += (1 if bad_bound < root else -1) * 1e-5
+            return root
+        bad_bound = try_log_age
+    raise ValueError(
+        "Could not find valid log(age) bound for params: "
+        f"{params}, bad_bound: {bad_bound}, bound_limit: {bound_limit}"
+    )
+
+
 def _get_logage_range(params, log_likelihood):
     """Return the valid range for log(age) for the given parameters."""
 
@@ -209,7 +266,7 @@ def _get_logage_range(params, log_likelihood):
         mprimary * params.mratio, params.meh
     )
     likelihood_log_age_range = log_likelihood.get_range("age_gyr")
-    return (
+    result = (
         max(
             likelihood_log_age_range[0],
             primary_log_age_range[0],
@@ -221,6 +278,14 @@ def _get_logage_range(params, log_likelihood):
             secondary_log_age_range[1],
         ),
     )
+    binary = Binary(from_mcmc=params._replace(age_gyr=10.0 ** result[0]))
+    if binary.a < 1 + binary.rp:
+        result = find_log_age_bound(params, *result), result[1]
+    binary = Binary(from_mcmc=params._replace(age_gyr=10.0 ** result[1]))
+    if binary.a < 1 + binary.rp:
+        result = result[0], find_log_age_bound(params, result[1], result[0])
+
+    return result
 
 
 def get_age_fraction(params, log_likelihood):
@@ -266,7 +331,7 @@ def params_to_sample(params, log_likelihood, reset_sys_err=False):
             ]
         )
 
-    print(f"Converting params to MCMC sample: {params}")
+    _logger.debug(f"Converting params to MCMC sample: %s", repr(params))
     mcmc_sample = get_mcmc_sample(params)
     non_finite = numpy.logical_not(numpy.isfinite(mcmc_sample))
     tiny = numpy.logical_and(non_finite, mcmc_sample < 0)
@@ -275,13 +340,13 @@ def params_to_sample(params, log_likelihood, reset_sys_err=False):
         tiny[SampleParams._fields.index("sed_sys")] = True
 
     huge = numpy.logical_and(non_finite, mcmc_sample > 0)
-    print(f"Replacing tiny: {tiny}, huge: {huge}")
+    _logger.debug("Replacing tiny: %s\nhuge: %s", tiny, huge)
 
     mcmc_sample[tiny] = norm.ppf(uniform.rvs(size=tiny.sum(), scale=0.05))
     mcmc_sample[huge] = norm.ppf(
         uniform.rvs(size=huge.sum(), loc=0.8, scale=0.2)
     )
-    print("Replaced MCMC sample:", mcmc_sample)
+    _logger.debug("Replaced MCMC sample: %s", repr(mcmc_sample))
     if (
         non_finite[SampleParams._fields.index("mtotal")]
         or non_finite[SampleParams._fields.index("mratio")]
@@ -368,3 +433,25 @@ def lstsq_optimize_samples(samples, log_likelihood, config, callback):
             chunksize=1,
         )
     return tuple(numpy.array(list(e[i] for e in result)) for i in range(2))
+
+
+def lmfit_and_tweak(input_sample, log_likelihood, max_tweak_fraction=0.1):
+    """Perform least squares fit and then tweak the result."""
+
+    lstsq_result = fit_least_squares(log_likelihood, input_sample)
+    _logger.debug("Least squares result: %s", repr(lstsq_result))
+    lstsq_sample = lstsq_result.x
+    lstsq_log_likelihood = log_likelihood(lstsq_sample)[0]
+    tweaked_log_likelihood = -numpy.inf
+    while not numpy.isfinite(tweaked_log_likelihood):
+        _logger.debug("Re-tweaking sample.")
+        tweaked_sample = line_tweak_sample(
+            lstsq_sample, input_sample, max_tweak_fraction
+        )
+        tweaked_log_likelihood = log_likelihood(tweaked_sample)[0]
+    return (
+        lstsq_sample,
+        tweaked_sample,
+        lstsq_log_likelihood,
+        tweaked_log_likelihood,
+    )

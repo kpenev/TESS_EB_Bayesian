@@ -145,6 +145,27 @@ class BinaryParams(batman.TransitParams):
             for lgt in cls._cmd_interpolators[0][1].get_log_age_range(mini, meh)
         )
 
+    def _calc_precessed_times(self, times):
+        """Find the times to pass the BatMan model to account for precession."""
+
+        w = (
+            (
+                self.w / 360
+                + (times - self._t0_both["primary"]) / self.prec_period
+            )
+            * 2
+            * numpy.pi
+        )
+        return (
+            times
+            + (
+                E_to_M(nu_to_E(numpy.pi / 2 - w, self.ecc), self.ecc)
+                - E_to_M(nu_to_E(numpy.pi / 2 - self.w, self.ecc), self.ecc)
+            )
+            / (2.0 * numpy.pi)
+            * self.per
+        )
+
     # pylint: enable=no-self-argument
     # pylint: enable=missing-function-docstring
 
@@ -426,10 +447,12 @@ class BinaryParams(batman.TransitParams):
 
         return self._out_of_range
 
-    def __init__(self, *, from_phoebe=None, from_mcmc=None):
+    def __init__(self, *, from_phoebe=None, from_mcmc=None, precessing=False):
         """Set the model parameters either from PHOEBE binary or MCMC sample."""
 
         BinaryParams.prepare_class()
+
+        self._precessing = precessing
 
         super().__init__()
         self._per_star_attr = [
@@ -455,6 +478,7 @@ class BinaryParams(batman.TransitParams):
         self.t0_perpass = None
         self.inverted = False
         self.absmag = None
+        self.prec_period = numpy.inf
         self._out_of_range = []
         for attr in self._per_star_attr:
             setattr(self, f"_{attr}_both", {"primary": None, "secondary": None})

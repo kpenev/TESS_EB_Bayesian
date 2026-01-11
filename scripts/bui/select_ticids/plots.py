@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 """Plots that can be used for selecting TESS objects."""
 
 from argparse import Namespace
@@ -11,7 +13,7 @@ from itertools import count
 
 from multiprocessing import Pool
 import matplotlib
-from sqlalchemy import select, update, or_, and_
+from sqlalchemy import select, or_, and_
 from configargparse import ArgumentParser, DefaultsFormatter
 import numpy
 from numpy.random import randint, seed
@@ -286,6 +288,9 @@ def get_tics_to_render(config):
     # pylint: enable=no-member
     # pylint: enable=invalid-name
 
+    if config.manual_tics is not None:
+        return config.manual_tics
+
     selection = select(SelectTICIDs.id)  # pylint: disable=no-member
     if config.limit_to_statuses:
         selection = selection.where(
@@ -386,6 +391,13 @@ def parse_command_line():
         type=int,
         help="The number of parallel processes to use.",
         default=16,
+    )
+    parser.add_argument(
+        '--manual-tics',
+        type=int,
+        nargs='+',
+        default=None,
+        help="If given, render plots for exactly these TIC IDs.",
     )
     parser.add_argument(
         "--limit-to-statuses",

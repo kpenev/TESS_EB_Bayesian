@@ -6,7 +6,7 @@ from os import path, remove, makedirs
 from subprocess import run
 from glob import glob
 import logging
-from itertools import repeat
+from itertools import repeat, count
 
 from matplotlib import pyplot, rcParams, legend_handler
 
@@ -15,6 +15,7 @@ try:
 except ImportError:
     # For older matplotlib versions (< 3.5)
     from matplotlib import cm as colormaps
+import h5py
 import numpy
 from configargparse import ArgumentParser, DefaultsFormatter
 import pandas
@@ -391,7 +392,9 @@ def include_in_axis(ax, x, y):
             )
 
 
-def create_corner_plot(plot_data, config, _, lstsq_data):
+def create_corner_plot(
+    plot_data, config, _, lstsq_data
+):  # pylint: disable=too-many-locals
     """Create and save a corner plot."""
 
     plot_data, ranges = get_chain_expressions(
@@ -436,8 +439,7 @@ def create_corner_plot(plot_data, config, _, lstsq_data):
                     "maxlike": maxlike_values[plot_data.columns[xi]],
                 }
                 ax = axes[yi, xi]
-                for label, color in [('maxlike', 'r'),
-                                     ('lstsq', 'g')]:
+                for label, color in [("maxlike", "r"), ("lstsq", "g")]:
                     if mark_x[label] is None or mark_y[label] is None:
                         continue
                     ax.axvline(mark_x[label], color=color)
@@ -734,7 +736,9 @@ def hex_color(color_tuple):
     )
 
 
-def create_quantile_plot(plot_data, config, num_walkers, lstsq_data=None):
+def create_quantile_plot(
+    plot_data, config, num_walkers, lstsq_data=None
+):  # pylint: disable=too-many-locals
     """Make a plot showing the evolution of quantile(s) of chain expressions."""
 
     num_steps = plot_data.shape[0] // num_walkers
@@ -784,15 +788,22 @@ def create_quantile_plot(plot_data, config, num_walkers, lstsq_data=None):
         yrange = numpy.inf, -numpy.inf
         for cdf_value in plot_quantiles:
             assert 0.0 <= cdf_value <= 1.0
-            plot_y = numpy.quantile(
+            plot_y = plot_data[column].to_numpy()
+            keep_range = numpy.nanquantile(plot_y, (0.05, 0.95))
+            keep_range[0] = max(
+                numpy.nanmin(plot_y), 1.1 * keep_range[0] - 0.1 * keep_range[1]
+            )
+            keep_range[1] += min(
+                numpy.nanmax(plot_y), 1.1 * keep_range[1] - 0.1 * keep_range[0]
+            )
+            plot_y[
+                numpy.logical_or(plot_y < keep_range[0], plot_y > keep_range[1])
+            ] = numpy.nan
+
+            plot_y = numpy.nanquantile(
                 plot_data[column].to_numpy().reshape(num_steps, num_walkers),
                 cdf_value,
                 axis=1,
-            )
-            print(
-                f"Marking maxlike and lstsq for column {column} at "
-                f"{lstsq_data['maxlike'][column]} and "
-                f"{lstsq_data['lstsq'][column]} respectively"
             )
             if config.quantile_plot_show_burnin:
                 burnin, quantile = next(convergence_data)
@@ -821,10 +832,18 @@ def create_quantile_plot(plot_data, config, num_walkers, lstsq_data=None):
                     plot_y,
                     label=f"q={cdf_value}",
                 )
-        pyplot.ylim(
-            1.2 * yrange[0] - 0.2 * yrange[1], 1.2 * yrange[1] - 0.2 * yrange[0]
-        )
+        if numpy.isfinite(yrange[0]) and numpy.isfinite(yrange[1]):
+            pyplot.ylim(
+                1.2 * yrange[0] - 0.2 * yrange[1],
+                1.2 * yrange[1] - 0.2 * yrange[0],
+            )
         if lstsq_data:
+            print(
+                f"Marking maxlike and lstsq for column {column} at "
+                f"{lstsq_data['maxlike'][column]} and "
+                f"{lstsq_data['lstsq'][column]} respectively"
+            )
+
             pyplot.axhline(
                 y=lstsq_data["maxlike"][column], color="r", linestyle=":"
             )
@@ -877,7 +896,7 @@ def get_walker_step_params(
                         "bls_duration": log_likelihood.best_fit_bls["duration"],
                     }
                 )
-            )(config.sample_condition or "True")
+            )(getattr(config, "sample_condition", "True"))
         ]
         print(f"Surviving params: {sample_params!r}")
     else:
@@ -943,7 +962,7 @@ def get_lstsq(backend, log_likelihood, config):
 
 def get_model_binaries(
     config, raw_data, log_prob, include, log_likelihood, lstsq_data=None
-):
+):  # pylint: disable=too-many-arguments, too-many-positional-arguments
     """Return fully set-up binaries per ``--show-model-with-lc``."""
 
     if raw_data is not None:
@@ -963,7 +982,7 @@ def get_model_binaries(
 
     result = (
         get_param_binaries([lstsq_data["lstsq_params"]])
-        if getattr(config, 'show_lstsq', False)
+        if getattr(config, "show_lstsq", False)
         else []
     )
     for selection in getattr(config, "show_model_with_lc", []):
@@ -999,22 +1018,62 @@ def get_model_binaries(
     return result
 
 
-def get_plot_data(config, backend, log_likelihood):
+def get_plot_data(config, log_likelihood):
     """Return the data required to generate the plots spceified by config."""
 
-    num_iterations = backend.iteration
+    num_iterations = 0
     raw_data = None
     log_prob = None
     selected = None
 
-    if num_iterations > 0:
-        if config.burn_in >= 0:
-            raw_data = backend.get_blobs(
-                discard=config.burn_in, thin=config.thin
+    with h5py.File(config.samples_fname, "r") as samples_f:
+        for chain_ind in [None] if config.chain_name else count():
+            chain_name = f"prelim_mcmc_{chain_ind}"
+            if chain_name not in samples_f:
+                chain_name = "mcmc"
+            backend = HDFBackend(
+                config.samples_fname, name=chain_name, read_only=True
             )
-            log_prob = backend.get_log_prob(
-                discard=config.burn_in, thin=config.thin
+
+            if backend.iteration > 0:
+                num_iterations += backend.iteration
+                if config.burn_in >= 0:
+                    if raw_data is None:
+                        raw_data = backend.get_blobs(
+                            discard=config.burn_in, thin=config.thin
+                        )
+                        log_prob = backend.get_log_prob(
+                            discard=config.burn_in, thin=config.thin
+                        )
+
+                    else:
+                        raw_data = numpy.concatenate(
+                            (
+                                raw_data,
+                                backend.get_blobs(
+                                    discard=config.burn_in, thin=config.thin
+                                ),
+                            ),
+                            axis=0,
+                        )
+                        log_prob = numpy.concatenate(
+                            (
+                                log_prob,
+                                backend.get_log_prob(
+                                    discard=config.burn_in, thin=config.thin
+                                ),
+                            ),
+                            axis=0,
+                        )
+            print(
+                f"Read chain {chain_name}. Now raw_data shape: "
+                f"{raw_data.shape if raw_data is not None else None}, "
+                "log_prob shape: "
+                f"{log_prob.shape if log_prob is not None else None}"
             )
+            if chain_name == "mcmc":
+                break
+        if raw_data is not None:
             plot_data = pandas.DataFrame(
                 raw_data[: num_iterations // config.thin, :, :]
                 .flatten()
@@ -1074,7 +1133,7 @@ def get_plot_data(config, backend, log_likelihood):
             selected.flatten(),
         )
 
-    return plot_data, raw_data, log_prob, selected
+    return plot_data, raw_data, log_prob, selected, backend
 
 
 def main(config):
@@ -1088,29 +1147,28 @@ def main(config):
         f"{getattr(config, 'chain_name', '')}"
     )
     lstsq_data = None
-    if path.exists(config.samples_fname) and getattr(
-        config, "chain_name", False
-    ):
+    if path.exists(config.samples_fname):
         print("Print found samples file. Loading data ...")
         if log_likelihood is None:
             log_likelihood = LogLikelihood(config.tic_id)
         print("Initializing HDF5 backend")
-        backend = HDFBackend(
-            config.samples_fname, name=config.chain_name, read_only=True
-        )
-        print("Extracting data from HDF5 backend")
-        plot_data, raw_data, log_prob, selected = get_plot_data(
+        print("Extracting data from HDF5 file")
+        plot_data, raw_data, log_prob, selected, backend = get_plot_data(
             config,
-            backend,
             log_likelihood,
         )
-        if getattr(config, 'show_lstsq', False):
+        if getattr(config, "show_lstsq", False):
             lstsq_data = get_lstsq(backend, log_likelihood, config)
     else:
         plot_data = None
         raw_data = None
         log_prob = None
         selected = None
+        backend = HDFBackend(
+            config.samples_fname,
+            name=config.chain_name or "mcmc",
+            read_only=True,
+        )
 
     print("Creating plots")
 

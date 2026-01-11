@@ -617,7 +617,7 @@ class LogLikelihood(TESSTarget):
             fit_mask = numpy.logical_and(
                 eclipse_mask, numpy.abs(eclipse_model - 1) < 1e-10
             )
-            if fit_mask.sum() < 10 or not fit_mask[eclipse_mask][[0, -1]].all():
+            if eclipse_mask.sum() < 20:
                 LogLikelihood._logger.debug(
                     "Discarding eclipse %d", eclipse_ind
                 )
@@ -629,16 +629,30 @@ class LogLikelihood(TESSTarget):
                 lc_sq_errors = lc_sq_errors[dont_discard]
                 lightcurve = lightcurve[dont_discard]
                 continue
-            LogLikelihood._logger.debug("Keeping eclipse %d", eclipse_ind)
-
-            ooe_poly = numpy.poly1d(
-                numpy.polyfit(
-                    lightcurve["time"][fit_mask],
-                    lightcurve["flux"][fit_mask],
-                    2,
-                    w=1 / lc_sq_errors[fit_mask] ** 0.5,
+            if fit_mask.sum() < 10 or not fit_mask[eclipse_mask][[0, -1]].all():
+                LogLikelihood._logger.debug(
+                    "For eclipse %d fitting OOE with eclipse.", eclipse_ind
                 )
-            )
+                ooe_poly = numpy.poly1d(
+                    numpy.polyfit(
+                        lightcurve["time"][eclipse_mask],
+                        lightcurve["flux"][eclipse_mask]
+                        / eclipse_model[eclipse_mask],
+                        2,
+                        w=1 / lc_sq_errors[eclipse_mask] ** 0.5,
+                    )
+                )
+            else:
+                LogLikelihood._logger.debug("Keeping eclipse %d", eclipse_ind)
+
+                ooe_poly = numpy.poly1d(
+                    numpy.polyfit(
+                        lightcurve["time"][fit_mask],
+                        lightcurve["flux"][fit_mask],
+                        2,
+                        w=1 / lc_sq_errors[fit_mask] ** 0.5,
+                    )
+                )
             eclipse_model[eclipse_mask] *= ooe_poly(
                 lightcurve["time"][eclipse_mask]
             )
@@ -858,6 +872,10 @@ class LogLikelihood(TESSTarget):
         """
 
         if binary.a < 1 + binary.rp or binary.out_of_range:
+            self._logger.warning(
+                "Unphysical binary parameters (assuming zero likelihood): %s",
+                binary,
+            )
             return -numpy.inf
         result = numpy.array([]) if return_residuals else 0.0
         for header, lightcurve in self._lcs:
@@ -926,9 +944,12 @@ class LogLikelihood(TESSTarget):
     ):
         """Return log-likelihood of observed SED for given binary."""
 
+        self._logger.debug("SED: %s", repr(self._sed))
         finite = numpy.isfinite(self._sed[0])
+        self._logger.debug("Finite SED flags: %s", repr(finite))
         sed_errors = (self._sed[1][finite] ** 2 + sed_sys_err**2) ** 0.5
         result = (self._sed[0][finite] - binary.absmag[finite]) / sed_errors
+        self._logger.debug("SED residuals: %s", repr(result))
         if self._sed[2][1]:
             nsigma = numpy.abs(
                 self._sed[0][finite] - binary.absmag[finite]
@@ -937,6 +958,9 @@ class LogLikelihood(TESSTarget):
             result[bad_sed] *= 10.0 ** (
                 self._sed[2][1] * (nsigma[bad_sed] - self._sed[2][0])
             )
+            result[numpy.isinf(result)] = numpy.finfo(result.dtype).max
+        self._logger.debug("After penalty, SED residuals: %s", repr(result))
+
         if return_residuals:
             if sed_sys_err > 0:
                 result = numpy.concatenate(
@@ -948,7 +972,10 @@ class LogLikelihood(TESSTarget):
                     )
                 )
             return result
-        result = -(result**2 + numpy.log(sed_errors**2)).sum() / 2
+        result = max(
+            numpy.finfo(result.dtype).min,
+            -(result**2 + numpy.log(sed_errors**2)).sum() / 2,
+        )
         self._logger.debug("SED log-likelihood: %s", result)
         return result
 

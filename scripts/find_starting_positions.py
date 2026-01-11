@@ -4,6 +4,7 @@ from collections import namedtuple
 from multiprocessing import Process, Queue
 import logging
 from traceback import format_exc
+import sys
 
 import numpy
 from scipy.stats import norm, uniform
@@ -22,7 +23,7 @@ from sample_params import SampleParams
 from log_likelihood import LogLikelihood
 from binary import Binary
 from binary_parameters import calc_eclipse_phase_diff
-from utils import set_logage_fraction, params_to_sample
+from utils import set_logage_fraction, params_to_sample, lmfit_and_tweak
 
 _logger = logging.getLogger(__name__)
 
@@ -104,10 +105,24 @@ class FindStartingPositions:
             "Matching eclipse times: e=0 phase diff = %s",
             calc_eclipse_phase_diff(0, params.w),
         )
+        max_e_phase_diff = calc_eclipse_phase_diff(
+            LogLikelihood.max_ecc, params.w
+        )
+        if abs(max_e_phase_diff - secondary_eclipse_phase) < 1e-8:
+            _logger.debug(
+                "Eclipse times require max e: e=%s for phase diff = %s vs %s "
+                "(diff=%s)",
+                repr(LogLikelihood.max_ecc),
+                repr(max_e_phase_diff),
+                repr(secondary_eclipse_phase),
+                repr(max_e_phase_diff - secondary_eclipse_phase),
+            )
+            return params._replace(ecc=LogLikelihood.max_ecc)
+
         _logger.debug(
             "Matching eclipse times: e=%s phase diff = %s",
             repr(LogLikelihood.max_ecc),
-            calc_eclipse_phase_diff(LogLikelihood.max_ecc, params.w),
+            max_e_phase_diff,
         )
 
         def to_solve(ecc):
@@ -289,15 +304,18 @@ class FindStartingPositions:
             return -self._log_likelihood.calc_sed_log_likelihood(binary, 0.0)
 
         def to_solve(mtotal, get_params=False):
-            lc_tuned_params = self._match_both_depths(
-                params._replace(mtotal=mtotal), logage_fraction
-            )
-            result = optimize.minimize_scalar(
-                to_minimize,
-                bounds=self._log_likelihood.get_range("mtotal"),
-                args=(lc_tuned_params,),
-                options={"xatol": 1e-3 * max(mtotal, 1)},
-            )
+            try:
+                lc_tuned_params = self._match_both_depths(
+                    params._replace(mtotal=mtotal), logage_fraction
+                )
+                result = optimize.minimize_scalar(
+                    to_minimize,
+                    bounds=self._log_likelihood.get_range("mtotal"),
+                    args=(lc_tuned_params,),
+                    options={"xatol": 1e-3 * max(mtotal, 1)},
+                )
+            except ValueError:
+                return -mtotal
             assert result.success, f"Failed to optimize total mass: {result!r}!"
             _logger.debug(
                 "Starting from Mtotal = %s, found b = %s, m2/m1 = %s, "
@@ -421,13 +439,13 @@ class FindStartingPositions:
             )
 
         logage_fractions = numpy.linspace(
-            config.initial_logage_smear / 2,
-            1.0 - config.initial_logage_smear / 2,
+            max(0.01, config.initial_logage_smear / 2),
+            min(0.99, 1.0 - config.initial_logage_smear / 2),
             config.initial_num_ages,
         )
         meh_values = numpy.linspace(
-            -1.0 + config.initial_meh_smear / 2,
-            0.5 - config.initial_meh_smear / 2,
+            max(-0.95, -1.0 + config.initial_meh_smear / 2),
+            min(0.45, 0.5 - config.initial_meh_smear / 2),
             config.initial_num_mehs,
         )
 
@@ -448,8 +466,8 @@ class FindStartingPositions:
                 wmin, wmax = wlimit, 360 - wlimit
 
         w_values = numpy.linspace(
-            wmin + config.initial_w_smear / 2,
-            wmax - config.initial_w_smear / 2,
+            wmin + max(5.0, config.initial_w_smear / 2),
+            wmax - max(5.0, config.initial_w_smear / 2),
             config.initial_num_ws,
         )
 
@@ -528,53 +546,29 @@ class FindStartingPositions:
                     )
                     continue
 
-                period_tweak = min(
-                    self._log_likelihood.best_fit_bls["period"][1] / 4,
-                    0.2
-                    * self._log_likelihood.best_fit_bls["duration"]
-                    * self._log_likelihood.best_fit_bls["period"][0]
-                    / (
-                        self._log_likelihood.time_span[1]
-                        - self._log_likelihood.time_span[0]
-                    ),
-                )
-                period_tweak = uniform.rvs(
-                    loc=-period_tweak,
-                    scale=2 * period_tweak,
-                )
-                timing_tweak = uniform.rvs(
-                    loc=-0.1 * self._log_likelihood.best_fit_bls["duration"],
-                    scale=0.2 * self._log_likelihood.best_fit_bls["duration"],
-                ) - period_tweak * (
-                    (
-                        self._log_likelihood.time_span[1]
-                        - self._log_likelihood.time_span[0]
-                    )
-                    / params.per
-                    / 2
-                )
-
-                params = params._replace(
-                    eclipse_time=params.eclipse_time + timing_tweak,
-                    per=params.per + period_tweak,
-                )
-
-                scenario_sample = params_to_sample(
-                    params, self._log_likelihood, True
+                result = lmfit_and_tweak(
+                    params_to_sample(params, self._log_likelihood, True),
+                    self._log_likelihood,
+                    0.01
                 )
                 _logger.info(
-                    "Generated optimized sample:\n%s",
-                    scenario_sample,
+                    "Generated optimized sample (ll=%s):\n%s\nTweaked to "
+                    "(ll=%s):\n%s",
+                    repr(result[2]),
+                    repr(result[0]),
+                    repr(result[3]),
+                    repr(result[1]),
                 )
-                params = self._log_likelihood.get_sample_params(scenario_sample)
+                params = self._log_likelihood.get_sample_params(result[1])
                 _logger.info(
-                    "Above sample corresponds to parameters:\n%s", params
+                    "Above tweaked sample corresponds to parameters:\n%s",
+                    params,
                 )
                 _logger.info(
                     "Above corresponds to binary:\n%s", Binary(from_mcmc=params)
                 )
 
-                optimized_queue.put((scenario_ind, scenario_sample))
+                optimized_queue.put((scenario_ind, result[1]))
             _logger.info("Position optimization process finished.")
         # pylint: disable=bare-except
         except:
@@ -669,7 +663,7 @@ class FindStartingPositions:
             )
             _logger.debug("Age fit params: %s", params)
         params = self._fit_limbdark(params)
-        _logger.debug("Suggested starting params: %s", params)
+        _logger.info("Suggested starting params: %s", params)
 
         return params
 
@@ -725,11 +719,11 @@ class FindStartingPositions:
         for _ in initial_scenarios:
             position = optimized_queue.get()
             if position is None:
-                # pylint: disable=invalid-name
                 for w in workers:
-                    w.terminate()
+                    w.kill()
+                _logger.critical("Failed to find initial walker positions.")
+                sys.exit(1)
                 # pylint: enable=invalid-name
-                raise RuntimeError("Failed to find initial walker positions.")
             _logger.debug("Saving initial position %d: %s", *position)
             save_initial_position(
                 position[1],

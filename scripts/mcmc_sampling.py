@@ -23,7 +23,7 @@ from general_purpose_python_modules.emcee_util import (
     load_initial_positions,
 )
 
-from utils import fit_least_squares, line_tweak_sample
+from utils import lmfit_and_tweak
 from hacked_emcee_hdf5_backend import HDFBackend
 from log_likelihood import SampleParams, LogLikelihood
 from log_likelihood_priors import LogLikelihoodPriorsOnly
@@ -274,7 +274,8 @@ def get_backend(samples_fname, config):
                 reset = False
         if not reset:
             _logger.info(
-                "Existing chain with %d samples found for TIC ID: %d. Extending.",
+                "Existing chain with %d samples found for TIC ID: %d. "
+                "Extending.",
                 backend.iteration,
                 config.tic_id,
             )
@@ -332,21 +333,27 @@ def prepare_restart(backend):
 
     if backend.iteration == 0:
         with h5py.File(backend.filename, "r") as samples_f:
-            if "starting_positions" in samples_f["mcmc"]:
+            if "seed_log_prob" in samples_f["mcmc"]:
+                assert "seed_samples" in samples_f["mcmc"]
                 result = (
                     samples_f["mcmc/seed_log_prob"][:],
                     samples_f["mcmc/seed_samples"][:],
                 )
             else:
-                result = None
-        if result:
-            return result + load_initial_positions(
+                result = (None, None)
+        if result[0] is not None:
+            assert result[1] is not None
+            result += load_initial_positions(
                 backend.filename,
                 num_walkers=backend.shape[0],
                 num_params=backend.shape[1],
                 chain_name="mcmc",
                 blobs_dtype=[("tweaked_log_prob", float)],
             )
+            if len(result) == 4:
+                return result[:3] + (None, None) + (result[3],)
+            assert len(result) == 6
+            return result
 
     log_prob, samples = get_all_samples(backend)
 
@@ -380,7 +387,6 @@ def prepare_restart(backend):
         initial_state = samples[top_indices]
         if walkers_independent(initial_state):
             with h5py.File(backend.filename, "r+") as samples_f:
-                samples_f["mcmc"].create_group("starting_positions")
                 samples_f["mcmc"].create_dataset(
                     "seed_log_prob", data=log_prob[top_indices]
                 )
@@ -407,34 +413,20 @@ def find_restart_samples(input_queue, output_queue, log_likelihood, config):
         setup_process(task="find_restart_samples", **vars(config))
         for input_ind, input_sample in iter(input_queue.get, "STOP"):
             if config.skip_restart_lstsq:
-                lstsq_sample = tweaked_sample = input_sample
-                lstsq_log_likelihood = tweaked_log_likelihood = numpy.nan
-            else:
-                lstsq_result = fit_least_squares(log_likelihood, input_sample)
-                _logger.info(
-                    "Least squares result for index %d: %s",
-                    input_ind,
-                    repr(lstsq_result),
-                )
-                lstsq_sample = lstsq_result.x
-                lstsq_log_likelihood = log_likelihood(lstsq_sample)[0]
-                tweaked_log_likelihood = -numpy.inf
-                while not numpy.isfinite(tweaked_log_likelihood):
-                    _logger.info("Re-tweaking sample for index %d.", input_ind)
-                    tweaked_sample = line_tweak_sample(
-                        lstsq_sample, input_sample
+                output_queue.put(
+                    (
+                        input_ind,
+                        input_sample,
+                        input_sample,
+                        numpy.nan,
+                        numpy.nan,
                     )
-                    tweaked_log_likelihood = log_likelihood(tweaked_sample)[0]
-            _logger.info("Found suitable sample for index %d.", input_ind)
-            output_queue.put(
-                (
-                    input_ind,
-                    lstsq_sample,
-                    tweaked_sample,
-                    lstsq_log_likelihood,
-                    tweaked_log_likelihood,
                 )
-            )
+            else:
+                _logger.info("Found suitable sample for index %d.", input_ind)
+                output_queue.put(
+                    (input_ind,) + lmfit_and_tweak(input_sample, log_likelihood)
+                )
 
     except:  # pylint: disable=bare-except
         _logger.critical("Restart sample worker failed:\n%s", format_exc())
@@ -461,6 +453,21 @@ def restart_sampling(
             "preliminary MCMC."
         )
         return backend, seed_samples, False
+
+    if config.changed_likelihood:
+        _logger.info(
+            "Log-likelihood function changed since last sampling. "
+            "Re-evaluating seed log-likelihoods."
+        )
+        with Pool(
+            config.num_parallel,
+            initializer=setup_process_map,
+            initargs=[vars(config)],
+            maxtasksperchild=1024,
+        ) as pool:
+            seed_log_prob = numpy.array(
+                [e[0] for e in pool.map(log_likelihood, seed_samples)]
+            )
 
     _logger.debug(
         "Spread in seed log probabilities: %s",
@@ -590,6 +597,9 @@ def main(config):
                 backend, config, log_likelihood
             )
 
+    with h5py.File(backend.filename, "r+") as samples_f:
+        samples_f["mcmc"].attrs["final_run"] = final_run
+
     if config.starting_positions_only:
         return
 
@@ -619,7 +629,9 @@ def main(config):
                         - backend.iteration
                     )
                 ),
-                skip_initial_state_check=initial_state is None,
+                skip_initial_state_check=(
+                    initial_state is None and not config.changed_likelihood
+                ),
             )
             if not final_run:
                 backend, initial_state, final_run = restart_sampling(
@@ -628,4 +640,5 @@ def main(config):
 
 
 if __name__ == "__main__":
+    numpy.set_printoptions(edgeitems=20)
     main(parse_command_line())

@@ -82,6 +82,7 @@ class LightCurvePlotter:
             "color": "red",
             "markersize": 10,
             "zorder": 100,
+            "alpha": 0.1,
         },
         "others": {
             "marker": "x",
@@ -89,6 +90,7 @@ class LightCurvePlotter:
             "color": "black",
             "markersize": 10,
             "zorder": 20,
+            "alpha": 0.1,
         },
     }
 
@@ -195,8 +197,8 @@ class LightCurvePlotter:
         pyplot.ylim(ylim)
 
     def plot_vs_phase(
-        self, lightcurve, phase, model_lcs=(), xlabel="Phase", order=True
-    ):
+        self, lightcurve, phase, *, model_lcs=(), xlabel="Phase", order=True
+    ):  # pylint: disable=too-many-arguments
         """Create a plot of the lightcurve vs the given phase."""
 
         if order:
@@ -251,7 +253,7 @@ class LightCurvePlotter:
         phase = (
             lightcurve["time"] % self._folding_period
         ) / self._folding_period
-        self.plot_vs_phase(lightcurve, phase, model_lcs)
+        self.plot_vs_phase(lightcurve, phase, model_lcs=model_lcs)
         pyplot.xlim(0, 1)
 
     @staticmethod
@@ -278,7 +280,7 @@ class LightCurvePlotter:
             print("Using offset phase")
             phase = offset_phase
         self.plot_vs_phase(
-            lightcurve, phase, model_lcs, xlabel=r"$\Delta$Phase"
+            lightcurve, phase, model_lcs=model_lcs, xlabel=r"$\Delta$Phase"
         )
 
     # pylint: disable=too-many-arguments
@@ -293,7 +295,9 @@ class LightCurvePlotter:
             flux = y[ooe_mask]
             ymin = min(flux.min(), ymin)
             ymax = max(flux.max(), ymax)
-        self.plot_vs_phase(lightcurve, plot_x, model_lcs, xlabel)
+        self.plot_vs_phase(
+            lightcurve, plot_x, model_lcs=model_lcs, xlabel=xlabel
+        )
         pad = 0.05 * (ymax - ymin)
         pyplot.ylim(ymin - pad, ymax + pad)
 
@@ -541,7 +545,9 @@ class LightCurvePlotter:
                 cfg["zorder"] = 30
             self.sed_plot_config["zorder"] = 30
 
-    def __call__(self, tic_id, binaries=None, title_info=None):
+    def __call__(
+        self, tic_id, binaries=None, title_info=None
+    ):  # pylint: disable=too-many-branches
         """
         Plot lightcurves of TESS target together with detrending and model(s).
 
@@ -596,7 +602,7 @@ class LightCurvePlotter:
             for plot_type, axis in subfig.subplot_mosaic(
                 self._mosaic_spec,
                 empty_sentinel="empty",
-                gridspec_kw={"hspace": 0.0},
+                gridspec_kw={"hspace": 0.0, "wspace": 0.0},
             ).items():
                 print(f"Plot type: {plot_type!r}.")
                 pyplot.sca(axis)
