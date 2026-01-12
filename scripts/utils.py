@@ -2,6 +2,7 @@
 
 from multiprocessing import Pool
 import logging
+from collections import namedtuple
 
 import numpy
 from scipy import optimize
@@ -93,7 +94,7 @@ def fit_least_squares(
     for arg, default in [
         ("method", "lm"),
         ("xtol", 1e-3),
-        ("max_nfev", 300 * initial_mcmc_sample.size),
+        ("max_nfev", 100 * initial_mcmc_sample.size),
     ]:
         if arg not in fit_kwargs:
             fit_kwargs[arg] = default
@@ -331,7 +332,7 @@ def params_to_sample(params, log_likelihood, reset_sys_err=False):
             ]
         )
 
-    _logger.debug(f"Converting params to MCMC sample: %s", repr(params))
+    _logger.debug("Converting params to MCMC sample: %s", repr(params))
     mcmc_sample = get_mcmc_sample(params)
     non_finite = numpy.logical_not(numpy.isfinite(mcmc_sample))
     tiny = numpy.logical_and(non_finite, mcmc_sample < 0)
@@ -370,16 +371,21 @@ def params_to_sample(params, log_likelihood, reset_sys_err=False):
     return mcmc_sample
 
 
-def tweak_sample(sample, log_likelihood, tweak_scale=None):
+def tweak_sample(sample, log_likelihood, tweak_scale=None,
+                 max_tweak_attempts=1000):
     """Slightly tweak the given MCMC sample to allow MCMC sampling near it."""
 
     params = log_likelihood.get_sample_params(sample)
-    if tweak_scale is None:
-        params = tweak_params(params, log_likelihood)
-    else:
-        params = tweak_params(params, log_likelihood, tweak_scale)
+    for _ in range(max_tweak_attemps):
+        if tweak_scale is None:
+            params = tweak_params(params, log_likelihood)
+        else:
+            params = tweak_params(params, log_likelihood, tweak_scale)
 
-    return params_to_sample(params, log_likelihood)
+        tweaked = params_to_sample(params, log_likelihood)
+        if numpy.isfinite(log_likelihood(tweaked)[0]):
+            return tweaked
+    return None
 
 
 def line_tweak_sample(tweak_from, tweak_toward, max_fraction=0.1):
@@ -435,7 +441,19 @@ def lstsq_optimize_samples(samples, log_likelihood, config, callback):
     return tuple(numpy.array(list(e[i] for e in result)) for i in range(2))
 
 
-def lmfit_and_tweak(input_sample, log_likelihood, max_tweak_fraction=0.1):
+InitialSample = namedtuple(
+    "InitialSample",
+    [
+        "lstsq_sample",
+        "tweaked_sample",
+        "lstsq_log_likelihood",
+        "tweaked_log_likelihood",
+    ],
+)
+
+def lmfit_and_tweak(
+    input_sample, log_likelihood, max_tweak_fraction=0.1, max_tweak_attemps=100
+):
     """Perform least squares fit and then tweak the result."""
 
     lstsq_result = fit_least_squares(log_likelihood, input_sample)
@@ -443,15 +461,25 @@ def lmfit_and_tweak(input_sample, log_likelihood, max_tweak_fraction=0.1):
     lstsq_sample = lstsq_result.x
     lstsq_log_likelihood = log_likelihood(lstsq_sample)[0]
     tweaked_log_likelihood = -numpy.inf
-    while not numpy.isfinite(tweaked_log_likelihood):
+    for _ in range(max_tweak_attemps):
         _logger.debug("Re-tweaking sample.")
         tweaked_sample = line_tweak_sample(
             lstsq_sample, input_sample, max_tweak_fraction
         )
         tweaked_log_likelihood = log_likelihood(tweaked_sample)[0]
-    return (
+        if numpy.isfinite(tweaked_log_likelihood):
+            return InitialSample(
+                lstsq_sample,
+                tweaked_sample,
+                lstsq_log_likelihood,
+                tweaked_log_likelihood,
+            )
+    _logger.warning(
+        "Tweaking LSTSQ sample failed, returning un-tweaked sample."
+    )
+    return InitialSample(
         lstsq_sample,
-        tweaked_sample,
+        lstsq_sample,
         lstsq_log_likelihood,
-        tweaked_log_likelihood,
+        lstsq_log_likelihood,
     )

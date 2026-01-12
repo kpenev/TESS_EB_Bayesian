@@ -23,7 +23,12 @@ from sample_params import SampleParams
 from log_likelihood import LogLikelihood
 from binary import Binary
 from binary_parameters import calc_eclipse_phase_diff
-from utils import set_logage_fraction, params_to_sample, lmfit_and_tweak
+from utils import (
+    set_logage_fraction,
+    params_to_sample,
+    lmfit_and_tweak,
+    tweak_sample,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -537,27 +542,26 @@ class FindStartingPositions:
                 except ValueError:
                     _logger.warning(
                         "Proposed initial position scenario (%s) appears "
-                        "unphysical, using random position:\n%s",
+                        "unphysical, using random position near top sample:\n"
+                        "%s",
                         repr(scenario),
                         format_exc(),
                     )
-                    optimized_queue.put(
-                        (scenario_ind, norm.rvs(size=len(SampleParams._fields)))
-                    )
+                    optimized_queue.put((scenario_ind, None))
                     continue
 
                 result = lmfit_and_tweak(
                     params_to_sample(params, self._log_likelihood, True),
                     self._log_likelihood,
-                    0.01
+                    0.01,
                 )
                 _logger.info(
                     "Generated optimized sample (ll=%s):\n%s\nTweaked to "
                     "(ll=%s):\n%s",
-                    repr(result[2]),
-                    repr(result[0]),
-                    repr(result[3]),
-                    repr(result[1]),
+                    repr(result.lstsq_log_likelihood),
+                    repr(result.lstsq_sample),
+                    repr(result.tweaked_log_likelihood),
+                    repr(result.tweaked_sample),
                 )
                 params = self._log_likelihood.get_sample_params(result[1])
                 _logger.info(
@@ -568,7 +572,7 @@ class FindStartingPositions:
                     "Above corresponds to binary:\n%s", Binary(from_mcmc=params)
                 )
 
-                optimized_queue.put((scenario_ind, result[1]))
+                optimized_queue.put((scenario_ind, result))
             _logger.info("Position optimization process finished.")
         # pylint: disable=bare-except
         except:
@@ -716,26 +720,56 @@ class FindStartingPositions:
         ]
         for process in workers:
             process.start()
+        unphysical = []
+        top_position = None
         for _ in initial_scenarios:
-            position = optimized_queue.get()
+            scenario_ind, position = optimized_queue.get()
             if position is None:
                 for w in workers:
                     w.kill()
                 _logger.critical("Failed to find initial walker positions.")
                 sys.exit(1)
                 # pylint: enable=invalid-name
-            _logger.debug("Saving initial position %d: %s", *position)
+            elif position[1] is None:
+                unphysical.append(scenario_ind)
+            else:
+                if top_position is None or (
+                    position.lstsq_log_likelihood
+                    > top_position.lstsq_log_likelihood
+                ):
+                    top_position = position
+                _logger.debug("Saving initial position %d: %s", *position)
+                save_initial_position(
+                    position.tweaked_sample,
+                    samples_fname,
+                    nwalkers=num_walkers,
+                    index=scenario_ind,
+                )
+                starting_positions[scenario_ind] = position.tweaked_sample
+        for scenario_ind in unphysical + range(-config.num_random_walkers, 0):
+            starting_positions[scenario_ind] = tweak_sample(
+                top_position.lstsq_sample, self._log_likelihood
+            )
+            if starting_positions[scenario_ind] is None:
+                starting_positions[scenario_ind] = norm.rvs(size=num_params)
+            _logger.info(
+                "Adding random sample %d (ll=%s):\n%s\nCorresponding to "
+                "params:\n%s",
+                scenario_ind,
+                self._log_likelihood(starting_positions[scenario_ind]),
+                starting_positions[scenario_ind],
+                self._log_likelihood.get_sample_params(
+                    starting_positions[scenario_ind]
+                ),
+            )
+
             save_initial_position(
-                position[1],
+                starting_positions[scenario_ind],
                 samples_fname,
                 nwalkers=num_walkers,
-                index=position[0],
+                index=scenario_ind,
             )
-            starting_positions[position[0]] = position[1]
-        if config.num_random_walkers > 0:
-            starting_positions[-config.num_random_walkers :, :] = norm.rvs(
-                size=config.num_random_walkers * num_params
-            ).reshape(config.num_random_walkers, num_params)
+
         return starting_positions
 
     # pylint: enable=too-many-locals
