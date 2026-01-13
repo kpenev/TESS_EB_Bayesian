@@ -167,7 +167,7 @@ def tweak_params(
     )
     tweak_scale = SampleParams(
         *(
-            abs_tweak + rel_tweak * orig
+            abs_tweak + rel_tweak * abs(orig)
             for abs_tweak, rel_tweak, orig in zip(
                 abs_tweak_scale, rel_tweak_scale, params
             )
