@@ -28,6 +28,7 @@ from utils import (
     params_to_sample,
     lmfit_and_tweak,
     tweak_sample,
+    InitialSample,
 )
 
 _logger = logging.getLogger(__name__)
@@ -582,6 +583,47 @@ class FindStartingPositions:
             optimized_queue.put(None)
         # pylint: enable=bare-except
 
+    def _load_initial_samples(self, samples_fname, num_walkers):
+        """Load saved initial positions from a previous run."""
+
+        initial_position_data = load_initial_positions(
+            samples_fname,
+            num_walkers=num_walkers,
+            num_params=len(SampleParams._fields),
+            blobs_dtype=[("log_likelihood", float)]
+            + [
+                (f"s{i:02d}", float) for i, _ in enumerate(SampleParams._fields)
+            ],
+        )
+        if len(initial_position_data) == 2:
+            assert not initial_position_data[1].any()
+            _logger.info("No previously saved starting positions found.")
+            return initial_position_data + (None,)
+        (
+            starting_positions,
+            starting_log_likelihood,
+            lstsq_data,
+            positions_found,
+        ) = initial_position_data
+        top_position = None
+        for tweaked_sample, tweaked_log_likelihood, lstsq_result in zip(
+            starting_positions, starting_log_likelihood, lstsq_data
+        ):
+            if (
+                top_position is None
+                or lstsq_result[0] > top_position.lstsq_log_likelihood
+            ):
+                _logger.debug(
+                    "Processing loaded LSTSQ result:\n%s", repr(lstsq_result)
+                )
+                top_position = InitialSample(
+                    numpy.array(list(lstsq_result)[1:]),
+                    tweaked_sample,
+                    lstsq_result['log_likelihood'],
+                    tweaked_log_likelihood,
+                )
+        return starting_positions, positions_found, top_position
+
     @property
     def secondary_eclipse_phase(self):
         """The allowed range for the argument of periapsis per eclipse times."""
@@ -686,10 +728,9 @@ class FindStartingPositions:
         samples_fname = config.samples_fname_pattern.format(
             tic_id=config.tic_id
         )
-        starting_positions, positions_found = load_initial_positions(
-            samples_fname,
-            num_walkers=num_walkers,
-            num_params=num_params,
+
+        starting_positions, positions_found, top_position = (
+            self._load_initial_samples(samples_fname, num_walkers)
         )
 
         positions_needed = numpy.flatnonzero(numpy.logical_not(positions_found))
@@ -721,16 +762,17 @@ class FindStartingPositions:
         for process in workers:
             process.start()
         unphysical = []
-        top_position = None
         for _ in initial_scenarios:
-            scenario_ind, position = optimized_queue.get()
+            position = optimized_queue.get()
             if position is None:
                 for w in workers:
                     w.kill()
                 _logger.critical("Failed to find initial walker positions.")
                 sys.exit(1)
                 # pylint: enable=invalid-name
-            elif position[1] is None:
+            else:
+                scenario_ind, position = position
+            if position is None:
                 unphysical.append(scenario_ind)
             else:
                 if top_position is None or (
@@ -744,9 +786,16 @@ class FindStartingPositions:
                     samples_fname,
                     nwalkers=num_walkers,
                     index=scenario_ind,
+                    log_prob_result=(
+                        position.tweaked_log_likelihood,
+                        position.lstsq_log_likelihood,
+                    )
+                    + tuple(position.lstsq_sample),
                 )
                 starting_positions[scenario_ind] = position.tweaked_sample
-        for scenario_ind in unphysical + range(-config.num_random_walkers, 0):
+        for scenario_ind in unphysical + list(
+            range(-config.num_random_walkers, 0)
+        ):
             starting_positions[scenario_ind] = tweak_sample(
                 top_position.lstsq_sample, self._log_likelihood
             )

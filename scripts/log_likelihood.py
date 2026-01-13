@@ -606,7 +606,7 @@ class LogLikelihood(TESSTarget):
         lc_sq_errors = lightcurve["flux_err"] ** 2 + lc_sys_err**2
 
         eclipse_model, eclipse_order = self._evaluate_eclipse_model(
-            binary, header, lightcurve
+            binary, header, lightcurve, False
         )
 
         for eclipse_ind in eclipse_order:
