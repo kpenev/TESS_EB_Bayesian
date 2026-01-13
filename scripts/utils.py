@@ -129,8 +129,8 @@ def tweak_params(
         secondary_reflection_coef=0.0,
         primary_beaming_coef=0.0,
         secondary_beaming_coef=0.0,
-        lc_sys=0.0,
-        sed_sys=0.0,
+        lc_sys=1e-6,
+        sed_sys=1e-6,
     ),
     rel_tweak_scale=SampleParams(
         mtotal=0.0,
