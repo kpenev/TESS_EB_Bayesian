@@ -241,7 +241,9 @@ def find_log_age_bound(params, bad_bound, bound_limit):
 
     for try_log_age in numpy.linspace(bad_bound, bound_limit, 32)[1:-1]:
         try:
-            binary = Binary(from_mcmc=params._replace(age_gyr=10.0**try_log_age))
+            binary = Binary(
+                from_mcmc=params._replace(age_gyr=10.0**try_log_age)
+            )
             if binary.a >= 1 + binary.rp:
                 root = optimize.brentq(
                     to_solve,
@@ -374,12 +376,13 @@ def params_to_sample(params, log_likelihood, reset_sys_err=False):
     return mcmc_sample
 
 
-def tweak_sample(sample, log_likelihood, tweak_scale=None,
-                 max_tweak_attempts=1000):
+def tweak_sample(
+    sample, log_likelihood, tweak_scale=None, max_tweak_attempts=1000
+):
     """Slightly tweak the given MCMC sample to allow MCMC sampling near it."""
 
     params = log_likelihood.get_sample_params(sample)
-    for _ in range(max_tweak_attemps):
+    for _ in range(max_tweak_attempts):
         if tweak_scale is None:
             params = tweak_params(params, log_likelihood)
         else:
@@ -453,6 +456,7 @@ InitialSample = namedtuple(
         "tweaked_log_likelihood",
     ],
 )
+
 
 def lmfit_and_tweak(
     input_sample, log_likelihood, max_tweak_fraction=0.1, max_tweak_attemps=100
