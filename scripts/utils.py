@@ -196,12 +196,12 @@ def tweak_params(
 
     logage_range = get_logage_range(result, log_likelihood)
     if result.age_gyr < 10.0 ** logage_range[0]:
-        result.age_gyr = 10.0 ** logage_range[0] + uniform.rvs(
-            tweak_scale.age_gyr
+        result = result._replace(
+            age_gyr=10.0 ** logage_range[0] + uniform.rvs(tweak_scale.age_gyr)
         )
     elif result.age_gyr > 10.0 ** logage_range[1]:
-        result.age_gyr = 10.0 ** logage_range[1] - uniform.rvs(
-            tweak_scale.age_gyr
+        result = result._replace(
+            age_gyr=10.0 ** logage_range[1] - uniform.rvs(tweak_scale.age_gyr)
         )
 
     result = result._replace(
