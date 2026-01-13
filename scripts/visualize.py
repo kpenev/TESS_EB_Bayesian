@@ -869,6 +869,34 @@ def get_param_binaries(sample_params):
     return result
 
 
+def get_initial_positions(config, num_walkers):
+    """Return the initial positions per the given config."""
+
+    print(
+        f"Reading initial positions from {config.samples_fname} with args:\n\t"
+        + "\n\t".join(
+            [
+                f"chain_name={config.chain_name}",
+                f"num_walkers={num_walkers}",
+                f"num_params={len(SampleParams._fields)}",
+                f'blobs_dtype={[("log_likelihood", float)] +
+                       [(f"s{i:02d}", float) for i, _ in
+                       enumerate(SampleParams._fields)]}',
+            ]
+        )
+    )
+
+    result = load_initial_positions(
+        config.samples_fname,
+        chain_name=config.chain_name,
+        num_walkers=num_walkers,
+        num_params=len(SampleParams._fields),
+        blobs_dtype=[("log_likelihood", float)]
+        + [(f"s{i:02d}", float) for i, _ in enumerate(SampleParams._fields)],
+    )
+    return result[0][result[-1]]
+
+
 def get_walker_step_params(
     raw_data, selection, config, log_likelihood, num_walkers
 ):
@@ -876,9 +904,7 @@ def get_walker_step_params(
 
     selection = tuple(int(s) for s in selection.split(","))
     if selection[0] == -1:
-        initial_positions = load_initial_positions(
-            config.samples_fname, chain_name=config.chain_name
-        )
+        initial_positions = get_initial_positions(config, num_walkers)
         if len(selection) != 1:
             initial_positions = [initial_positions[selection[1]]]
         print(
@@ -961,7 +987,13 @@ def get_lstsq(backend, log_likelihood, config):
 
 
 def get_model_binaries(
-    config, raw_data, log_prob, include, log_likelihood, lstsq_data=None
+    config,
+    raw_data,
+    log_prob,
+    include,
+    log_likelihood,
+    num_walkers,
+    lstsq_data=None,
 ):  # pylint: disable=too-many-arguments, too-many-positional-arguments
     """Return fully set-up binaries per ``--show-model-with-lc``."""
 
@@ -1009,7 +1041,7 @@ def get_model_binaries(
                 selection,
                 config,
                 log_likelihood,
-                None if selection == "-1" else log_prob.shape[1],
+                num_walkers,
             )
             if selection.startswith("-1,") and top_params is not None:
                 sample_params = [top_params] + sample_params
@@ -1094,9 +1126,7 @@ def get_plot_data(config, log_likelihood):
                 sub_log_prob,
             )
     if config.burn_in == -1:
-        plot_data = load_initial_positions(
-            config.samples_fname, chain_name=config.chain_name
-        )
+        plot_data = get_initial_positions(config, backend.shape[0])
         plot_data = pandas.DataFrame(
             [log_likelihood.get_sample_params(sample) for sample in plot_data],
             columns=SampleParams._fields,
@@ -1190,6 +1220,7 @@ def main(config):
                     else None
                 ),
                 log_likelihood,
+                backend.shape[0],
                 lstsq_data,
             )
         else:

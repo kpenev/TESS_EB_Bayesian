@@ -194,7 +194,7 @@ def tweak_params(
         )
     # pylint: enable=unsubscriptable-object
 
-    logage_range = _get_logage_range(result, log_likelihood)
+    logage_range = get_logage_range(result, log_likelihood)
     if result.age_gyr < 10.0 ** logage_range[0]:
         result.age_gyr = 10.0 ** logage_range[0] + uniform.rvs(
             tweak_scale.age_gyr
@@ -240,17 +240,20 @@ def find_log_age_bound(params, bad_bound, bound_limit):
         return binary.a - (1 + binary.rp)
 
     for try_log_age in numpy.linspace(bad_bound, bound_limit, 32)[1:-1]:
-        binary = Binary(from_mcmc=params._replace(age_gyr=10.0**try_log_age))
-        if binary.a >= 1 + binary.rp:
-            root = optimize.brentq(
-                to_solve,
-                bad_bound,
-                try_log_age,
-                xtol=1e-5,
-            )
-            while to_solve(root) < 0:
-                root += (1 if bad_bound < root else -1) * 1e-5
-            return root
+        try:
+            binary = Binary(from_mcmc=params._replace(age_gyr=10.0**try_log_age))
+            if binary.a >= 1 + binary.rp:
+                root = optimize.brentq(
+                    to_solve,
+                    bad_bound,
+                    try_log_age,
+                    xtol=1e-5,
+                )
+                while to_solve(root) < 0:
+                    root += (1 if bad_bound < root else -1) * 1e-5
+                return root
+        except ValueError:
+            pass
         bad_bound = try_log_age
     raise ValueError(
         "Could not find valid log(age) bound for params: "
@@ -258,7 +261,7 @@ def find_log_age_bound(params, bad_bound, bound_limit):
     )
 
 
-def _get_logage_range(params, log_likelihood):
+def get_logage_range(params, log_likelihood):
     """Return the valid range for log(age) for the given parameters."""
 
     mprimary = params.mtotal / (1.0 + params.mratio)
@@ -292,7 +295,7 @@ def _get_logage_range(params, log_likelihood):
 def get_age_fraction(params, log_likelihood):
     """Return what fraction of the log(age) interval is the current age."""
 
-    min_log_age, max_log_age = _get_logage_range(params, log_likelihood)
+    min_log_age, max_log_age = get_logage_range(params, log_likelihood)
     return (numpy.log10(params.age_gyr) - min_log_age) / (
         max_log_age - min_log_age
     )
@@ -304,7 +307,7 @@ def set_logage_fraction(params, logage_fraction, log_likelihood):
     assert (
         0.0 <= logage_fraction <= 1.0
     ), f"Log(age) fraction {logage_fraction} is not in [0, 1] range!"
-    min_log_age, max_log_age = _get_logage_range(params, log_likelihood)
+    min_log_age, max_log_age = get_logage_range(params, log_likelihood)
     _logger.debug(
         "Setting age for params %s, log(age) fraction = %s based on range "
         "(%s, %s)",

@@ -29,6 +29,7 @@ from utils import (
     lmfit_and_tweak,
     tweak_sample,
     InitialSample,
+    get_logage_range,
 )
 
 _logger = logging.getLogger(__name__)
@@ -256,7 +257,7 @@ class FindStartingPositions:
             )
             return result
 
-        mass_range = self._log_likelihood.get_range("mtotal")
+        mass_range = self._mtotal_range
         mass_range = (mass_range[0] / 2, mass_range[1])
         _logger.debug("Mass range: %s", repr(mass_range))
         _logger.debug("Mtot: %s", repr(params.mtotal))
@@ -306,6 +307,12 @@ class FindStartingPositions:
                     )
                 )
             except ValueError:
+                _logger.warning(
+                    "Mtotal to_minimize failed for mtotal=%s, params=%s:\n%s",
+                    repr(mtotal),
+                    repr(lc_tuned_params),
+                    format_exc(),
+                )
                 return numpy.inf
             return -self._log_likelihood.calc_sed_log_likelihood(binary, 0.0)
 
@@ -316,20 +323,29 @@ class FindStartingPositions:
                 )
                 result = optimize.minimize_scalar(
                     to_minimize,
-                    bounds=self._log_likelihood.get_range("mtotal"),
+                    bounds=self._mtotal_range,
                     args=(lc_tuned_params,),
                     options={"xatol": 1e-3 * max(mtotal, 1)},
                 )
             except ValueError:
-                return -mtotal
+                _logger.warning(
+                    "Mtotal equation failed for mtotal=%s, params=%s:\n%s",
+                    repr(mtotal),
+                    repr(params),
+                    format_exc(),
+                )
+                if get_params:
+                    raise
+                return self._mtotal_range[0] - mtotal
             assert result.success, f"Failed to optimize total mass: {result!r}!"
             _logger.debug(
                 "Starting from Mtotal = %s, found b = %s, m2/m1 = %s, "
-                "Motal = %s",
+                "Motal = %s. Minimization result: %s",
                 mtotal,
                 lc_tuned_params.primary_impact_param,
                 lc_tuned_params.mratio,
                 result.x,
+                repr(result),
             )
 
             if get_params:
@@ -342,21 +358,49 @@ class FindStartingPositions:
                 raise GoodEnough("eclipses_and_sed", mtotal)
             return result.x - mtotal
 
-        mtotal_range = self._log_likelihood.get_range("mtotal")
         try:
             result = optimize.root_scalar(
                 to_solve,
-                bracket=mtotal_range,
+                bracket=self._mtotal_range,
                 rtol=1e-3,
             )
+            _logger.debug("Mtotal root finding result: %s", repr(result))
             assert result.converged, f"Failed to solve for mtotal: {result!r}!"
             result = result.root
+        except ValueError:
+            _logger.warning(
+                "Root finding failed for mass range %s, trying endpoints.",
+                repr(self._mtotal_range),
+            )
+            residuals = to_solve(self._mtotal_range[0]), to_solve(
+                self._mtotal_range[1]
+            )
+            if residuals[0] * residuals[1] < 0:
+                _logger.warning(
+                    "Unexpected failure for mass range %s for params:\n%s:\n%s",
+                    repr(self._mtotal_range),
+                    repr(params),
+                    format_exc(),
+                )
+                raise
+            _logger.debug(
+                "Endpoint residuals: %s -> %s, %s -> %s",
+                repr(self._mtotal_range[0]),
+                repr(residuals[0]),
+                repr(self._mtotal_range[1]),
+                repr(residuals[1]),
+            )
+            result = (
+                self._mtotal_range[0]
+                if abs(residuals[0]) < abs(residuals[1])
+                else self._mtotal_range[1]
+            )
         except GoodEnough as stopped:
             assert (
                 stopped.args[0] == "eclipses_and_sed"
             ), f"Unexpected good enough caller: {stopped.args[0]!r}"
             result = stopped.args[1]
-        result = min(max(result, mtotal_range[0]), mtotal_range[1])
+        result = min(max(result, self._mtotal_range[0]), self._mtotal_range[1])
         params = to_solve(result, True)
         _logger.info("Optimized parameters: %s", params)
         return params
@@ -619,7 +663,7 @@ class FindStartingPositions:
                 top_position = InitialSample(
                     numpy.array(list(lstsq_result)[1:]),
                     tweaked_sample,
-                    lstsq_result['log_likelihood'],
+                    lstsq_result["log_likelihood"],
                     tweaked_log_likelihood,
                 )
         return starting_positions, positions_found, top_position
@@ -651,6 +695,8 @@ class FindStartingPositions:
 
         else:
             self._secondary_eclipse_phase = 0.5
+
+        self._mtotal_range = log_likelihood.get_range("mtotal")
 
         _logger.info("From BLS: %s", repr(self._bls_eclipses))
 
@@ -688,23 +734,48 @@ class FindStartingPositions:
         _logger.debug("Starting params: %s", params)
         params = self._match_eclipse_times(params, randomize_e)
         _logger.debug("Eclipse timing matched params: %s", params)
+        while self._mtotal_range[1] - self._mtotal_range[0] > 1e-3:
+            try:
+                get_logage_range(
+                    params._replace(mtotal=self._mtotal_range[1], mratio=1.0),
+                    self._log_likelihood,
+                )
+                break
+            except ValueError as err:
+                _logger.warning(
+                    "Upper mass range %s invalid for params %s: %s",
+                    repr(self._mtotal_range[1]),
+                    repr(
+                        params._replace(
+                            mtotal=self._mtotal_range[1], mratio=1.0
+                        )
+                    ),
+                    str(err),
+                )
+                self._mtotal_range = (
+                    self._mtotal_range[0],
+                    self._mtotal_range[1]
+                    - 0.1 * (self._mtotal_range[1] - self._mtotal_range[0]),
+                )
+        if self._mtotal_range[1] - self._mtotal_range[0] <= 1e-3:
+            raise ValueError(f"No valid mass range found for params {params!r}")
+
         if numpy.isfinite(self._log_likelihood.sed[0]).any():
             params = self._match_eclipses_and_sed(
                 params, logage_or_mass_fraction
             )
             _logger.debug("Eclipse and SED matched params: %s", params)
         else:
-            mtotal_range = self._log_likelihood.get_range("mtotal")
             _logger.debug(
                 "Fitting age for mass fraction %s of range %s",
                 repr(logage_or_mass_fraction),
-                repr(mtotal_range),
+                repr(self._mtotal_range),
             )
             params = self._fit_age(
                 params._replace(
-                    mtotal=mtotal_range[0]
+                    mtotal=self._mtotal_range[0]
                     + logage_or_mass_fraction
-                    * (mtotal_range[1] - mtotal_range[0])
+                    * (self._mtotal_range[1] - self._mtotal_range[0])
                 )
             )
             _logger.debug("Age fit params: %s", params)
