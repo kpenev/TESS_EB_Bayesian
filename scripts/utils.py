@@ -177,6 +177,9 @@ def tweak_params(
         per=period_tweak,
         eclipse_time=0.1 * log_likelihood.best_fit_bls["duration"],
     )
+    _logger.info(
+        "Using tweak scale:\n%s\naround%s", repr(tweak_scale), repr(params)
+    )
     result = SampleParams(
         *(
             orig + uniform.rvs(loc=-scale, scale=2 * scale)

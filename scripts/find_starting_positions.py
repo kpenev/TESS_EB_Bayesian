@@ -851,7 +851,11 @@ class FindStartingPositions:
                     > top_position.lstsq_log_likelihood
                 ):
                     top_position = position
-                _logger.debug("Saving initial position %d: %s", *position)
+                    _logger.debug(
+                        "Top position updated to\n%s",
+                        repr(top_position.lstsq_sample),
+                    )
+                _logger.info("Saving initial position %d: %s", *position)
                 save_initial_position(
                     position.tweaked_sample,
                     samples_fname,
