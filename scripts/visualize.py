@@ -879,9 +879,14 @@ def get_initial_positions(config, num_walkers):
                 f"chain_name={config.chain_name}",
                 f"num_walkers={num_walkers}",
                 f"num_params={len(SampleParams._fields)}",
-                f'blobs_dtype={[("log_likelihood", float)] +
-                       [(f"s{i:02d}", float) for i, _ in
-                       enumerate(SampleParams._fields)]}',
+                "blobs_dtype="
+                + repr(
+                    [("log_likelihood", float)]
+                    + [
+                        (f"s{i:02d}", float)
+                        for i, _ in enumerate(SampleParams._fields)
+                    ]
+                ),
             ]
         )
     )
