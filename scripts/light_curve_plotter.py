@@ -82,7 +82,7 @@ class LightCurvePlotter:
             "color": "red",
             "markersize": 10,
             "zorder": 100,
-            "alpha": 0.1,
+            "alpha": 0.5,
         },
         "others": {
             "marker": "x",
