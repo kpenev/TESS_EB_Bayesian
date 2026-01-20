@@ -319,15 +319,6 @@ class BinaryParams(batman.TransitParams):
             self._gravdark_both[component] = self._gravdark_interp(
                 **interp_args
             )
-        self.a = (
-            (
-                (self.per * units.day) ** 2
-                * (constants.G * self.mtotal * units.M_sun)
-                / (4.0 * numpy.pi**2)
-            )
-            ** (1.0 / 3.0)
-            / radii["primary"]
-        ).to_value()
         self.rstar = radii["primary"].to_value(units.R_sun)
         self.rp = (radii["secondary"] / radii["primary"]).to_value()
         self.teff_ratio = 10.0 ** (
@@ -338,29 +329,36 @@ class BinaryParams(batman.TransitParams):
             + 10.0 ** (-interpolated["secondary"][3:] / 2.5)
         )
 
-    def set_from_mcmc(self, sample_params):
-        """
-        Set the binary parameters from an MCMC sample.
+    def _fix_evolving_orbit(self, times=None):
+        """Set the orbital parameters (handle evolving orbits transparently)."""
 
-        Args:
-            sample_params:    Object with attributes specifying the phyisical
-                parameters of the system being sampled. See `SampleParams` in
-                `log_likelihood.py` for the attribute names.
+        if self._evolving_orbit:
+            eval_time = numpy.mean(times)
+            for param, (init_value, deriv) in self._evolving_orbit:
+                setattr(
+                    self,
+                    param,
+                    init_value + (eval_time - self._t0_both["primary"]) * deriv,
+                )
+        elif times is not None:
+            return
 
-        Returns:
-            None
-        """
+        self.a = (
+            (
+                (self.per * units.day) ** 2
+                * (constants.G * self.mtotal * units.M_sun)
+                / (4.0 * numpy.pi**2)
+            )
+            ** (1.0 / 3.0)
+            / (self.rstar * units.R_sun)
+        ).to_value()
 
-        for param in ["per", "ecc", "w"]:
-            setattr(self, param, getattr(sample_params, param))
-
-        self._set_interpolated_mcmc(sample_params)
-        if numpy.abs(sample_params.primary_impact_param) > self.a:
+        if numpy.abs(self._primary_impact_param) > self.a:
             self._out_of_range.append("impact_param")
             self.inc = numpy.nan
         else:
             self.inc = (
-                numpy.arccos(sample_params.primary_impact_param / self.a)
+                numpy.arccos(self._primary_impact_param / self.a)
                 * 180.0
                 / numpy.pi
             )
@@ -376,7 +374,6 @@ class BinaryParams(batman.TransitParams):
         #    )
         # )
 
-        self._t0_both["primary"] = sample_params.eclipse_time
         self._t0_both["secondary"] = self._t0_both["primary"] + (
             self.per * self._calc_eclipse_phase_diff()
         )
@@ -389,6 +386,23 @@ class BinaryParams(batman.TransitParams):
             / (2.0 * numpy.pi)
             * self.per
         )
+
+        self._set_per_star()
+
+    def set_from_mcmc(self, sample_params):
+        """
+        Set the binary parameters from an MCMC sample.
+
+        Args:
+            sample_params:    Object with attributes specifying the phyisical
+                parameters of the system being sampled. See `SampleParams` in
+                `log_likelihood.py` for the attribute names.
+
+        Returns:
+            None
+        """
+
+        self._set_interpolated_mcmc(sample_params)
 
         for component in ["primary", "secondary"]:
             self._limb_dark_both[component] = "quadratic"
@@ -408,17 +422,23 @@ class BinaryParams(batman.TransitParams):
                 getattr(self, f"_{param}_both")[component] = getattr(
                     sample_params, f"{component}_{param}"
                 )
-        self._set_per_star()
+
         self.lc_sys_err = sample_params.lc_sys
         self.sed_sys_err = sample_params.sed_sys
 
-    def shift_time(self, shift):
-        """Shift the lightcurve in time i.e. new(t + shift) = old(t)."""
+        self._t0_both["primary"] = sample_params.eclipse_time
 
-        self.t0_perpass += shift
-        self.t0 += shift
-        for k in self._t0_both:
-            self._t0_both[k] += shift
+        self._evolving_orbit = []
+        for param in ["per", "ecc", "w", "_primary_impact_param"]:
+            value = getattr(sample_params, param.lstrip("_"))
+            if isinstance(value, tuple):
+                assert len(value) == 2
+                self._evolving_orbit.append((param, value))
+            else:
+                setattr(self, param, value)
+
+        if not self._evolving_orbit:
+            self._fix_evolving_orbit(sample_params)
 
     @property
     def out_of_range(self):
@@ -455,6 +475,7 @@ class BinaryParams(batman.TransitParams):
         self.t0_perpass = None
         self.inverted = False
         self.absmag = None
+        self._primary_impact_param = None
         self._out_of_range = []
         for attr in self._per_star_attr:
             setattr(self, f"_{attr}_both", {"primary": None, "secondary": None})
@@ -502,12 +523,23 @@ class BinaryParams(batman.TransitParams):
 
         orbit = result["orbit@component"]
         orbit["t0_perpass"].set_value(self.t0_perpass * units.day)
-        orbit["period"].set_value(self.per * units.day)
+        if self._evolving_orbit:
+            assert len(self._evolving_orbit) == 1
+            assert self._evolving_orbit[0][0] == "w"
+            orbit["dperdt"].set_value(
+                self._evolving_orbit[1][1] * units.deg / units.day
+            )
+            orbit["per0"].set_value(self.w * units.deg)
+            result.set_value("t0", self._t0_both["primary"] * units.day)
+            orbit.flip_constraint("period_anom", solve_for="period")
+            orbit.set_value["period_anom"].set_value(self.per * units.day)
+        else:
+            orbit["period"].set_value(self.per * units.day)
+            orbit["per0"].set_value(self.w * units.deg)
         orbit["requivratio"].set_value(self.rp)
         orbit["requivsumfrac"].set_value((1.0 + self.rp) / self.a)
         orbit["incl"].set_value(self.inc * units.deg)
         orbit["ecc"].set_value(self.ecc)
-        orbit["per0"].set_value(self.w * units.deg)
 
         stars = (
             result["primary"]["component"],
@@ -532,6 +564,7 @@ class BinaryParams(batman.TransitParams):
             # pylint: disable=no-member
             this_star["period"].set_value(self._prot_both[star_rank])
             # pylint: enable=no-member
+        return result
 
     def secondary_flux_fraction(self):
         """Return the fraction of the flux coming from the secondary."""
@@ -571,6 +604,7 @@ class BinaryParams(batman.TransitParams):
     def calc_true_anomaly(self, times):
         """Return the true anomaly for the given binary and times."""
 
+        self._fix_evolving_orbit(times)
         mean_anom = 2 * numpy.pi * (times - self.t0_perpass) / self.per
         mean_anom = (mean_anom + numpy.pi) % (2 * numpy.pi) - numpy.pi
         true_anom = numpy.vectorize(E_to_nu)(
