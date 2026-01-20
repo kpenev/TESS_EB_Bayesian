@@ -4,7 +4,6 @@ import logging
 
 import batman
 import numpy
-from scipy.optimize import minimize
 from scipy.linalg import lstsq
 
 from ebeer import EBEERBinary
@@ -76,7 +75,7 @@ class Binary(EBEERBinary):
         if "eclipse" in exclude:
             eclipse = 1
         else:
-            eclipse = batman.TransitModel(self, times).light_curve(self)
+            eclipse = self.eclipse(times)
 
         rhs = numpy.copy(lc_to_fit)
         if secondary_flux_fraction:
@@ -104,7 +103,7 @@ class Binary(EBEERBinary):
         if secondary_flux_fraction > 0:
             self.swap_components()
             if "eclipse" not in exclude:
-                eclipse = batman.TransitModel(self, times).light_curve(self)
+                eclipse = self.eclipse(times)
             add_primary_rhs(rhs, secondary_flux_fraction, eclipse)
             add_primary_lhs(lhs_matrix, secondary_flux_fraction, eclipse, 1)
 
@@ -112,7 +111,7 @@ class Binary(EBEERBinary):
 
         return lhs_matrix, rhs, num_coef, secondary_flux_fraction
 
-    def fit_ebeer_coefficients(
+    def fit_ebeer_coefficients(  # pylint: disable=too-many-arguments
         self,
         times,
         lc_to_fit,
@@ -194,54 +193,9 @@ class Binary(EBEERBinary):
     def eclipse(self, times, **transit_config):
         """Return fraction of the primary flux observed due to eclipse."""
 
+        self._fix_evolving_orbit(times)
         return batman.TransitModel(self, times, **transit_config).light_curve(
             self
-        )
-
-    def fit_lightcurve(self, times, lc_to_fit, **fit_coef_kwargs):
-        """
-        Set the parameters of the binary to best fit the given flux modulations.
-
-        Args
-            times(array):    The times at which the flux modulations are known.
-
-            lc_to_fit(array):    The lightcurve to fit (ratio of flux to that of
-                isolated stars). Should have the same size as times.
-
-            fit_coef_kwargs:    Any arguments to pass to
-                `fit_ebeer_coefficients()`.
-
-        Returns:
-            See `fit_ebeer_coefficients()`.
-        """
-
-        def to_minimize(t0_perpass):
-            """The function to minimize."""
-
-            self.t0_perpass = t0_perpass
-            result = self.fit_ebeer_coefficients(
-                times,
-                lc_to_fit,
-                result="rms",
-                **fit_coef_kwargs,
-            )
-            print(f"To minimize result at t={t0_perpass}: {result!r}")
-            return result
-
-        orig_result = fit_coef_kwargs.pop("result", "fluxdiff")
-        best_fit = None
-        for t0_guess in numpy.linspace(0, self.per, 11):
-            print(f"Minimizing with t0 = {t0_guess!r}")
-            fit_result = minimize(to_minimize, x0=t0_guess)
-            print(f"Minimize result: {fit_result!r}")
-            if best_fit is None or fit_result.fun < best_fit.fun:
-                best_fit = fit_result
-        self.t0_perpass = best_fit.x
-        fit_coef_kwargs["result"] = orig_result
-        return self.fit_ebeer_coefficients(
-            times,
-            lc_to_fit,
-            **fit_coef_kwargs,
         )
 
     def get_lightcurve(
