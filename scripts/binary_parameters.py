@@ -320,7 +320,7 @@ class BinaryParams(batman.TransitParams):
                 **interp_args
             )
         self.rstar = radii["primary"].to_value(units.R_sun)
-        self.rp = (radii["secondary"] / radii["primary"]).to_value()
+        self.rp = (radii["secondary"] / radii["primary"]).to_value("")
         self.teff_ratio = 10.0 ** (
             interpolated["secondary"][2] - interpolated["primary"][2]
         )
@@ -332,6 +332,7 @@ class BinaryParams(batman.TransitParams):
     def _fix_evolving_orbit(self, times=None):
         """Set the orbital parameters (handle evolving orbits transparently)."""
 
+        print(f"Fixing evolving orbit for times: {times!r}")
         if self._evolving_orbit:
             eval_time = numpy.mean(times)
             for param, (init_value, deriv) in self._evolving_orbit:
@@ -343,6 +344,8 @@ class BinaryParams(batman.TransitParams):
         elif times is not None:
             return
 
+        print(f"Setting orbital parameters for binary:\n{self}")
+
         self.a = (
             (
                 (self.per * units.day) ** 2
@@ -351,7 +354,7 @@ class BinaryParams(batman.TransitParams):
             )
             ** (1.0 / 3.0)
             / (self.rstar * units.R_sun)
-        ).to_value()
+        ).to_value("")
 
         if numpy.abs(self._primary_impact_param) > self.a:
             self._out_of_range.append("impact_param")
@@ -377,6 +380,7 @@ class BinaryParams(batman.TransitParams):
         self._t0_both["secondary"] = self._t0_both["primary"] + (
             self.per * self._calc_eclipse_phase_diff()
         )
+        print("Setting periapsis passage time")
         self.t0_perpass = (
             self._t0_both["primary"]
             - E_to_M(
@@ -437,8 +441,9 @@ class BinaryParams(batman.TransitParams):
             else:
                 setattr(self, param, value)
 
+        print(f"Evolving orbit: {self._evolving_orbit!r}")
         if not self._evolving_orbit:
-            self._fix_evolving_orbit(sample_params)
+            self._fix_evolving_orbit()
 
     @property
     def out_of_range(self):
@@ -524,6 +529,7 @@ class BinaryParams(batman.TransitParams):
         )
 
         orbit = result["orbit@component"]
+        result.flip_constraint("t0_perpass", solve_for="t0_supconj")
         orbit["t0_perpass"].set_value(self.t0_perpass * units.day)
         if self._evolving_orbit:
             assert len(self._evolving_orbit) == 1
@@ -543,28 +549,36 @@ class BinaryParams(batman.TransitParams):
         orbit["incl"].set_value(self.inc * units.deg)
         orbit["ecc"].set_value(self.ecc)
 
-        stars = (
-            result["primary"]["component"],
-            result["secondary"]["component"],
+        result["primary"]["component"]["mass"] = (
+            self.mtotal / (1.0 + self.mratio) * units.Msun
         )
-        stars[0]["mass"] = self.mtotal / (1.0 + self.mratio) * units.Msun
-        stars[1]["mass"] = stars[0]["mass"] * self.mratio
-        stars[1]["teff"].set_value(self.teff_ratio * stars[0]["teff"].quantity)
-        for this_star, star_rank in zip(
-            stars,
-            (
-                ["secondary", "primary"]
-                if self.inverted
-                else ["primary", "secondary"]
-            ),
+        result["q"].set_value(self.mratio)
+        result["secondary"]["component"]["teff"].set_value(
+            self.teff_ratio * result["primary"]["component"]["teff"].quantity
+        )
+        for star_rank in (
+            ["secondary", "primary"]
+            if self.inverted
+            else ["primary", "secondary"]
         ):
-            this_star["gravb_bol"].set_value(self._gravdark_both[star_rank])
-            this_star["ld_mode_bol"].set_value("manual")
-            this_star["ld_func_bol"].set_value("linear")
-            this_star["ld_coeffs_bol"].set_value(self._u_both[star_rank])
+            print(result.filter("requiv_max", component="primary"))
+            result[star_rank]["component"]["gravb_bol"].set_value(
+                self._gravdark_both[star_rank]
+            )
+            result[star_rank]["component"]["ld_mode_bol"] = "manual"
+            result[star_rank]["component"]["ld_func_bol"] = "linear"
+            result[star_rank]["component"]["ld_coeffs_bol"].set_value(
+                self._u_both[star_rank]
+            )
+            result.flip_constraint(
+                f"period@{star_rank}",
+                solve_for=f"syncpar@{star_rank}",
+            )
             # False positive
             # pylint: disable=no-member
-            this_star["period"].set_value(self._prot_both[star_rank])
+            result[star_rank]["component"]["period"].set_value(
+                self._prot_both[star_rank]
+            )
             # pylint: enable=no-member
         return result
 
