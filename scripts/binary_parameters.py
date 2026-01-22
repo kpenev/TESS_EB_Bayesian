@@ -332,8 +332,8 @@ class BinaryParams(batman.TransitParams):
     def _fix_evolving_orbit(self, times=None):
         """Set the orbital parameters (handle evolving orbits transparently)."""
 
-        print(f"Fixing evolving orbit for times: {times!r}")
         if self._evolving_orbit:
+            print(f"Fixing evolving orbit for times: {times!r}")
             eval_time = numpy.mean(times)
             for param, (init_value, deriv) in self._evolving_orbit:
                 setattr(
@@ -519,7 +519,10 @@ class BinaryParams(batman.TransitParams):
         """Return PHOEBE binary with parameters specified in this object."""
 
         result = phoebe.default_binary()
-        result.add_dataset("lc", times=0, label="lc01")
+        result.set_value_all("distortion_method", value="roche")
+        result["irrad_method"].set_value("none")
+        result.add_dataset("lc", times=[0], label="lc01")
+        result["lc"]["passband"] = "Bolometric:900-40000"
         result.flip_constraint("mass@primary", solve_for="sma")
         result.flip_constraint(
             "requivratio", solve_for="requiv@secondary@component"
@@ -556,18 +559,29 @@ class BinaryParams(batman.TransitParams):
         result["secondary"]["component"]["teff"].set_value(
             self.teff_ratio * result["primary"]["component"]["teff"].quantity
         )
+        result.set_value_all("ld_mode_bol", value="manual")
+        result.set_value_all("ld_mode", value="manual")
+
         for star_rank in (
             ["secondary", "primary"]
             if self.inverted
             else ["primary", "secondary"]
         ):
+            result.set_value_all(
+                f"ld_func@{star_rank}", value=self._limb_dark_both[star_rank]
+            )
+            result[star_rank]["component"]["irrad_frac_refl_bol"].set_value(
+                self._reflection_coef_both[star_rank]
+            )
             print(result.filter("requiv_max", component="primary"))
             result[star_rank]["component"]["gravb_bol"].set_value(
                 self._gravdark_both[star_rank]
             )
-            result[star_rank]["component"]["ld_mode_bol"] = "manual"
-            result[star_rank]["component"]["ld_func_bol"] = "linear"
+            print(result)
             result[star_rank]["component"]["ld_coeffs_bol"].set_value(
+                self._u_both[star_rank]
+            )
+            result["dataset"]["lc01"][star_rank]["ld_coeffs"].set_value(
                 self._u_both[star_rank]
             )
             result.flip_constraint(
@@ -585,7 +599,23 @@ class BinaryParams(batman.TransitParams):
     def secondary_flux_fraction(self):
         """Return the fraction of the flux coming from the secondary."""
 
-        return self.teff_ratio**4 * (self.rp) ** 2
+        result = self.teff_ratio**4 * (self.rp) ** 2
+        for i, component in enumerate(
+            ["primary", "secondary"]
+            if self.inverted
+            else ["secondary", "primary"]
+        ):
+            factor = (
+                6.0
+                - 2 * self._u_both[component][0]
+                - self._u_both[component][1]
+            )
+            if i == 0:
+                result *= factor
+            else:
+                result /= factor
+
+        return result
 
     def _set_ebeer_coefficients(self, coef, effect):
         """Set either the reflection or beaming (``effect``) coefficients."""
