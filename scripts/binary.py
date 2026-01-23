@@ -193,7 +193,8 @@ class Binary(EBEERBinary):
     def eclipse(self, times, **transit_config):
         """Return fraction of the primary flux observed due to eclipse."""
 
-        self._fix_evolving_orbit(times)
+        if not self._orbit_is_fixed:
+            self._fix_evolving_orbit(times)
         return batman.TransitModel(self, times, **transit_config).light_curve(
             self
         )
@@ -234,6 +235,7 @@ class Binary(EBEERBinary):
         """
 
         true_anomaly = self.calc_true_anomaly(times)
+        self._orbit_is_fixed = True
         primary_flux = self._get_primary_lightcurve(
             times, true_anomaly, exclude, **eclipse_config
         )
@@ -248,6 +250,7 @@ class Binary(EBEERBinary):
         )
 
         self.swap_components()
+        self._orbit_is_fixed = False
 
         if secondary_flux_fraction == "split":
             return (primary_flux, secondary_flux)
