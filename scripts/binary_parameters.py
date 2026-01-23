@@ -329,22 +329,37 @@ class BinaryParams(batman.TransitParams):
             + 10.0 ** (-interpolated["secondary"][3:] / 2.5)
         )
 
+    def _calc_perpass_eclipse_time_diff(self):
+        """Return the time between periapsis passage and primary eclipse."""
+
+        return (
+            E_to_M(
+                nu_to_E(numpy.pi / 2 - self.w * numpy.pi / 180, self.ecc),
+                self.ecc,
+            )
+            / (2.0 * numpy.pi)
+            * self.per
+        )
+
     def _fix_evolving_orbit(self, times=None):
         """Set the orbital parameters (handle evolving orbits transparently)."""
 
+        if self._orbit_is_fixed:
+            return
+
         if self._evolving_orbit:
             print(f"Fixing evolving orbit for times: {times!r}")
-            eval_time = numpy.mean(times)
+            time_shift = numpy.mean(times) - self.t0_perpass
             for param, (init_value, deriv) in self._evolving_orbit:
                 setattr(
                     self,
                     param,
-                    init_value + (eval_time - self._t0_both["primary"]) * deriv,
+                    init_value + time_shift * deriv,
                 )
+                if param == "w" and self.inverted:
+                    self.w = (self.w + 180.0) % 360.0
         elif times is not None:
             return
-
-        print(f"Setting orbital parameters for binary:\n{self}")
 
         self.a = (
             (
@@ -377,18 +392,12 @@ class BinaryParams(batman.TransitParams):
         #    )
         # )
 
+        self._t0_both["primary"] = (
+            self.t0_perpass + self._calc_perpass_eclipse_time_diff()
+        )
+
         self._t0_both["secondary"] = self._t0_both["primary"] + (
             self.per * self._calc_eclipse_phase_diff()
-        )
-        print("Setting periapsis passage time")
-        self.t0_perpass = (
-            self._t0_both["primary"]
-            - E_to_M(
-                nu_to_E(numpy.pi / 2 - self.w * numpy.pi / 180, self.ecc),
-                self.ecc,
-            )
-            / (2.0 * numpy.pi)
-            * self.per
         )
 
         self._set_per_star()
@@ -436,10 +445,18 @@ class BinaryParams(batman.TransitParams):
         for param in ["per", "ecc", "w", "_primary_impact_param"]:
             value = getattr(sample_params, param.lstrip("_"))
             if isinstance(value, tuple):
+                assert (
+                    param != "per"
+                ), "Evolving orbital period is not supported!"
                 assert len(value) == 2
                 self._evolving_orbit.append((param, value))
+                setattr(self, param, value[0])
             else:
                 setattr(self, param, value)
+
+        self.t0_perpass = (
+            self._t0_both["primary"] - self._calc_perpass_eclipse_time_diff()
+        )
 
         print(f"Evolving orbit: {self._evolving_orbit!r}")
         if not self._evolving_orbit:
@@ -457,6 +474,7 @@ class BinaryParams(batman.TransitParams):
         BinaryParams.prepare_class()
 
         self._precessing = precessing
+        self._orbit_is_fixed = False
 
         super().__init__()
         self._per_star_attr = [
@@ -518,6 +536,7 @@ class BinaryParams(batman.TransitParams):
     def to_phoebe(self):
         """Return PHOEBE binary with parameters specified in this object."""
 
+        self._fix_evolving_orbit([self._t0_both["primary"]])
         result = phoebe.default_binary()
         result.set_value_all("distortion_method", value="roche")
         result["irrad_method"].set_value("none")
@@ -538,15 +557,15 @@ class BinaryParams(batman.TransitParams):
             assert len(self._evolving_orbit) == 1
             assert self._evolving_orbit[0][0] == "w"
             orbit["dperdt"].set_value(
-                self._evolving_orbit[1][1] * units.deg / units.day
+                self._evolving_orbit[0][1][1] * units.deg / units.day
             )
             orbit["per0"].set_value(self.w * units.deg)
-            result.set_value("t0", self._t0_both["primary"] * units.day)
-            orbit.flip_constraint("period_anom", solve_for="period")
-            orbit.set_value["period_anom"].set_value(self.per * units.day)
+            result.flip_constraint("period_anom", solve_for="period")
+            result.set_value("period_anom", value=self.per * units.day)
+            result.set_value("t0", self.t0_perpass * units.day)
         else:
-            orbit["period"].set_value(self.per * units.day)
             orbit["per0"].set_value(self.w * units.deg)
+            orbit["period"].set_value(self.per * units.day)
         orbit["requivratio"].set_value(self.rp)
         orbit["requivsumfrac"].set_value((1.0 + self.rp) / self.a)
         orbit["incl"].set_value(self.inc * units.deg)
@@ -571,7 +590,9 @@ class BinaryParams(batman.TransitParams):
                 f"ld_func@{star_rank}", value=self._limb_dark_both[star_rank]
             )
             result[star_rank]["component"]["irrad_frac_refl_bol"].set_value(
-                self._reflection_coef_both[star_rank]
+                self._reflection_coef_both[  # pylint: disable=no-member
+                    star_rank
+                ]
             )
             print(result.filter("requiv_max", component="primary"))
             result[star_rank]["component"]["gravb_bol"].set_value(
