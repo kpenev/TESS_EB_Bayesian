@@ -287,11 +287,19 @@ def get_logage_range(params, log_likelihood):
             secondary_log_age_range[1],
         ),
     )
-    binary = Binary(from_mcmc=params._replace(age_gyr=10.0 ** result[0]))
-    if binary.a < 1 + binary.rp:
+    try:
+        binary = Binary(from_mcmc=params._replace(age_gyr=10.0 ** result[0]))
+        bad_bound = binary.a < 1 + binary.rp
+    except ValueError:
+        bad_bound = True
+    if bad_bound:
         result = find_log_age_bound(params, *result), result[1]
-    binary = Binary(from_mcmc=params._replace(age_gyr=10.0 ** result[1]))
-    if binary.a < 1 + binary.rp:
+    try:
+        binary = Binary(from_mcmc=params._replace(age_gyr=10.0 ** result[1]))
+        bad_bound = binary.a < 1 + binary.rp
+    except ValueError:
+        bad_bound = True
+    if bad_bound:
         result = result[0], find_log_age_bound(params, result[1], result[0])
 
     return result
