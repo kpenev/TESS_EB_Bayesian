@@ -37,6 +37,12 @@ def parse_command_line():
         choices=[str(g) for g in job_groups],
         help="Which job group should be continued.",
     )
+    parser.add_argument(
+        "--job-id",
+        type=int,
+        default=None,
+        help="Allows filling up only a single job in a group."
+    )
     add_slurm_config(parser)
     parser.add_argument(
         "--continue-statuses",
@@ -222,6 +228,8 @@ def update_job_group(config):
         pending_tics = get_pending_tics(config, SelectTICTable, db_session)
 
         for job_id in range(job_group.num_jobs):
+            if config.job_id is not None and job_id != config.job_id:
+                continue
             update_job(
                 group_id=job_group.id,
                 job_id=job_id,
