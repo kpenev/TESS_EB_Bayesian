@@ -36,6 +36,7 @@ class LogLikelihood(TESSTarget):
         "lc_sys",
         "sed_sys",
     ]
+    _precession_scale = 0.2
 
     max_ecc = 0.96
     max_outlier_iterations = 5
@@ -684,6 +685,12 @@ class LogLikelihood(TESSTarget):
         """Return index and value within sample to set param to given value."""
 
         param_ind = SampleParams._fields.index(param)
+        if isinstance(value, tuple):
+            assert param == "w"
+            assert len(value) == 2
+            value, precession_rate = value
+        else:
+            precession_rate = None
         if param == "meh":
             return param_ind, norm.ppf(
                 truncnorm.cdf(
@@ -706,15 +713,21 @@ class LogLikelihood(TESSTarget):
             repr(high),
         )
         if value < low:
-            return param_ind, -numpy.inf
+            result = -numpy.inf
         if value > high:
-            return param_ind, numpy.inf
-        return param_ind, norm.ppf((value - low) / (high - low))
+            result = numpy.inf
+        result = norm.ppf((value - low) / (high - low))
+        if precession_rate is not None:
+            return (param_ind, len(SampleParams._fields)), (
+                result,
+                precession_rate / self._precession_scale,
+            )
+        return param_ind, result
 
     def get_sample_params(self, mcmc_sample):
         """Return prior-transformed parameters given sample."""
 
-        return SampleParams(
+        result = SampleParams(
             *[
                 self.prior_transform(param, sample_entry)
                 for param, sample_entry in zip(
@@ -722,6 +735,11 @@ class LogLikelihood(TESSTarget):
                 )
             ]
         )
+        if mcmc_sample.size == len(SampleParams._fields) + 1:
+            result = result._replace(
+                w=(result.w, self._precession_scale * mcmc_sample[-1])
+            )
+        return result
 
     def _bin_lightcurve(self, lightcurve, num_bins, phase):
         """Bin the given lightcurve in phase."""
@@ -956,7 +974,7 @@ class LogLikelihood(TESSTarget):
             ) / numpy.maximum(self._sed[1][finite], 0.01)
             bad_sed = nsigma > self._sed[2][0]
             result[bad_sed] *= 10.0 ** (
-                self._sed[2][1] * (nsigma[bad_sed] - self._sed[2][0])**0.5
+                self._sed[2][1] * (nsigma[bad_sed] - self._sed[2][0]) ** 0.5
             )
             result[numpy.isinf(result)] = numpy.finfo(result.dtype).max
         self._logger.debug("After penalty, SED residuals: %s", repr(result))
@@ -1001,6 +1019,20 @@ class LogLikelihood(TESSTarget):
                         "noerr\n"
                     )
 
+    @staticmethod
+    def get_blob(sample_params):
+        """Return blob to save in the emcee file for given sample parameters."""
+
+        if isinstance(sample_params.w, float):
+            return sample_params
+
+        return (
+            sample_params._replace(
+                w=sample_params.w[0],
+            )
+            + sample_params.w[1]
+        )
+
     def __call__(self, mcmc_sample, exclude_priors=False):
         """Return the log-likelihood of the given MCMC sample."""
 
@@ -1035,4 +1067,4 @@ class LogLikelihood(TESSTarget):
         self._logger.debug(
             "Final log likelihood(%s): %s", repr(mcmc_sample), repr(result)
         )
-        return (result,) + sample_params
+        return (result,) + self.get_blob(sample_params)
