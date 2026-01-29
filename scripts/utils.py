@@ -39,6 +39,8 @@ def fit_least_squares(
             `scipy.optimize.least_squares`.
     """
 
+    has_precession = initial_mcmc_sample.size == len(SampleParams._fields) + 1
+
     def residuals(x, num_residuals):
         """Return array of residuals (LC and SED) for given MCMC sample."""
 
@@ -46,6 +48,9 @@ def fit_least_squares(
         _logger.debug("LSTSQ Function evaluation %d", residuals.num_eval)
         if x.size == len(SampleParams._fields) - 2:
             x = numpy.concatenate((x, [0.0, 0.0]))
+        if has_precession:
+            x[-1] = x[-3]
+            x[-3] = 0.0
         assert x.size == len(SampleParams._fields)
         sample_params = log_likelihood.get_sample_params(x)
         try:
@@ -77,10 +82,14 @@ def fit_least_squares(
         )
         return numpy.concatenate((lc_residuals, sed_residuals, x))
 
-    assert initial_mcmc_sample.size == len(SampleParams._fields)
+    assert has_precession or len(SampleParams._fields) == initial_mcmc_sample.size
     if not fit_sys_err:
+        if has_precession:
+            precession_value =  initial_mcmc_sample[-1]
         # Fix lc_sys and sed_sys to zero during least squares fit if instructed
         initial_mcmc_sample = initial_mcmc_sample[:-2]
+        if has_precession:
+            initial_mcmc_sample[-1] = precession_value
 
     residuals.num_eval = 0
     initial_resdiuals = residuals(initial_mcmc_sample, 0)
@@ -356,6 +365,21 @@ def params_to_sample(params, log_likelihood, reset_sys_err=False):
     def get_mcmc_sample(params):
         """Return the MCMC sample corresponding to the given parameters."""
 
+        if isinstance(params.w, tuple):
+            w_inverse, dwdt_inverse = log_likelihood.inverse_prior(
+                "w", params.w
+            )[1]
+            return numpy.array(
+                [
+                    (
+                        w_inverse
+                        if param == "w"
+                        else log_likelihood.inverse_prior(param, value)[1]
+                    )
+                    for param, value in zip(params._fields, params)
+                ]
+                + [dwdt_inverse]
+            )
         return numpy.array(
             [
                 log_likelihood.inverse_prior(param, value)[1]
