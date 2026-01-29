@@ -595,6 +595,9 @@ class FindStartingPositions:
                     optimized_queue.put((scenario_ind, None))
                     continue
 
+                if config.enable_precession:
+                    params = params._replace(w=(params.w, 0.0))
+
                 result = lmfit_and_tweak(
                     params_to_sample(params, self._log_likelihood, True),
                     self._log_likelihood,
