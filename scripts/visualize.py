@@ -25,6 +25,7 @@ from general_purpose_python_modules.visuals import make_corner_plot
 from general_purpose_python_modules.emcee_util import load_initial_positions
 from general_purpose_python_modules.emcee_quantile_convergence import (
     find_emcee_quantiles,
+    diagnose_emcee_quantile,
 )
 from general_purpose_python_modules.multi_pickle import MultiPickle
 
@@ -472,25 +473,49 @@ def get_convergence_data(plot_data, config, num_walkers):
         "thin": numpy.empty(num_entries, dtype=int),
         "num_steps": num_steps,
     }
+    burnin = 0
     result_ind = 0
     for column in plot_data.columns:
         for cdf_value in config.diagnostic_quantiles:
             print(f"Processing quantile {cdf_value} for column {column}")
-            quantile_info = find_emcee_quantiles(
+            convergence_data["burnin"][result_ind] = find_emcee_quantiles(
                 plot_data[column].values.reshape(num_steps, num_walkers),
                 cdf_value,
                 config.burnin_tolerance,
-                config.quantile_variance_realizations,
+                0,
                 max(1, num_steps // 10),
+            )[1]
+            result_ind += 1
+    burnin = convergence_data["burnin"].max()
+    print(f"Burnin is {burnin} out of {num_steps} steps.")
+    result_ind = 0
+    for column in plot_data.columns:
+        for cdf_value in config.diagnostic_quantiles:
+            if burnin < num_steps:
+                samples = plot_data[column].values.reshape(
+                    num_steps, num_walkers
+                )[burnin:]
+            else:
+                samples = plot_data[column].values.reshape(
+                    num_steps, num_walkers
+                )
+            print(f"Finding quantile of {column} from {samples.size} samples.")
+            quantile = numpy.quantile(samples.flatten(), cdf_value)
+            convergence_data["value"][result_ind] = quantile
+            print(
+                f"Diagnosing {column} CDF({quantile}) = {cdf_value} quantile."
             )
-            print(f"Quantile info: {quantile_info}")
-            convergence_data["value"][result_ind] = quantile_info[0]
-            convergence_data["stdev"][result_ind] = quantile_info[2]
-            convergence_data["thin"][result_ind] = quantile_info[3] or 0
-            convergence_data["burnin"][result_ind] = (
-                quantile_info[4] if quantile_info[4] > 0 else 2 * num_steps
-            )
-
+            (
+                convergence_data["stdev"][result_ind],
+                convergence_data["thin"][result_ind],
+            ) = diagnose_emcee_quantile(
+                samples,
+                samples.shape[1],
+                config.quantile_variance_realizations,
+                quantile=quantile,
+            )[
+                1:
+            ]
             result_ind += 1
     pickler.add_result(config, convergence_data)
 
@@ -538,8 +563,25 @@ def create_convergence_plot(plot_data, config, num_walkers, _):
         pyplot.xscale("log")
         if plot_type == "burnin":
             pyplot.axvspan(
-                0, convergence_data["num_steps"], zorder=10, color="black"
+                0,
+                min(
+                    convergence_data["num_steps"],
+                    convergence_data["burnin"].max(),
+                ),
+                zorder=10,
+                color="grey",
             )
+            if convergence_data["burnin"].max() < convergence_data["num_steps"]:
+                pyplot.axvspan(
+                    min(
+                        convergence_data["num_steps"],
+                        convergence_data["burnin"].max(),
+                    ),
+                    convergence_data["num_steps"],
+                    zorder=10,
+                    color="black",
+                )
+
         print(
             f"Plotting bars with y_pos={y_pos!r}, "
             f"length={convergence_data[plot_type]}, "
