@@ -511,7 +511,7 @@ def get_convergence_data(plot_data, config, num_walkers):
                 config.quantile_variance_realizations,
                 quantile=quantile,
             )
-            if quantile_info[1] is None:
+            if quantile_info[2] is None:
                 (
                     convergence_data["stdev"][result_ind],
                     convergence_data["thin"][result_ind],
