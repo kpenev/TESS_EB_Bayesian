@@ -43,12 +43,14 @@ def fit_least_squares(
 
         residuals.num_eval += 1
         _logger.debug("LSTSQ Function evaluation %d", residuals.num_eval)
-        if x.size == len(SampleParams._fields) - 2:
+        if x.size < len(SampleParams._fields):
             x = numpy.concatenate((x, [0.0, 0.0]))
-        if has_precession:
-            x[-1] = x[-3]
-            x[-3] = 0.0
-        assert x.size == len(SampleParams._fields)
+            if has_precession:
+                x[-1] = x[-3]
+                x[-3] = 0.0
+        assert x.size == len(SampleParams._fields) + (
+            1 if has_precession else 0
+        )
         sample_params = log_likelihood.get_sample_params(x)
         try:
             binary = Binary(from_mcmc=sample_params)
@@ -74,10 +76,12 @@ def fit_least_squares(
         )
         return numpy.concatenate((lc_residuals, sed_residuals, x))
 
-    assert has_precession or len(SampleParams._fields) == initial_mcmc_sample.size
+    assert (
+        has_precession or len(SampleParams._fields) == initial_mcmc_sample.size
+    )
     if not fit_sys_err:
         if has_precession:
-            precession_value =  initial_mcmc_sample[-1]
+            precession_value = initial_mcmc_sample[-1]
         # Fix lc_sys and sed_sys to zero during least squares fit if instructed
         initial_mcmc_sample = initial_mcmc_sample[:-2]
         if has_precession:
@@ -189,9 +193,19 @@ def tweak_params(
     _logger.info(
         "Using tweak scale:\n%s\naround%s", repr(tweak_scale), repr(params)
     )
+    dwdt_scale = min(
+        1e-3, 0.1 / (log_likelihood.time_span[1] - log_likelihood.time_span[0])
+    )
     result = SampleParams(
         *(
-            orig + uniform.rvs(loc=-scale, scale=2 * scale)
+            (
+                (
+                    orig[0] + uniform.rvs(loc=-scale, scale=2 * scale),
+                    orig[1] + dwdt_scale,
+                )
+                if isinstance(orig, tuple)
+                else orig + uniform.rvs(loc=-scale, scale=2 * scale)
+            )
             for orig, scale in zip(params, tweak_scale)
         )
     )
