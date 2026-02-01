@@ -505,17 +505,22 @@ def get_convergence_data(plot_data, config, num_walkers):
             print(
                 f"Diagnosing {column} CDF({quantile}) = {cdf_value} quantile."
             )
-            (
-                convergence_data["stdev"][result_ind],
-                convergence_data["thin"][result_ind],
-            ) = diagnose_emcee_quantile(
+            quantile_info = diagnose_emcee_quantile(
                 samples,
                 samples.shape[1],
                 config.quantile_variance_realizations,
                 quantile=quantile,
-            )[
-                1:
-            ]
+            )
+            if quantile_info[1] is None:
+                (
+                    convergence_data["stdev"][result_ind],
+                    convergence_data["thin"][result_ind],
+                ) = (numpy.nan, 1)
+            else:
+                (
+                    convergence_data["stdev"][result_ind],
+                    convergence_data["thin"][result_ind],
+                ) = quantile_info[1:]
             result_ind += 1
     pickler.add_result(config, convergence_data)
 
