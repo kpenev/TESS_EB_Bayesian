@@ -361,16 +361,6 @@ class BinaryParams(batman.TransitParams):
         elif times is not None:
             return
 
-        self.a = (
-            (
-                (self.per * units.day) ** 2
-                * (constants.G * self.mtotal * units.M_sun)
-                / (4.0 * numpy.pi**2)
-            )
-            ** (1.0 / 3.0)
-            / (self.rstar * units.R_sun)
-        ).to_value("")
-
         if numpy.abs(self._primary_impact_param) > self.a:
             self._out_of_range.append("impact_param")
             self.inc = numpy.nan
@@ -448,6 +438,7 @@ class BinaryParams(batman.TransitParams):
                 assert (
                     param != "per"
                 ), "Evolving orbital period is not supported!"
+
                 assert len(value) == 2
                 self._evolving_orbit.append((param, value))
                 setattr(self, param, value[0])
@@ -458,7 +449,17 @@ class BinaryParams(batman.TransitParams):
             self._t0_both["primary"] - self._calc_perpass_eclipse_time_diff()
         )
 
-        print(f"Evolving orbit: {self._evolving_orbit!r}")
+        self.a = (
+            (
+                (self.per * units.day) ** 2
+                * (constants.G * self.mtotal * units.M_sun)
+                / (4.0 * numpy.pi**2)
+            )
+            ** (1.0 / 3.0)
+            / (self.rstar * units.R_sun)
+        ).to_value("")
+
+        _logger.debug("Evolving orbit: %s", repr(self._evolving_orbit))
         if not self._evolving_orbit:
             self._fix_evolving_orbit()
 

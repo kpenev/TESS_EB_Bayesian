@@ -145,12 +145,12 @@ def tweak_params(
         secondary_limb_dark_2=1e-6,
         primary_prot=0.1,
         secondary_prot=0.1,
-        primary_reflection_coef=1e-8,
-        secondary_reflection_coef=1e-8,
-        primary_beaming_coef=1e-8,
-        secondary_beaming_coef=1e-8,
-        lc_sys=1e-6,
-        sed_sys=1e-6,
+        primary_reflection_coef=0.1,  # log-scale
+        secondary_reflection_coef=0.1,  # log-scale
+        primary_beaming_coef=0.1,  # log-scale
+        secondary_beaming_coef=0.1,  # log-scale
+        lc_sys=0.1,  # log-scale
+        sed_sys=0.1,  # log-scale
     ),
     rel_tweak_scale=SampleParams(
         mtotal=0.0,
@@ -168,73 +168,83 @@ def tweak_params(
         secondary_limb_dark_2=0.01,
         primary_prot=0.0,
         secondary_prot=0.0,
-        primary_reflection_coef=0.01,
-        secondary_reflection_coef=0.01,
-        primary_beaming_coef=0.01,
-        secondary_beaming_coef=0.01,
-        lc_sys=0.1,
-        sed_sys=0.1,
+        primary_reflection_coef=0.01,  # log-scale
+        secondary_reflection_coef=0.01,  # log-scale
+        primary_beaming_coef=0.01,  # log-scale
+        secondary_beaming_coef=0.01,  # log-scale
+        lc_sys=0.1,  # log-scale
+        sed_sys=0.1,  # log-scale
     ),
 ):
     """Slightly tweak the given parameters to allow MCMC sampling near them."""
 
-    period_tweak = min(
-        log_likelihood.best_fit_bls["period"][1] / 4,
-        0.2
-        * log_likelihood.best_fit_bls["duration"]
-        * log_likelihood.best_fit_bls["period"][0]
-        / (log_likelihood.time_span[1] - log_likelihood.time_span[0]),
-    )
-    tweak_scale = SampleParams(
-        *(
-            abs_tweak + rel_tweak * abs(orig)
-            for abs_tweak, rel_tweak, orig in zip(
-                abs_tweak_scale, rel_tweak_scale, params
+    def get_tweaked(param, orig, abs_tweak, rel_tweak):
+        """Return tweaked value for the given parameter, respecting limits."""
+
+        if param == "w":
+            w = orig[0] if isinstance(orig, tuple) else orig
+            scale = abs_tweak + rel_tweak * abs(w)
+            result = uniform.rvs(loc=w - scale, scale=2 * scale)
+            while result > 180:
+                result -= 360.0
+            while result < -180:
+                result += 360.0
+            dwdt_scale = min(
+                1e-3,
+                0.1
+                / (log_likelihood.time_span[1] - log_likelihood.time_span[0]),
             )
+            return result, uniform.rvs(orig[1] - dwdt_scale, 2 * dwdt_scale)
+
+        allowed = log_likelihood.get_range(param)
+        if param == "per":
+            scale = min(
+                log_likelihood.best_fit_bls["period"][1] / 4,
+                0.2
+                * log_likelihood.best_fit_bls["duration"]
+                * log_likelihood.best_fit_bls["period"][0]
+                / (log_likelihood.time_span[1] - log_likelihood.time_span[0]),
+            )
+        elif param == "eclipse_time":
+            scale = 0.1 * log_likelihood.best_fit_bls["duration"]
+        else:
+            if log_likelihood.check_logscale(param):
+                orig = numpy.log10(orig)
+            scale = abs_tweak + rel_tweak * abs(orig)
+        _logger.debug(
+            "Tweaking %s from %s with scale %s, range: %s.",
+            param,
+            orig,
+            scale,
+            allowed,
         )
-    )
-    tweak_scale = tweak_scale._replace(
-        per=period_tweak,
-        eclipse_time=0.1 * log_likelihood.best_fit_bls["duration"],
-    )
-    _logger.info(
-        "Using tweak scale:\n%s\naround%s", repr(tweak_scale), repr(params)
-    )
-    dwdt_scale = min(
-        1e-3, 0.1 / (log_likelihood.time_span[1] - log_likelihood.time_span[0])
-    )
+        lower = max(allowed[0], orig - scale)
+        upper = min(allowed[1], orig + scale)
+        result = uniform.rvs(loc=lower, scale=upper - lower)
+        if log_likelihood.check_logscale(param):
+            return 10.0**result
+        return result
+
     result = SampleParams(
         *(
-            (
-                (
-                    orig[0] + uniform.rvs(loc=-scale, scale=2 * scale),
-                    orig[1] + dwdt_scale,
-                )
-                if isinstance(orig, tuple)
-                else orig + uniform.rvs(loc=-scale, scale=2 * scale)
+            get_tweaked(param_name, orig, abs_tweak, rel_tweak)
+            for param_name, orig, abs_tweak, rel_tweak in zip(
+                SampleParams._fields, params, abs_tweak_scale, rel_tweak_scale
             )
-            for orig, scale in zip(params, tweak_scale)
         )
     )
-    # pylint: disable=unsubscriptable-object
-    if result.meh < Binary.meh_range[0]:
-        result = result._replace(
-            meh=Binary.meh_range[0] + uniform.rvs(tweak_scale.meh / 2)
-        )
-    elif result.meh > Binary.meh_range[1]:
-        result = result._replace(
-            meh=Binary.meh_range[1] - uniform.rvs(tweak_scale.meh / 2)
-        )
-    # pylint: enable=unsubscriptable-object
 
     logage_range = get_logage_range(result, log_likelihood)
+    age_scale = (
+        abs_tweak_scale.age_gyr + rel_tweak_scale.age_gyr * params.age_gyr
+    )
     if result.age_gyr < 10.0 ** logage_range[0]:
         result = result._replace(
-            age_gyr=10.0 ** logage_range[0] + uniform.rvs(tweak_scale.age_gyr)
+            age_gyr=10.0 ** logage_range[0] + uniform.rvs(age_scale)
         )
     elif result.age_gyr > 10.0 ** logage_range[1]:
         result = result._replace(
-            age_gyr=10.0 ** logage_range[1] - uniform.rvs(tweak_scale.age_gyr)
+            age_gyr=10.0 ** logage_range[1] - uniform.rvs(age_scale)
         )
 
     result = result._replace(
@@ -437,6 +447,9 @@ def tweak_sample(
 ):
     """Slightly tweak the given MCMC sample to allow MCMC sampling near it."""
 
+    assert numpy.isfinite(
+        sample
+    ).all(), "Attempting to tweak sample with non-finite entries!"
     params = log_likelihood.get_sample_params(sample)
     for _ in range(max_tweak_attempts):
         if tweak_scale is None:

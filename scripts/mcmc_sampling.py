@@ -151,7 +151,11 @@ def parse_command_line():
         " since the last sampling run. This will cause the sampling to restart"
         " from the last step of the existing chain, rather than continuing.",
     )
-
+    parser.add_argument(
+        "--with-precession",
+        action="store_true",
+        help="If passed, include apsidal precession in the model.",
+    )
     parser.add_argument(
         "--num-parallel",
         type=int,
@@ -254,6 +258,15 @@ def get_backend(samples_fname, config):
     reset = True
     if path.exists(samples_fname):
         print("Found existing samples file:", samples_fname)
+        assert reset or (
+            backend.shape[1]
+            == len(SampleParams._fields) + (1 if config.with_precession else 0)
+        ), (
+            f"Number of parameters {backend.shape[1]} in existing samples file "
+            "does not match expected number"
+            + (" with" if config.with_precession else " without")
+            + " precession: "
+        )
         with h5py.File(
             samples_fname, "r+" if config.update_git_hash else "r"
         ) as samples_file:
@@ -278,7 +291,7 @@ def get_backend(samples_fname, config):
             + config.initial_num_ages
             * config.initial_num_mehs
             * config.initial_num_ws,
-            len(SampleParams._fields),
+            len(SampleParams._fields) + (1 if config.with_precession else 0),
         )
         with h5py.File(samples_fname, "a") as samples_file:
             samples_file.attrs["TICID"] = config.tic_id
