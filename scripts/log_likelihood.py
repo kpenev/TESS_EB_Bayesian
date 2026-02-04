@@ -398,6 +398,11 @@ class LogLikelihood(TESSTarget):
 
         return getattr(self._range, param)
 
+    def check_logscale(self, param):
+        """Return True iff the given parameter is sampled in log-scale."""
+
+        return param in self._log_uniform
+
     def __init__(
         self,
         tic_id,
@@ -1026,12 +1031,9 @@ class LogLikelihood(TESSTarget):
         if isinstance(sample_params.w, float):
             return sample_params
 
-        return (
-            sample_params._replace(
-                w=sample_params.w[0],
-            )
-            + sample_params.w[1]
-        )
+        return sample_params._replace(
+            w=sample_params.w[0],
+        ) + (sample_params.w[1],)
 
     def __call__(self, mcmc_sample, exclude_priors=False):
         """Return the log-likelihood of the given MCMC sample."""
@@ -1047,13 +1049,13 @@ class LogLikelihood(TESSTarget):
                 sample_params,
                 error.args[0],
             )
-            return (-numpy.inf,) + sample_params
+            return (-numpy.inf,) + self.get_blob(sample_params)
         if binary.out_of_range:
             self._logger.warning(
                 "Out of range parameters:\n\t%s",
                 "\n\t".join(binary.out_of_range),
             )
-            return (-numpy.inf,) + sample_params
+            return (-numpy.inf,) + self.get_blob(sample_params)
         self._logger.debug("Binary: %s", binary)
 
         result = (
@@ -1064,7 +1066,16 @@ class LogLikelihood(TESSTarget):
             + self.calc_sed_log_likelihood(binary, sample_params.sed_sys)
         )
 
+        blob = self.get_blob(sample_params)
         self._logger.debug(
-            "Final log likelihood(%s): %s", repr(mcmc_sample), repr(result)
+            "Final log likelihood(%s): %s, blob size: %d, blob types: %s",
+            repr(mcmc_sample),
+            repr(result),
+            len(self.get_blob(sample_params)),
+            set(map(type, blob)),
         )
-        return (result,) + self.get_blob(sample_params)
+        result = (result,) + blob
+        self._logger.debug(
+            "Final result (size %d): %s", len(result), repr(result)
+        )
+        return result

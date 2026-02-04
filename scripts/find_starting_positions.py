@@ -595,7 +595,7 @@ class FindStartingPositions:
                     optimized_queue.put((scenario_ind, None))
                     continue
 
-                if config.enable_precession:
+                if config.with_precession:
                     params = params._replace(w=(params.w, 0.0))
 
                 result = lmfit_and_tweak(
@@ -630,16 +630,16 @@ class FindStartingPositions:
             optimized_queue.put(None)
         # pylint: enable=bare-except
 
-    def _load_initial_samples(self, samples_fname, num_walkers):
+    def _load_initial_samples(self, samples_fname, num_walkers, num_params):
         """Load saved initial positions from a previous run."""
 
         initial_position_data = load_initial_positions(
             samples_fname,
             num_walkers=num_walkers,
-            num_params=len(SampleParams._fields),
+            num_params=num_params,
             blobs_dtype=[("log_likelihood", float)]
             + [
-                (f"s{i:02d}", float) for i, _ in enumerate(SampleParams._fields)
+                (f"s{i:02d}", float) for i in range(num_params)
             ],
         )
         if len(initial_position_data) == 2:
@@ -797,14 +797,16 @@ class FindStartingPositions:
             f"match config TIC ID ({config.tic_id})!"
         )
         initial_scenarios = self._get_init_scenarios(config)
-        num_params = len(SampleParams._fields)
+        num_params = len(SampleParams._fields) + (
+            1 if config.with_precession else 0
+        )
         num_walkers = initial_scenarios.size + config.num_random_walkers
         samples_fname = config.samples_fname_pattern.format(
             tic_id=config.tic_id
         )
 
         starting_positions, positions_found, top_position = (
-            self._load_initial_samples(samples_fname, num_walkers)
+            self._load_initial_samples(samples_fname, num_walkers, num_params)
         )
 
         positions_needed = numpy.flatnonzero(numpy.logical_not(positions_found))
@@ -836,8 +838,14 @@ class FindStartingPositions:
         for process in workers:
             process.start()
         unphysical = []
+        _logger.debug(
+            "Collecting optimized starting positions for %d initial scenarios.",
+            len(initial_scenarios),
+        )
         for _ in initial_scenarios:
+            _logger.debug("Waiting for new starting position")
             position = optimized_queue.get()
+            _logger.debug("Received new starting position: %s", repr(position))
             if position is None:
                 for w in workers:
                     w.kill()
@@ -847,6 +855,12 @@ class FindStartingPositions:
             else:
                 scenario_ind, position = position
             if position is None:
+                _logger.warning(
+                    "Proposed initial position %d unphysical: %s, will replace "
+                    "with random position near top sample.",
+                    scenario_ind,
+                    repr(position),
+                )
                 unphysical.append(scenario_ind)
             else:
                 if top_position is None or (
