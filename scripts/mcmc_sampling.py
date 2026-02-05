@@ -363,14 +363,6 @@ def prepare_restart(backend):
 
     log_prob, samples = get_all_samples(backend)
 
-    if backend.iteration > 0:
-        with h5py.File(backend.filename, "r+") as samples_f:
-            for prelim in count():
-                chain_name = f"prelim_mcmc_{prelim}"
-                if chain_name not in samples_f:
-                    samples_f.move("mcmc", chain_name)
-                break
-
     _logger.info(
         "Restarting sampling. Last step log-likelihood spread: %s. Choosing top"
         "samples from %d.",
@@ -381,7 +373,15 @@ def prepare_restart(backend):
     select_from = backend.shape[0]
 
     if backend.iteration > 0:
-        backend.reset(*backend.shape)
+        backend_shape = backend.shape
+        with h5py.File(backend.filename, "r+") as samples_f:
+            for prelim in count():
+                chain_name = f"prelim_mcmc_{prelim}"
+                if chain_name not in samples_f:
+                    samples_f.move("mcmc", chain_name)
+                break
+
+        backend.reset(*backend_shape)
     while select_from <= ordered_indices.size:
         top_indices = numpy.random.choice(
             ordered_indices[-select_from:], backend.shape[0]
