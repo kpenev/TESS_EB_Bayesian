@@ -909,7 +909,7 @@ def get_param_binaries(sample_params):
     return result
 
 
-def get_initial_positions(config, num_walkers):
+def get_initial_positions(config, num_walkers, num_params):
     """Return the initial positions per the given config."""
 
     print(
@@ -935,7 +935,7 @@ def get_initial_positions(config, num_walkers):
         config.samples_fname,
         chain_name=config.chain_name,
         num_walkers=num_walkers,
-        num_params=len(SampleParams._fields),
+        num_params=num_params,
         blobs_dtype=[("log_likelihood", float)]
         + [(f"s{i:02d}", float) for i, _ in enumerate(SampleParams._fields)],
     )
@@ -949,7 +949,9 @@ def get_walker_step_params(
 
     selection = tuple(int(s) for s in selection.split(","))
     if selection[0] == -1:
-        initial_positions = get_initial_positions(config, num_walkers)
+        initial_positions = get_initial_positions(
+            config, num_walkers, len(raw_data.columns)
+        )
         if len(selection) != 1:
             initial_positions = [initial_positions[selection[1]]]
         print(
@@ -1030,6 +1032,14 @@ def get_lstsq(backend, log_likelihood, config):
     pickler.add_result(pickler_config, result)
     return result
 
+def get_sample_params(param_values):
+    """Return a SampleParams instance for the given parameter values."""
+
+    result = SampleParams(*param_values[: len(SampleParams._fields)])
+    if len(param_values) == len(SampleParams._fields) + 1:
+        result = result._replace(w=(result.w, param_values[-1]))
+    return result
+
 
 def get_model_binaries(
     config,
@@ -1051,8 +1061,8 @@ def get_model_binaries(
         if include is not None:
             ordered = ordered[include.flatten()[ordered]]
 
-        top_params = SampleParams(
-            *raw_data[numpy.unravel_index(ordered[0], log_prob.shape)]
+        top_params = get_sample_params(
+            raw_data[numpy.unravel_index(ordered[0], log_prob.shape)]
         )
     else:
         top_params = None
@@ -1079,7 +1089,7 @@ def get_model_binaries(
                     numpy.nonzero(include)[0], selection
                 )
             selection = raw_data[numpy.unravel_index(selection, log_prob.shape)]
-            sample_params = [SampleParams(*sample) for sample in selection]
+            sample_params = [get_sample_params(sample) for sample in selection]
         elif selection != "bls":
             sample_params = get_walker_step_params(
                 raw_data,
@@ -1150,6 +1160,9 @@ def get_plot_data(config, log_likelihood):
             )
             if chain_name == "mcmc":
                 break
+        columns = SampleParams._fields
+        if backend.shape[1] == len(SampleParams._fields) + 1:
+            columns += ("dwdt",)
         if raw_data is not None:
             plot_data = pandas.DataFrame(
                 raw_data[: num_iterations // config.thin, :, :]
@@ -1159,7 +1172,7 @@ def get_plot_data(config, log_likelihood):
                     * backend.shape[0],
                     backend.shape[1],
                 ),
-                columns=SampleParams._fields,
+                columns=columns,
             )
             sub_log_prob = log_prob[
                 : num_iterations // config.thin, :
@@ -1171,10 +1184,12 @@ def get_plot_data(config, log_likelihood):
                 sub_log_prob,
             )
     if config.burn_in == -1:
-        plot_data = get_initial_positions(config, backend.shape[0])
+        plot_data = get_initial_positions(
+            config, backend.shape[0], backend.shape[1]
+        )
         plot_data = pandas.DataFrame(
             [log_likelihood.get_sample_params(sample) for sample in plot_data],
-            columns=SampleParams._fields,
+            columns=columns,
         )
         num_iterations = 1
         selected = None
