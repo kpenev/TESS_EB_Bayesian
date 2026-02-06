@@ -8,7 +8,6 @@ from multiprocessing import Pool, Process, Queue
 from itertools import count
 from traceback import format_exc
 
-from configargparse import ArgumentParser, DefaultsFormatter
 from emcee import EnsembleSampler, walkers_independent
 import h5py
 import numpy
@@ -23,6 +22,7 @@ from general_purpose_python_modules.emcee_util import (
     load_initial_positions,
 )
 
+from command_line_util import create_parser
 from utils import lmfit_and_tweak
 from hacked_emcee_hdf5_backend import HDFBackend
 from log_likelihood import SampleParams, LogLikelihood
@@ -44,14 +44,7 @@ default_logging_format = (
 def parse_command_line():
     """Return the command line configuration."""
 
-    parser = ArgumentParser(
-        description=__doc__,
-        default_config_files=["mcmc_sampling.cfg"],
-        args_for_writing_out_config_file=["--generate-config-file"],
-        args_for_setting_config_path=["--config-file", "-c"],
-        formatter_class=DefaultsFormatter,
-        ignore_unknown_config_file_keys=False,
-    )
+    parser = create_parser()
     parser.add_argument(
         "tic_id", type=int, help="The TIC identifier to sample."
     )
