@@ -5,12 +5,15 @@ import numpy
 from general_purpose_python_modules.emcee_quantile_convergence import (
     find_emcee_quantiles,
 )
+from general_purpose_python_modules import ensure_directory
 import pandas
+from astropy.table import QTable
+from astropy import units as u
 
 from command_line_util import create_parser
 import paths
 from visualize import get_plot_data
-from log_likelihood import LogLikelihood
+from sample_params import SampleParams, param_units, param_descriptions
 
 
 def parse_command_line():
@@ -82,7 +85,7 @@ def get_burnin(plot_data, num_steps, num_walkers, config):
             "release_burnin.txt", sep=r"\s+", header=0, index_col="TIC"
         )
     try:
-        return get_burnin.burnin.loc[config.tic_id]
+        return int(get_burnin.burnin.loc[config.tic_id])
     except KeyError:
         burnin = 0
         for column in config.diagnostic_params:
@@ -107,16 +110,38 @@ def get_burnin(plot_data, num_steps, num_walkers, config):
 def create_release(config):
     """Create the release of a single TIC ID."""
 
-    log_likelihood = LogLikelihood(config.tic_id)
-    plot_data, raw_data, log_prob, selected, backend = get_plot_data(
+    plot_data, blobs, log_prob, _, backend = get_plot_data(
         config,
-        log_likelihood,
+        None,
     )
     num_steps = backend.iteration
     num_walkers = backend.shape[0]
 
     burnin = get_burnin(plot_data, num_steps, num_walkers, config)
     print(f"Burn-in for {config.tic_id}: {burnin}")
+    thin = (num_steps - burnin) // config.release_num_steps
+    if thin == 0:
+        raise ValueError(
+            f"Insufficient number of MCMC steps ({num_steps - burnin}) after "
+            f"burnin ({burnin}) to release {config.release_num_steps} steps!"
+        )
+    burnin = num_steps - thin * (config.release_num_steps - 1) - 1
+    release_data = QTable(
+        rows=blobs[burnin::thin, :, :].reshape(
+            config.release_num_steps * num_walkers, backend.shape[1]
+        ),
+        names=SampleParams._fields,
+        units=param_units,
+        descriptions=param_descriptions
+    )
+    release_data.add_column(
+        log_prob[burnin::thin, :].flatten() * u.dimensionless_unscaled,
+        name="log_prob",
+    )
+    ensure_directory(config.release_fname)
+    print(f"Release data stats: {release_data.info(['attributes', 'stats'])}")
+    release_data.write(config.release_fname, format="fits", overwrite=True)
+    print(f"Written to: {config.release_fname!r}")
 
 
 def main(config):
@@ -125,6 +150,9 @@ def main(config):
     config.chain_name = "mcmc"
     for config.tic_id in config.tic_id_list:
         config.samples_fname = config.samples_fname_pattern.format(
+            tic_id=config.tic_id
+        )
+        config.release_fname = config.release_fname_pattern.format(
             tic_id=config.tic_id
         )
         config.burn_in = 0

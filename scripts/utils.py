@@ -48,6 +48,11 @@ def fit_least_squares(
         try:
             binary = Binary(from_mcmc=sample_params)
         except ValueError:
+            _logger.warning(
+                "Least squares encountered unphysical parameters:\n%s\n%s",
+                repr(sample_params),
+                format_exc()
+            )
             return numpy.full(num_residuals, numpy.inf)
         lc_residuals = log_likelihood.calc_lc_log_likelihood(
             binary, sample_params.lc_sys, return_residuals=True
