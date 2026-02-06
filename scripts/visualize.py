@@ -17,7 +17,6 @@ except ImportError:
     from matplotlib import cm as colormaps
 import h5py
 import numpy
-from configargparse import ArgumentParser, DefaultsFormatter
 import pandas
 from asteval import Interpreter
 
@@ -29,6 +28,7 @@ from general_purpose_python_modules.emcee_quantile_convergence import (
 )
 from general_purpose_python_modules.multi_pickle import MultiPickle
 
+from command_line_util import create_parser
 from hacked_emcee_hdf5_backend import HDFBackend
 from sample_params import SampleParams
 from log_likelihood import LogLikelihood
@@ -41,14 +41,7 @@ from light_curve_plotter import LightCurvePlotter
 def parse_command_line():
     """Return the command line configuration."""
 
-    parser = ArgumentParser(
-        description=__doc__,
-        default_config_files=["plotting.cfg"],
-        args_for_writing_out_config_file=["--generate-config-file"],
-        args_for_setting_config_path=["--config-file", "-c"],
-        formatter_class=DefaultsFormatter,
-        ignore_unknown_config_file_keys=False,
-    )
+    parser = create_parser()
     parser.add_argument("tic_id", type=int, help="TIC ID to create plots for.")
     parser.add_argument(
         "--samples-fname-pattern",
