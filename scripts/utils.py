@@ -3,6 +3,7 @@
 from multiprocessing import Pool
 import logging
 from collections import namedtuple
+from traceback import format_exc
 
 import numpy
 from scipy import optimize
@@ -265,6 +266,13 @@ def find_log_age_bound(params, bad_bound, bound_limit):
                     root += (1 if bad_bound < root else -1) * 1e-5
                 return root
         except ValueError:
+            _logger.warning(
+                "Attempt to find log(age) bound for params %s with log(age) = "
+                "%s failed:\n%s",
+                params,
+                try_log_age,
+                format_exc(),
+            )
             pass
         bad_bound = try_log_age
     raise ValueError(
