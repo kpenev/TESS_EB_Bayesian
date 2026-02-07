@@ -239,9 +239,6 @@ class Green19Correction:
 
             tic_fallback (bool): If True, use TIC E(B-V) values to infer
                 reddening when Bayestar map is undefined.
-
-        Returns:
-            None
         """
 
         self._last_healpix = numpy.array(

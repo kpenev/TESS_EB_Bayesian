@@ -484,7 +484,7 @@ class LogLikelihood(TESSTarget):
 
     @staticmethod
     def get_full_model(binary, header, lightcurve, lc_sys_err):
-        """Fit the model scaling to match that of the lightcurve."""
+        """Generate model lightcurve and fit its scaling to the data."""
 
         lc_sq_errors = lightcurve["flux_err"] ** 2 + lc_sys_err**2
 
@@ -585,7 +585,7 @@ class LogLikelihood(TESSTarget):
 
     def get_eclipse_model(self, binary, header, lightcurve, lc_sys_err):
         """
-        Same as `get_model()` but ignoring OOE variability.
+        Same as `get_full_model()` but ignoring OOE variability.
 
         This method allows handling cases where there is significant non-binary
         related variability in the lightcurve (astrophysical or instrumental).
@@ -857,7 +857,7 @@ class LogLikelihood(TESSTarget):
                 * even: Only the points in the vicinity of even eclipses (per
                   best fit BLS) are included.
 
-                * odd: Only the points in the vicinity of even eclipses (per
+                * odd: Only the points in the vicinity of odd eclipses (per
                   best fit BLS) are included.
 
                 * both: Points near both eclipses.

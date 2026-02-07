@@ -670,7 +670,7 @@ class FindStartingPositions:
 
     @property
     def secondary_eclipse_phase(self):
-        """The allowed range for the argument of periapsis per eclipse times."""
+        """The phase of the secondary eclipse."""
 
         return self._secondary_eclipse_phase
 

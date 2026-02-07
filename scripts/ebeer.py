@@ -59,7 +59,7 @@ class EBEERBinary(BinaryParams):
 
         Args:
             true_anomaly(float or array):    The true anomaly at which to
-                evaluate the beaming effect.
+                evaluate the ellipsoidal effect.
 
         Returns:
             A float or numpy array of the flux modulation due to the ellipsoidal
@@ -167,7 +167,7 @@ class EBEERBinary(BinaryParams):
 
         Args:
             true_anomaly(float or array):    The true anomaly at which to
-                evaluate the beaming effect.
+                evaluate the reflection effect.
 
         Returns:
             A float or numpy array of the flux modulation due to the reflection

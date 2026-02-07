@@ -137,7 +137,7 @@ class BinaryParams(batman.TransitParams):
 
     @classmethod
     def get_star_log_age_range(cls, mini, meh):
-        """Return the log(age) range for the given initial mass and [Fe/H]."""
+        """Return log10(age/Gyr) range for the given initial mass and [Fe/H]."""
 
         BinaryParams.prepare_class()
         return tuple(
@@ -409,7 +409,7 @@ class BinaryParams(batman.TransitParams):
         Args:
             sample_params:    Object with attributes specifying the phyisical
                 parameters of the system being sampled. See `SampleParams` in
-                `log_likelihood.py` for the attribute names.
+                `sample_params.py` for the attribute names.
 
         Returns:
             None
@@ -618,7 +618,7 @@ class BinaryParams(batman.TransitParams):
         return result
 
     def secondary_flux_fraction(self):
-        """Return the fraction of the flux coming from the secondary."""
+        """Return the ratio of secondary to primary flux."""
 
         result = self.teff_ratio**4 * (self.rp) ** 2
         for i, component in enumerate(
@@ -664,7 +664,7 @@ class BinaryParams(batman.TransitParams):
         self._set_ebeer_coefficients(coef, "reflection")
 
     def set_beaming_coef(self, coef):
-        """Set the reflection coefficients from the given 2-element iterable."""
+        """Set the beaming coefficients from the given 2-element iterable."""
 
         self._set_ebeer_coefficients(coef, "beaming")
 

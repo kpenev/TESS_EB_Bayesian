@@ -26,8 +26,10 @@ def fit_least_squares(
 
     Args:
         initial_mcmc_sample(array):    Initial guess for the MCMC sample
-            values. Omit the last two entiers (corresponding to `lc_sys` and
-            `sed_sys`) to keep those fixed at zero during the fit.
+            values.
+
+        fit_sys_err(bool):    If False, the last two entries (corresponding to
+            `lc_sys` and `sed_sys`) are fixed at zero during the fit.
 
     Returns:
         OptimizeResult:
@@ -419,7 +421,7 @@ def line_tweak_sample(tweak_from, tweak_toward, max_fraction=0.1):
 
 
 def process_sample(sample, log_likelihood, callback=None):
-    """Get Least squares optimized s and resulting log-likelihood."""
+    """Get Least squares optimized sample and resulting log-likelihood."""
 
     lstsq_result = fit_least_squares(log_likelihood, sample)
     result = (
@@ -445,8 +447,9 @@ def lstsq_optimize_samples(samples, log_likelihood, config, callback):
             redirect).
 
     Returns:
-        array of OptimizeResult:
-            Least squares optimized version of each input sample.
+        tuple of two numpy arrays::
+            The first array contains the optimized samples, and the second
+            contains the corresponding log-likelihoods.
     """
 
     with Pool(

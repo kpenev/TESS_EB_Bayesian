@@ -557,8 +557,8 @@ class LightCurvePlotter:
             binaries ([Binary]|None):    Collection of binaries configured with
                 the model lightcurves to plot.
 
-            detrend(callable):    Function to detrend the lightcurve (detrended
-                lightcurve is shown the same way as models.
+            title_info(str|None):    Additional information to display in the
+                plot title.
 
         Returns:
             None
