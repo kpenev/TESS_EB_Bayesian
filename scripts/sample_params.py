@@ -91,3 +91,27 @@ param_descriptions = {
     "lc_sys": "Systematic uncertainty in flux measurement (fractional)",
     "sed_sys": "Systematic uncertainty is SED [mag]",
 }
+
+param_fits_keys = {
+    "mtotal": "MTOTAL",
+    "mratio": "MRATIO",
+    "age_gyr": "AGEGYR",
+    "meh": "MEH",
+    "per": "PER",
+    "ecc": "ECC",
+    "w": "W",
+    "primary_impact_param": "BIMPACT",
+    "eclipse_time": "ECLTIME",
+    "primary_limb_dark_1": "PLD1",
+    "primary_limb_dark_2": "PLD2",
+    "secondary_limb_dark_1": "SLD1",
+    "secondary_limb_dark_2": "SLD2",
+    "primary_prot": "PPROT",
+    "secondary_prot": "SPROT",
+    "primary_reflection_coef": "PREFLC",
+    "secondary_reflection_coef": "SREFLC",
+    "primary_beaming_coef": "PBEAMC",
+    "secondary_beaming_coef": "SBEAMC",
+    "lc_sys": "LCSYS",
+    "sed_sys": "SEDSYS",
+}
