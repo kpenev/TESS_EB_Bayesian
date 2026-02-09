@@ -576,6 +576,12 @@ def create_convergence_plot(plot_data, config, num_walkers, _):
                 zorder=10,
                 color="grey",
             )
+            pyplot.axvline(
+                x=3000,
+                color="red",
+                linestyle=":",
+                zorder=25,
+            )
             if convergence_data["burnin"].max() < convergence_data["num_steps"]:
                 pyplot.axvspan(
                     min(
@@ -586,6 +592,13 @@ def create_convergence_plot(plot_data, config, num_walkers, _):
                     zorder=10,
                     color="black",
                 )
+        elif plot_type == "stdev":
+            pyplot.axvline(
+                x=0.01,
+                color="red",
+                linestyle=":",
+                zorder=25,
+            )
 
         print(
             f"Plotting bars with y_pos={y_pos!r}, "

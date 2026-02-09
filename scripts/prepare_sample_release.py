@@ -2,6 +2,7 @@
 """Prepare FITS files of samples for public release."""
 
 import numpy
+from matplotlib import pyplot
 from general_purpose_python_modules.emcee_quantile_convergence import (
     find_emcee_quantiles,
 )
@@ -39,7 +40,7 @@ def parse_command_line():
     parser.add_argument(
         "--burnin-tolerance",
         type=float,
-        default=1e-4,
+        default=1e-3,
         help="Tolerance for the Raftery-Lewis burn-in estimate.",
     )
     parser.add_argument(
@@ -107,6 +108,67 @@ def get_burnin(plot_data, num_steps, num_walkers, config):
         return burnin
 
 
+def plot_release_cdf(orig_data, release_data, config):
+    """
+    Plot cumulative distributions comparing all post-burnin samples to release.
+
+    For each parameter in ``config.diagnostic_params`` a panel is drawn with two
+    CDFs: one from the full chain (``orig_data`` after discarding the first
+    ``burnin * num_walkers`` entries) and one from the thinned release data.
+
+    Args:
+        orig_data:      DataFrame of all samples (rows = steps * walkers).
+
+        release_data:   ``QTable`` of the thinned release samples.
+
+        burnin:         Number of burn-in *steps* (rows to skip =
+            ``burnin * num_walkers``).
+
+        num_walkers:    Number of MCMC walkers.
+
+        config:         Parsed command-line config providing
+            ``diagnostic_params``, ``tic_id``, and ``release_fname``.
+    """
+
+    def setup_figure():
+        """Set up the figure and axes for the CDF comparison plot."""
+
+        ncols = min(3, len(config.diagnostic_params))
+        nrows = (len(config.diagnostic_params) + ncols - 1) // ncols
+
+        fig, axes = pyplot.subplots(
+            nrows, ncols, figsize=(5 * ncols, 4 * nrows)
+        )
+        axes = numpy.atleast_1d(axes).flatten()
+        return fig, axes
+
+    fig, axes = setup_figure()
+
+    for ax, param in zip(axes, config.diagnostic_params):
+        full_vals = numpy.sort(orig_data[param].values)
+        release_vals = numpy.sort(numpy.array(release_data[param]))
+
+        full_cdf = numpy.arange(1, len(full_vals) + 1) / len(full_vals)
+        release_cdf = numpy.arange(1, len(release_vals) + 1) / len(release_vals)
+
+        ax.plot(full_vals, full_cdf, label="full chain")
+        ax.plot(release_vals, release_cdf, label="release", linestyle="--")
+        ax.set_xlabel(param)
+        ax.set_ylabel("CDF")
+        ax.legend(fontsize="small")
+
+    for ax in axes[len(config.diagnostic_params) :]:
+        ax.set_visible(False)
+
+    fig.suptitle(f"TIC {config.tic_id}")
+    fig.tight_layout()
+
+    pdf_fname = config.release_fname.replace(".fits", "_cdf.pdf")
+    fig.savefig(pdf_fname)
+    pyplot.close(fig)
+    print(f"CDF comparison plot saved to: {pdf_fname!r}")
+
+
 def create_release(config):
     """Create the release of a single TIC ID."""
 
@@ -132,11 +194,14 @@ def create_release(config):
         ),
         names=SampleParams._fields,
         units=param_units,
-        descriptions=param_descriptions
+        descriptions=param_descriptions,
     )
     release_data.add_column(
         log_prob[burnin::thin, :].flatten() * u.dimensionless_unscaled,
         name="log_prob",
+    )
+    plot_release_cdf(
+        plot_data.iloc[burnin * num_walkers :], release_data, config
     )
     ensure_directory(config.release_fname)
     print(f"Release data stats: {release_data.info(['attributes', 'stats'])}")
