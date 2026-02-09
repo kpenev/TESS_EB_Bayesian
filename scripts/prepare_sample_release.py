@@ -3,6 +3,7 @@
 
 import numpy
 from matplotlib import pyplot
+from matplotlib.backends.backend_pdf import PdfPages
 from general_purpose_python_modules.emcee_quantile_convergence import (
     find_emcee_quantiles,
 )
@@ -108,41 +109,55 @@ def get_burnin(plot_data, num_steps, num_walkers, config):
         return burnin
 
 
-def plot_release_cdf(orig_data, release_data, config):
+def setup_diagnostic_figure(config):
+    """Create a figure with one axes per diagnostic parameter.
+
+    Args:
+        config:     Parsed command-line config providing
+            ``diagnostic_params``.
+
+    Returns:
+        tuple:  ``(fig, axes)`` where ``axes`` is a flat numpy array of
+            ``Axes`` objects, one per diagnostic parameter (extra axes are
+            hidden).
+    """
+
+    params = config.diagnostic_params
+    ncols = min(3, len(params))
+    nrows = (len(params) + ncols - 1) // ncols
+
+    fig, axes = pyplot.subplots(
+        nrows, ncols, figsize=(5 * ncols, 4 * nrows)
+    )
+    axes = numpy.atleast_1d(axes).flatten()
+
+    for ax in axes[len(params) :]:
+        ax.set_visible(False)
+
+    fig.suptitle(f"TIC {config.tic_id}")
+    return fig, axes
+
+
+def plot_release_cdf(orig_data, release_data, config, pdf):
     """
     Plot cumulative distributions comparing all post-burnin samples to release.
 
     For each parameter in ``config.diagnostic_params`` a panel is drawn with two
-    CDFs: one from the full chain (``orig_data`` after discarding the first
-    ``burnin * num_walkers`` entries) and one from the thinned release data.
+    CDFs: one from the full chain (``orig_data``) and one from the thinned
+    release data.
 
     Args:
-        orig_data:      DataFrame of all samples (rows = steps * walkers).
+        orig_data:      DataFrame of post-burnin samples from the full chain.
 
         release_data:   ``QTable`` of the thinned release samples.
 
-        burnin:         Number of burn-in *steps* (rows to skip =
-            ``burnin * num_walkers``).
-
-        num_walkers:    Number of MCMC walkers.
-
         config:         Parsed command-line config providing
-            ``diagnostic_params``, ``tic_id``, and ``release_fname``.
+            ``diagnostic_params`` and ``tic_id``.
+
+        pdf:            ``PdfPages`` object to save the figure to.
     """
 
-    def setup_figure():
-        """Set up the figure and axes for the CDF comparison plot."""
-
-        ncols = min(3, len(config.diagnostic_params))
-        nrows = (len(config.diagnostic_params) + ncols - 1) // ncols
-
-        fig, axes = pyplot.subplots(
-            nrows, ncols, figsize=(5 * ncols, 4 * nrows)
-        )
-        axes = numpy.atleast_1d(axes).flatten()
-        return fig, axes
-
-    fig, axes = setup_figure()
+    fig, axes = setup_diagnostic_figure(config)
 
     for ax, param in zip(axes, config.diagnostic_params):
         full_vals = numpy.sort(orig_data[param].values)
@@ -157,16 +172,54 @@ def plot_release_cdf(orig_data, release_data, config):
         ax.set_ylabel("CDF")
         ax.legend(fontsize="small")
 
-    for ax in axes[len(config.diagnostic_params) :]:
-        ax.set_visible(False)
-
-    fig.suptitle(f"TIC {config.tic_id}")
     fig.tight_layout()
-
-    pdf_fname = config.release_fname.replace(".fits", "_cdf.pdf")
-    fig.savefig(pdf_fname)
+    pdf.savefig(fig)
     pyplot.close(fig)
-    print(f"CDF comparison plot saved to: {pdf_fname!r}")
+
+
+def plot_release_quantile_diff(orig_data, release_data, config, pdf):
+    """
+    Plot the difference between release and expected quantile fractions.
+
+    For each parameter in ``config.diagnostic_params``, computes 99 equally
+    spaced quantiles (1%, 2%, ..., 99%) from ``orig_data``, then measures the
+    actual fraction of ``release_data`` points below each quantile value and
+    plots the difference (actual fraction - expected fraction) vs the expected
+    percent.
+
+    Args:
+        orig_data:      DataFrame of post-burnin samples from the full chain.
+
+        release_data:   ``QTable`` of the thinned release samples.
+
+        config:         Parsed command-line config providing
+            ``diagnostic_params`` and ``tic_id``.
+
+        pdf:            ``PdfPages`` object to save the figure to.
+    """
+
+    percentiles = numpy.arange(1, 100)
+
+    fig, axes = setup_diagnostic_figure(config)
+
+    for ax, param in zip(axes, config.diagnostic_params):
+        quantile_vals = numpy.percentile(orig_data[param].values, percentiles)
+        release_vals = numpy.array(release_data[param])
+        release_fractions = (
+            numpy.searchsorted(numpy.sort(release_vals), quantile_vals)
+            / len(release_vals)
+            * 100.0
+        )
+
+        ax.plot(percentiles, release_fractions - percentiles)
+        ax.axhline(0, color="k", linewidth=0.5)
+        ax.set_xlabel("expected percentile")
+        ax.set_ylabel("release - expected [pp]")
+        ax.set_title(param, fontsize="medium")
+
+    fig.tight_layout()
+    pdf.savefig(fig)
+    pyplot.close(fig)
 
 
 def create_release(config):
@@ -200,9 +253,12 @@ def create_release(config):
         log_prob[burnin::thin, :].flatten() * u.dimensionless_unscaled,
         name="log_prob",
     )
-    plot_release_cdf(
-        plot_data.iloc[burnin * num_walkers :], release_data, config
-    )
+    orig_data = plot_data.iloc[burnin * num_walkers :]
+    pdf_fname = config.release_fname.replace(".fits", "_diag.pdf")
+    with PdfPages(pdf_fname) as pdf:
+        plot_release_cdf(orig_data, release_data, config, pdf)
+        plot_release_quantile_diff(orig_data, release_data, config, pdf)
+    print(f"Diagnostic plots saved to: {pdf_fname!r}")
     ensure_directory(config.release_fname)
     print(f"Release data stats: {release_data.info(['attributes', 'stats'])}")
     release_data.write(config.release_fname, format="fits", overwrite=True)
