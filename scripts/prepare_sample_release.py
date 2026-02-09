@@ -72,6 +72,7 @@ def parse_command_line():
 
     parser.add_argument(
         "--release-num-steps",
+        type=int,
         default=1024,
         help="The number of steps to include in the release. Note that for each"
         " step there will be many walkers.",
@@ -233,7 +234,10 @@ def create_release(config):
     num_walkers = backend.shape[0]
 
     burnin = get_burnin(plot_data, num_steps, num_walkers, config)
-    print(f"Burn-in for {config.tic_id}: {burnin}")
+    print(
+        f"Burn-in for {config.tic_id}: {burnin!r} out of {num_steps!r} steps, "
+        f"deciding thinning to release {config.release_num_steps!r} steps."
+    )
     thin = (num_steps - burnin) // config.release_num_steps
     if thin == 0:
         raise ValueError(
