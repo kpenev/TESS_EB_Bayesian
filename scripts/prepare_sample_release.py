@@ -127,9 +127,7 @@ def setup_diagnostic_figure(config):
     ncols = min(3, len(params))
     nrows = (len(params) + ncols - 1) // ncols
 
-    fig, axes = pyplot.subplots(
-        nrows, ncols, figsize=(5 * ncols, 4 * nrows)
-    )
+    fig, axes = pyplot.subplots(nrows, ncols, figsize=(5 * ncols, 4 * nrows))
     axes = numpy.atleast_1d(axes).flatten()
 
     for ax in axes[len(params) :]:
@@ -139,7 +137,7 @@ def setup_diagnostic_figure(config):
     return fig, axes
 
 
-def plot_release_cdf(orig_data, release_data, config, pdf):
+def plot_release_cdf(orig_data, release_data, config, pdf, max_points=1000):
     """
     Plot cumulative distributions comparing all post-burnin samples to release.
 
@@ -166,6 +164,11 @@ def plot_release_cdf(orig_data, release_data, config, pdf):
 
         full_cdf = numpy.arange(1, len(full_vals) + 1) / len(full_vals)
         release_cdf = numpy.arange(1, len(release_vals) + 1) / len(release_vals)
+
+        if full_vals.size > max_points:
+            full_thin = full_vals.size // max_points
+            full_vals = full_vals[::full_thin]
+            full_cdf = full_cdf[::full_thin]
 
         ax.plot(full_vals, full_cdf, label="full chain")
         ax.plot(release_vals, release_cdf, label="release", linestyle="--")
