@@ -90,6 +90,7 @@ def get_burnin(plot_data, num_steps, num_walkers, config):
     try:
         return int(get_burnin.burnin.loc[config.tic_id])
     except KeyError:
+        print(f"No cached burnin found for TIC {config.tic_id}, estimating...")
         burnin = 0
         for column in config.diagnostic_params:
             for cdf_value in config.diagnostic_quantiles:
@@ -229,11 +230,13 @@ def plot_release_quantile_diff(orig_data, release_data, config, pdf):
 def create_release(config):
     """Create the release of a single TIC ID."""
 
+    max_steps = 100000
     plot_data, blobs, log_prob, _, backend = get_plot_data(
         config,
         None,
+        max_steps
     )
-    num_steps = backend.iteration
+    num_steps = min(backend.iteration, max_steps)
     num_walkers = backend.shape[0]
 
     burnin = get_burnin(plot_data, num_steps, num_walkers, config)
@@ -260,11 +263,12 @@ def create_release(config):
         log_prob[burnin::thin, :].flatten() * u.dimensionless_unscaled,
         name="log_prob",
     )
-    orig_data = plot_data.iloc[burnin * num_walkers :]
+    print("Generating diagnostic plots")
+    plot_data = plot_data.iloc[burnin * num_walkers :]
     pdf_fname = config.release_fname.replace(".fits", "_diag.pdf")
     with PdfPages(pdf_fname) as pdf:
-        plot_release_cdf(orig_data, release_data, config, pdf)
-        plot_release_quantile_diff(orig_data, release_data, config, pdf)
+        plot_release_cdf(plot_data, release_data, config, pdf)
+        plot_release_quantile_diff(plot_data, release_data, config, pdf)
     print(f"Diagnostic plots saved to: {pdf_fname!r}")
     ensure_directory(config.release_fname)
     print(f"Release data stats: {release_data.info(['attributes', 'stats'])}")

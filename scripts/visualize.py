@@ -1115,7 +1115,7 @@ def get_model_binaries(
     return result
 
 
-def get_plot_data(config, log_likelihood):
+def get_plot_data(config, log_likelihood, max_steps=numpy.inf):
     """Return the data required to generate the plots spceified by config."""
 
     num_iterations = 0
@@ -1133,7 +1133,7 @@ def get_plot_data(config, log_likelihood):
             )
 
             if backend.iteration > 0:
-                num_iterations += backend.iteration
+                num_iterations += min(backend.iteration, max_steps)
                 if config.burn_in >= 0:
                     if raw_data is None:
                         raw_data = backend.get_blobs(
@@ -1162,6 +1162,12 @@ def get_plot_data(config, log_likelihood):
                             ),
                             axis=0,
                         )
+            if raw_data.shape[0] > max_steps:
+                print(
+                    f"Raw data too large, leaving only last {max_steps} steps."
+                )
+                raw_data = raw_data[-max_steps:]
+                log_prob = log_prob[-max_steps:]
             print(
                 f"Read chain {chain_name}. Now raw_data shape: "
                 f"{raw_data.shape if raw_data is not None else None}, "
@@ -1171,6 +1177,7 @@ def get_plot_data(config, log_likelihood):
             if chain_name == "mcmc":
                 break
         if raw_data is not None:
+            print("Formatting plot data")
             plot_data = pandas.DataFrame(
                 raw_data[: num_iterations // config.thin, :, :]
                 .flatten()
@@ -1181,10 +1188,15 @@ def get_plot_data(config, log_likelihood):
                 ),
                 columns=SampleParams._fields,
             )
+            print(f"Calculating shifted log-prob from shape {log_prob.shape}")
             sub_log_prob = log_prob[
                 : num_iterations // config.thin, :
             ].flatten()
-            sub_log_prob -= sub_log_prob[numpy.isfinite(sub_log_prob)].min()
+            print(f"Applying shift on {sub_log_prob.shape} shaped array")
+            min_log_prob = sub_log_prob[numpy.isfinite(sub_log_prob)].min()
+            print(f"Subtracting minimum {min_log_prob}")
+            sub_log_prob -= min_log_prob
+            print("Inserting log-probability")
             plot_data.insert(
                 0,
                 "logprob",
@@ -1228,6 +1240,7 @@ def get_plot_data(config, log_likelihood):
             selected.flatten(),
         )
 
+    print("Returning plot and raw data")
     return plot_data, raw_data, log_prob, selected, backend
 
 
