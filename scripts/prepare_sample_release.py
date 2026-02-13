@@ -230,12 +230,7 @@ def plot_release_quantile_diff(orig_data, release_data, config, pdf):
 def create_release(config):
     """Create the release of a single TIC ID."""
 
-    max_steps = 100000
-    plot_data, blobs, log_prob, _, backend = get_plot_data(
-        config,
-        None,
-        max_steps
-    )
+    plot_data, blobs, log_prob, _, backend = get_plot_data(config, None)
     num_steps = min(backend.iteration, max_steps)
     num_walkers = backend.shape[0]
 

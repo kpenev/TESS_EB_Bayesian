@@ -11,15 +11,12 @@ _states = list(
             "bad",
             "continue",
             "fix",
-            "old_finished",
-            "old_ls6_sampling",
-            "old_juno_sampling",
             "changed_likelihood",
             "finished",
         ],
         start=1
     )
-) + [(100, "fix_attempt")]
+)
 
 
 def get_review_urls(mode, table_name, states):
