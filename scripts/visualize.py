@@ -57,6 +57,13 @@ def parse_command_line():
         "sampling continues, adding more points to the existing chain.",
     )
     parser.add_argument(
+        "--max-plot-steps",
+        type=int,
+        default=100000,
+        help="If the chain contains more than this many steps, only the last "
+        "--max-plot-steps are used for plotting.",
+    )
+    parser.add_argument(
         "--chain-name",
         default="mcmc",
         help="The name of the HDF5 group containin the MCMC chain to "
@@ -1115,13 +1122,16 @@ def get_model_binaries(
     return result
 
 
-def get_plot_data(config, log_likelihood, max_steps=numpy.inf):
+def get_plot_data(  # pylint: disable=too-many-statements
+    config, log_likelihood
+):
     """Return the data required to generate the plots spceified by config."""
 
     num_iterations = 0
     raw_data = None
     log_prob = None
     selected = None
+    max_steps = getattr(config, "max_plot_steps", 100000)
 
     with h5py.File(config.samples_fname, "r") as samples_f:
         for chain_ind in [None] if config.chain_name else count():
