@@ -363,7 +363,7 @@ def prepare_restart(backend):
                 chain_name = f"prelim_mcmc_{prelim}"
                 if chain_name not in samples_f:
                     samples_f.move("mcmc", chain_name)
-                break
+                    break
 
     _logger.info(
         "Restarting sampling. Last step log-likelihood spread: %s. Choosing top"
