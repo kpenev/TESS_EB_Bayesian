@@ -1155,7 +1155,9 @@ def get_plot_data(  # pylint: disable=too-many-statements
             )
 
             if backend.iteration > 0:
-                num_iterations += min(backend.iteration, max_steps)
+                num_iterations += min(
+                    backend.iteration - config.burn_in, max_steps
+                )
                 burn_in = max(
                     config.burn_in, backend.iteration - num_iterations
                 )
@@ -1201,7 +1203,7 @@ def get_plot_data(  # pylint: disable=too-many-statements
                 raw_data[: num_iterations // config.thin, :, :]
                 .flatten()
                 .reshape(
-                    ((num_iterations - burn_in) // config.thin)
+                    (num_iterations // config.thin)
                     * backend.shape[0],
                     backend.shape[1],
                 ),
