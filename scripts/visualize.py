@@ -179,6 +179,14 @@ def parse_command_line():
         " specified in ``--chain-expression``.",
     )
     parser.add_argument(
+        '--check-pickled',
+        action='store_true',
+        help="If specified, the pickled convergence data is checked for "
+        "consistency with the current configuration and reused if consistent, "
+        "or computed and pickle if no match is found. If not specified, any "
+        "pickled convergence data is ignored.",
+    )
+    parser.add_argument(
         "--sample-condition",
         default=None,
         help="Condition to impose on the samples, excluding those which do not "
@@ -463,13 +471,14 @@ def create_corner_plot(
 def get_convergence_data(plot_data, config, num_walkers):
     """Prepare the data needed for the convergence plot."""
 
-    pickler = get_pickler("convergence_data.pickle")
-    num_steps = plot_data.shape[0] // num_walkers
-    assert num_walkers * num_steps == plot_data.shape[0]
-    config.num_steps = num_steps
-    pickled = pickler.check_for_pickled(config)
-    if pickled is not None:
-        return pickled[0]
+    if config.check_pickled:
+        pickler = get_pickler("convergence_data.pickle")
+        num_steps = plot_data.shape[0] // num_walkers
+        assert num_walkers * num_steps == plot_data.shape[0]
+        config.num_steps = num_steps
+        pickled = pickler.check_for_pickled(config)
+        if pickled is not None:
+            return pickled[0]
 
     num_entries = len(plot_data.columns) * len(config.diagnostic_quantiles)
     print(f"Initializing convergence data with {num_entries} entries")
@@ -529,7 +538,9 @@ def get_convergence_data(plot_data, config, num_walkers):
                     convergence_data["thin"][result_ind],
                 ) = quantile_info[1:]
             result_ind += 1
-    pickler.add_result(config, convergence_data)
+
+    if config.check_pickled:
+        pickler.add_result(config, convergence_data)
 
     return convergence_data
 
