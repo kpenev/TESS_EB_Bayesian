@@ -179,8 +179,8 @@ def parse_command_line():
         " specified in ``--chain-expression``.",
     )
     parser.add_argument(
-        '--check-pickled',
-        action='store_true',
+        "--check-pickled",
+        action="store_true",
         help="If specified, the pickled convergence data is checked for "
         "consistency with the current configuration and reused if consistent, "
         "or computed and pickle if no match is found. If not specified, any "
@@ -471,10 +471,11 @@ def create_corner_plot(
 def get_convergence_data(plot_data, config, num_walkers):
     """Prepare the data needed for the convergence plot."""
 
-    if config.check_pickled:
+    num_steps = plot_data.shape[0] // num_walkers
+    assert num_walkers * num_steps == plot_data.shape[0]
+
+    if getattr(config, "check_pickled", False):
         pickler = get_pickler("convergence_data.pickle")
-        num_steps = plot_data.shape[0] // num_walkers
-        assert num_walkers * num_steps == plot_data.shape[0]
         config.num_steps = num_steps
         pickled = pickler.check_for_pickled(config)
         if pickled is not None:
@@ -539,7 +540,7 @@ def get_convergence_data(plot_data, config, num_walkers):
                 ) = quantile_info[1:]
             result_ind += 1
 
-    if config.check_pickled:
+    if getattr(config, "check_pickled", False):
         pickler.add_result(config, convergence_data)
 
     return convergence_data
@@ -1155,13 +1156,16 @@ def get_plot_data(  # pylint: disable=too-many-statements
 
             if backend.iteration > 0:
                 num_iterations += min(backend.iteration, max_steps)
+                burn_in = max(
+                    config.burn_in, backend.iteration - num_iterations
+                )
                 if config.burn_in >= 0:
                     if raw_data is None:
                         raw_data = backend.get_blobs(
-                            discard=config.burn_in, thin=config.thin
+                            discard=burn_in, thin=config.thin
                         )
                         log_prob = backend.get_log_prob(
-                            discard=config.burn_in, thin=config.thin
+                            discard=burn_in, thin=config.thin
                         )
 
                     else:
@@ -1169,7 +1173,7 @@ def get_plot_data(  # pylint: disable=too-many-statements
                             (
                                 raw_data,
                                 backend.get_blobs(
-                                    discard=config.burn_in, thin=config.thin
+                                    discard=burn_in, thin=config.thin
                                 ),
                             ),
                             axis=0,
@@ -1178,17 +1182,11 @@ def get_plot_data(  # pylint: disable=too-many-statements
                             (
                                 log_prob,
                                 backend.get_log_prob(
-                                    discard=config.burn_in, thin=config.thin
+                                    discard=burn_in, thin=config.thin
                                 ),
                             ),
                             axis=0,
                         )
-            if raw_data.shape[0] > max_steps:
-                print(
-                    f"Raw data too large, leaving only last {max_steps} steps."
-                )
-                raw_data = raw_data[-max_steps:]
-                log_prob = log_prob[-max_steps:]
             print(
                 f"Read chain {chain_name}. Now raw_data shape: "
                 f"{raw_data.shape if raw_data is not None else None}, "
@@ -1203,7 +1201,7 @@ def get_plot_data(  # pylint: disable=too-many-statements
                 raw_data[: num_iterations // config.thin, :, :]
                 .flatten()
                 .reshape(
-                    ((num_iterations - config.burn_in) // config.thin)
+                    ((num_iterations - burn_in) // config.thin)
                     * backend.shape[0],
                     backend.shape[1],
                 ),
@@ -1249,11 +1247,6 @@ def get_plot_data(  # pylint: disable=too-many-statements
                 }
             )
         )(config.sample_condition).reshape(num_iterations, backend.shape[0])
-
-        if config.burn_in >= 0:
-            selected = selected[
-                config.burn_in : num_iterations : config.thin, :
-            ]
 
         plot_data.insert(
             0,
