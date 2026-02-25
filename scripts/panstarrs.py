@@ -38,6 +38,7 @@ def ps1search(
             required!
     """
 
+    print('Searching PS1 with parameters: %s' % repr(kw))
     data = kw.copy()
     if not data:
         raise ValueError("You must specify some parameters for search")
@@ -64,12 +65,14 @@ def ps1search(
         data["columns"] = f"[{','.join(columns)}]"
         _logger.debug("Querying with columns: %s", repr(data["columns"]))
 
+    print(f"Submitting request url: {url} with params: {repr(data)}")
     # either get or post works
     #    r = requests.post(url, data=data)
     r = requests.get(url, params=data, timeout=300)
 
     _logger.debug("Query URL: %s", r.url)
     r.raise_for_status()
+    print(f"PS1 query successful, got: {r.json()}")
     if fmt == "json":
         return r.json()
     return r.text
@@ -145,6 +148,7 @@ def get_panstarrs_mags(gaia_id, phot_mode="MeanPSFMag", filters="grizy"):
         "SELECT original_ext_source_id FROM "
         "gaiadr3.panstarrs1_best_neighbour WHERE source_id = " + str(gaia_id)
     ).get_results()["original_ext_source_id"]
+    print(f"PS1 ID for Gaia ID {gaia_id}: {ps1_id}")
     if ps1_id.size == 0:
         return (
             [numpy.nan] * len(filters),

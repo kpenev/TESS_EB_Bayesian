@@ -5,6 +5,7 @@
 from glob import glob
 from os import path
 import logging
+from time import sleep
 
 import numpy
 import h5py
@@ -77,9 +78,7 @@ def get_gaia_distance(gaia_id):
             for quant in quantiles
         ]
     )
-    if numpy.isfinite(result).all():
-        return result
-    return None
+    return result
 
 
 class Green19Correction:
@@ -91,7 +90,7 @@ class Green19Correction:
         gaia_id = int(tic_entry["GAIA"])
         distance = get_gaia_distance(gaia_id)
         if distance is None:
-            raise RuntimeError(
+            raise ValueError(
                 "No distance found for TIC ID: "
                 f"{tic_entry['ID']} (Gaia ID: {gaia_id})"
             )
@@ -178,9 +177,24 @@ class Green19Correction:
     def _get_tic_info(self, tic_entry):
         """Return stellar and extinction parameters for the given TIC entry."""
 
-        result = self._get_magnitudes(tic_entry)
-        result["percentiles"] = self._evaluate_bayestar_map(tic_entry)
-        return result
+        for i in range(10):
+            try:
+                result = self._get_magnitudes(tic_entry)
+                result["percentiles"] = self._evaluate_bayestar_map(tic_entry)
+                return result
+            except:  # pylint: disable=bare-except
+                _logger.warning(
+                    "Collecting SED information failed for for TIC ID %s "
+                    "(Gaia ID: %s), attempt %s/10.",
+                    tic_entry["ID"],
+                    tic_entry["GAIA"],
+                    i + 1,
+                    exc_info=True,
+                )
+                sleep(120)
+                if i == 9:
+                    raise
+        assert False
 
         # pylint: disable=line-too-long
         # gal_coords = SkyCoord(
@@ -314,4 +328,4 @@ class Green19Correction:
 
 
 if __name__ == "__main__":
-    print(repr(Green19Correction(True).get_absolute_magnitudes(189639080)))
+    print(repr(Green19Correction(True).get_absolute_magnitudes(91961)))
