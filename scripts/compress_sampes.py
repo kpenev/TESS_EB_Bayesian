@@ -4,6 +4,7 @@
 
 import subprocess
 import os
+import shutil
 from multiprocessing import Pool
 
 import h5py
@@ -22,8 +23,11 @@ def truncate(fname):
     assert fname.endswith(
         ".h5"
     ), "Input file must be an HDF5 file with .h5 extension."
+
+    trunc_fname = fname[:-3] + "_truncated.h5"
+    shutil.copy2(fname, trunc_fname)
     chains_found = []
-    with h5py.File(fname, "r+") as f:
+    with h5py.File(trunc_fname, "r+") as f:
         for chain in f:
             chains_found.append(chain)
             iterations = f[chain].attrs["iteration"]
@@ -35,41 +39,41 @@ def truncate(fname):
                 print(f"{dset} has shape: {f[chain][dset].shape}")
                 f[chain][dset].resize((iterations, *f[chain][dset].shape[1:]))
                 print("Truncating")
-    return chains_found
+    return trunc_fname, chains_found
 
 
 def repack(fname):
     """Repark the file to reduce file size."""
 
+    repacked_fname = fname[:-3] + "_repacked.h5"
     repack_cmd = [
         "h5repack",
         "-f",
         "GZIP=9",
         fname,
-        fname[:-3] + "_truncated.h5",
+        repacked_fname,
     ]
     print(f"Repacking command: {repack_cmd}")
     print("Repacking ...")
     subprocess.run(repack_cmd, check=True)
+    print(f"Overwriting: {repacked_fname!r} -> {fname!r}")
+    os.replace(repacked_fname, fname)
 
 
-def verify(fname, chains_expected):
+def verify(orig_fname, repacked_fname, chains_expected):
     """Verify that the truncated file data is identical to original."""
 
-    print("Verifying ...")
+    print(f"Verifying {orig_fname!r} vs {repacked_fname!r}.")
     for chain in chains_expected:
-        try:
-            os.remove(fname[:-3] + ".unsaved_steps")  # unsaved steps
-        except FileNotFoundError:
-            pass
-        try:
-            os.remove(fname[:-3] + "_truncated.unsaved_steps")  # unsaved steps
-        except FileNotFoundError:
-            pass
+        for fname in [orig_fname, repacked_fname]:
+            try:
+                os.remove(fname[:-3] + ".unsaved_steps")  # unsaved steps
+            except FileNotFoundError:
+                pass
 
         backends = {
-            "original": HDFBackend(fname, name=chain),
-            "truncated": HDFBackend(fname[:-3] + "_truncated.h5", name=chain),
+            "original": HDFBackend(orig_fname, name=chain),
+            "truncated": HDFBackend(repacked_fname, name=chain),
         }
         assert (
             backends["original"].iteration == backends["truncated"].iteration
@@ -90,15 +94,16 @@ def verify(fname, chains_expected):
             backends["original"].get_blobs()
             == backends["truncated"].get_blobs()
         ).all(), f"Blobs data mismatch for chain {chain}"
+        print(f"Verified chain {chain}")
 
 
 def process(fname):
     """Process the file by truncating, repacking, and verifying."""
 
-    chains_expected = truncate(fname)
-    repack(fname)
-    verify(fname, chains_expected)
-    os.replace(fname[:-3] + "_truncated.h5", fname)
+    trunc_fname, chains_expected = truncate(fname)
+    repack(trunc_fname)
+    verify(fname, trunc_fname, chains_expected)
+    os.replace(trunc_fname, fname)
     print(f"Finished processing {fname}.")
 
 
