@@ -9,7 +9,7 @@ import logging
 import numpy
 import h5py
 from astroquery.mast import Catalogs
-from astroquery.gaia import Gaia
+from astroquery.gaia import GaiaClass
 from astropy.coordinates import SkyCoord
 from astropy import units
 from healpy import pixelfunc
@@ -60,22 +60,25 @@ def get_last_healpix(fname):
 def get_gaia_distance(gaia_id):
     """Return 50-th, 16-th, & 84-th pencentiles of the Gaia distance estimate"""
 
-    gaia_distance_entry = Gaia.launch_job(
-        "SELECT * FROM external.gaiaedr3_distance WHERE source_id = "
-        + str(gaia_id)
+    gaia = GaiaClass()
+    gaia_distance_entry = gaia.launch_job_async(
+        "SELECT distance_gspphot_lower, distance_gspphot, "
+        "distance_gspphot_upper FROM gaiadr3.gaia_source WHERE source_id = "
+        f"{gaia_id};",
+        verbose=True,
     ).get_results()
+    print("Gaia distance entry: ", gaia_distance_entry)
     if len(gaia_distance_entry) == 0:
         return None
-    quantiles = ["lo", "med", "hi"]
-    for mode in ["photogeo", "geo"]:
-        result = numpy.array(
-            [
-                float(gaia_distance_entry[f"r_{quant}_{mode}"])
-                for quant in quantiles
-            ]
-        )
-        if numpy.isfinite(result).all():
-            return result
+    quantiles = ["_lower", "", "_upper"]
+    result = numpy.array(
+        [
+            float(gaia_distance_entry[f"distance_gspphot{quant}"])
+            for quant in quantiles
+        ]
+    )
+    if numpy.isfinite(result).all():
+        return result
     return None
 
 

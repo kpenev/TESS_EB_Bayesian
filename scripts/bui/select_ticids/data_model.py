@@ -82,6 +82,7 @@ def set_rendered(RenderedTable, plot_dirs):  # pylint: disable=invalid-name
         db_session.execute(delete(RenderedTable))
 
         for plot_dir in plot_dirs:
+            print("Setting rendered for plots in directory:", plot_dir)
             db_session.execute(
                 insert(RenderedTable),
                 [

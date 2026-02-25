@@ -282,16 +282,25 @@ def get_tics_to_render(config):
     # pylint: disable=no-member
     # This is actually a class
     # pylint: disable=invalid-name
-    SelectTICIDs = get_ticid_select_tables(
-        config.table_name, refresh_rendered=not config.skip_rendered
-    )[0]
+    SelectTICIDs, RenderedTable = get_ticid_select_tables(
+        config.table_name,
+        plot_dirs=(config.plot_dir.format(config=config),),
+        refresh_rendered=True
+    )
     # pylint: enable=no-member
     # pylint: enable=invalid-name
 
     if config.manual_tics is not None:
         return config.manual_tics
 
-    selection = select(SelectTICIDs.id)  # pylint: disable=no-member
+    selection = select(SelectTICIDs.id).join(
+        RenderedTable,
+        and_(
+            SelectTICIDs.id == RenderedTable.id,
+            RenderedTable.plot == config.plot_type,
+        ),
+        isouter=True,
+    )
     if config.limit_to_statuses:
         selection = selection.where(
             SelectTICIDs.status.in_(  # pylint: disable=no-member
@@ -303,7 +312,7 @@ def get_tics_to_render(config):
             or_(*[get_job_clause(job_str) for job_str in config.limit_to_jobs])
         )
     if config.skip_rendered:
-        selection = selection.filter_by(rendered=0)
+        selection = selection.where(RenderedTable.id == None)
 
     with Session.begin() as db_session:  # pylint: disable=no-member
         # pylint: enable=no-member
@@ -314,7 +323,9 @@ def get_tics_to_render(config):
         )[config.start :]
 
     if config.plot_type in ["starting", "best", "convergence"]:
-        print("Restricting TIC IDs to existing samples files.")
+        print(
+            f"Restricting {len(tic_id_list)} TIC IDs to existing samples files."
+        )
         tic_id_list = [
             tic_id
             for tic_id in tic_id_list
@@ -393,9 +404,9 @@ def parse_command_line():
         default=16,
     )
     parser.add_argument(
-        '--manual-tics',
+        "--manual-tics",
         type=int,
-        nargs='+',
+        nargs="+",
         default=None,
         help="If given, render plots for exactly these TIC IDs.",
     )
