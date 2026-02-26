@@ -12,6 +12,7 @@ from time import sleep
 from itertools import count
 
 from multiprocessing import Pool
+import subprocess
 import matplotlib
 from sqlalchemy import select, or_, and_
 from configargparse import ArgumentParser, DefaultsFormatter
@@ -285,7 +286,7 @@ def get_tics_to_render(config):
     SelectTICIDs, RenderedTable = get_ticid_select_tables(
         config.table_name,
         plot_dirs=(config.plot_dir.format(config=config),),
-        refresh_rendered=True
+        refresh_rendered=True,
     )
     # pylint: enable=no-member
     # pylint: enable=invalid-name
@@ -312,7 +313,9 @@ def get_tics_to_render(config):
             or_(*[get_job_clause(job_str) for job_str in config.limit_to_jobs])
         )
     if config.skip_rendered:
-        selection = selection.where(RenderedTable.id == None)
+        selection = selection.where(
+            RenderedTable.id == None  # pylint: disable=singleton-comparison
+        )
 
     with Session.begin() as db_session:  # pylint: disable=no-member
         # pylint: enable=no-member
@@ -323,6 +326,12 @@ def get_tics_to_render(config):
         )[config.start :]
 
     if config.plot_type in ["starting", "best", "convergence"]:
+        sample_fnames = [
+            config.samples_fname_template.format(tic_id=tic_id)
+            for tic_id in tic_id_list
+        ]
+        if config.auto_download:
+            download_samples(sample_fnames)
         print(
             f"Restricting {len(tic_id_list)} TIC IDs to existing samples files."
         )
@@ -364,6 +373,42 @@ def render_all_plots(config):
     else:
         for tic_id in tic_id_list:
             render_func(tic_id)
+
+
+def download_samples(fnames):
+    """Download the given files from juno and vista."""
+
+    destination = {path.dirname(f) for f in fnames}
+    assert (
+        len(destination) == 1
+    ), "Downloading only supported for files in single directory"
+    destination = destination.pop()
+
+    if not path.exists(destination):
+        makedirs(destination)
+
+    for source in [
+        "kxp174430@juno:/scratch/juno/kxp174430/TESS_EBs/juno/samples/",
+        "vista.tacc.utexas.edu:/scratch/05392/kpenev/TESS_EBs/vista/samples/",
+    ]:
+        fnames = [f for f in fnames if not path.exists(f)]
+        if not fnames:
+            break
+        rsync_list_fname = path.join(destination, "need_samples.txt")
+        with open(rsync_list_fname, "w", encoding="utf-8") as rsync_list:
+            rsync_list.write("\n".join([path.basename(f) for f in fnames]))
+        subprocess.run(
+            [
+                "rsync",
+                "--files-from",
+                rsync_list_fname,
+                source,
+                destination,
+                "-avz",
+                "--progress",
+            ],
+            check=True,
+        )
 
 
 def parse_command_line():
@@ -485,6 +530,11 @@ def parse_command_line():
         default=default_logging_format,
         help="How to format logging messages. See python logging module "
         "documentation for details.",
+    )
+    parser.add_argument(
+        "--auto-download",
+        help="If passed, rsync from juno and vista is automatically triggeresd "
+        "for any TIC that is missing samples file.",
     )
 
     return parser.parse_args()
