@@ -82,14 +82,19 @@ def set_rendered(RenderedTable, plot_dirs):  # pylint: disable=invalid-name
         db_session.execute(delete(RenderedTable))
 
         for plot_dir in plot_dirs:
-            print("Setting rendered for plots in directory:", plot_dir)
-            db_session.execute(
-                insert(RenderedTable),
-                [
-                    {"id": tic_id, "plot": parse_render_dir(plot_dir)[1]}
-                    for tic_id in get_ticids(plot_dir)
-                ],
+            rendered_tics = list(get_ticids(plot_dir))
+            print(
+                f"Setting {len(rendered_tics)} rendered plots in directory: "
+                f"{plot_dir!r}"
             )
+            if rendered_tics:
+                db_session.execute(
+                    insert(RenderedTable),
+                    [
+                        {"id": tic_id, "plot": parse_render_dir(plot_dir)[1]}
+                        for tic_id in rendered_tics
+                    ],
+                )
 
 
 def get_ticid_select_tables(
