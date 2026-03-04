@@ -19,7 +19,7 @@ class LogLikelihoodVisualize(LogLikelihood):
         super()._add_eclipse_flags(*args)
 
         for header, lightcurve in self._lcs:
-            porb = header["bls_period"]
+            porb = header["porb"]
             for eclipse_flag in numpy.unique(lightcurve["eclipse_flags"]):
                 pyplot.plot(
                     lightcurve["time"][
@@ -87,8 +87,8 @@ class LogLikelihoodVisualize(LogLikelihood):
             eclipse_mask = lightcurve["eclipse_flags"] == eclipse_flag
             pyplot.plot(
                 lightcurve["time"][eclipse_mask]
-                % header["bls_period"]
-                / header["bls_period"],
+                % header["porb"]
+                / header["porb"],
                 lightcurve["flux"][eclipse_mask],
                 "o",
                 zorder=10,
@@ -96,8 +96,8 @@ class LogLikelihoodVisualize(LogLikelihood):
             if eclipse_model.size > 0:
                 pyplot.plot(
                     lightcurve["time"][eclipse_mask]
-                    % header["bls_period"]
-                    / header["bls_period"],
+                    % header["porb"]
+                    / header["porb"],
                     eclipse_model[eclipse_mask[model_mask]],
                     "-k",
                     zorder=20,
