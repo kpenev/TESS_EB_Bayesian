@@ -3,6 +3,7 @@
 import numpy
 from numpy.lib.recfunctions import append_fields
 from scipy.optimize import minimize_scalar
+from scipy.integrate import solve_ivp
 
 from binary import Binary
 from log_likelihood import LogLikelihood
@@ -46,19 +47,27 @@ class MeasureETV(LogLikelihood):
         start_phase = (t_start % porb) / porb
         return start_phase, duration
 
+    def _find_near_eclipse_ranges(self, pad_duration):
+        """Return the start phase & duration near primary/secondary eclipses."""
+
+        near_eclipse_ranges = []
+        for best_binary in self._best_binaries:
+            max_etv_phase = self._max_abs_etv / best_binary.per
+            start_phase, duration = self._get_eclipse_range(best_binary)
+            start_phase -= pad_duration * duration + max_etv_phase
+            duration += 2 * pad_duration * duration + 2 * max_etv_phase
+            near_eclipse_ranges.append(
+                (start_phase, duration)
+            )
+        return near_eclipse_ranges
+
+
     def _add_eclipse_flags(self, pad_duration):
         """Add flags to the LCs selecting only and all points near eclipses."""
 
         porb = self._best_binaries[0].per
-        near_eclipse_ranges = []
+        near_eclipse_ranges = self._find_near_eclipse_ranges(pad_duration)
         max_duration = 0.0
-
-        for best_binary in self._best_binaries:
-            start_phase, duration = self._get_eclipse_range(best_binary)
-            start_phase -= pad_duration * duration
-            max_duration = max(max_duration, duration)
-            duration *= 1 + 2 * pad_duration
-            near_eclipse_ranges.append((start_phase, duration))
 
         for lc_ind, (header, lightcurve) in enumerate(self._lcs):
             lightcurve = append_fields(
@@ -72,6 +81,7 @@ class MeasureETV(LogLikelihood):
             for (start_phase, duration), sign in zip(
                 near_eclipse_ranges, [1, -1]
             ):
+                max_duration = max(max_duration, duration)
                 shifted_time = lightcurve["time"] - start_phase * porb
                 near_eclipses = shifted_time % porb / porb < duration
                 period_ind = numpy.floor(shifted_time / porb).astype(int)
@@ -85,7 +95,7 @@ class MeasureETV(LogLikelihood):
         """Remove the OOE variability of the lightcurve and flag eclipses."""
 
         max_eclipse_duration = self._add_eclipse_flags(
-            kwargs.get("pad_duration", 0.4)
+            kwargs.get("pad_duration", 0.0)
         )
         for lc_ind, (header, lightcurve) in enumerate(self._lcs):
             self._lcs[lc_ind] = (
@@ -105,7 +115,7 @@ class MeasureETV(LogLikelihood):
             )
 
     def _get_observed_eclipses(self, eclipse_indices):
-        """Return lightcurve and model of selected eclipse indices."""
+        """Return the lightcurve near selected eclipse indices."""
 
         observed_lc = None
         exptime = None
@@ -152,7 +162,7 @@ class MeasureETV(LogLikelihood):
             1.0 + secondary_flux_fraction
         )
 
-    def __init__(self, tic_id, best_params, **kwargs):
+    def __init__(self, tic_id, best_params, max_abs_etv, **kwargs):
         """
         Prepare ETV measurement using max-likelihood parameters.
 
@@ -166,25 +176,8 @@ class MeasureETV(LogLikelihood):
         ]
         self._best_binaries[1].swap_components()
         self._lc_sys_err = best_params.lc_sys
+        self._max_abs_etv = max_abs_etv
         super().__init__(tic_id, **kwargs)
-
-    def fit_timeshift(self, eclipse_indices):
-        """Find the best-fit common time shift for the given eclipses."""
-
-        bound = (self._best_binaries[1].t0 - self._best_binaries[0].t0) / 2
-        if bound > 0:
-            assert bound < self._best_binaries[0].per / 2
-            bracket = numpy.array(
-                [bound - self._best_binaries[0].per / 2, 0.0, bound]
-            )
-        else:
-            assert bound > -self._best_binaries[0].per / 2
-            bracket = numpy.array(
-                [bound, 0.0, bound + self._best_binaries[0].per / 2]
-            )
-        return minimize_scalar(
-            self.sum_sq_residuals, bracket, args=(eclipse_indices,)
-        )
 
     def sum_sq_residuals(self, time_shift, eclipse_indices):
         """Sum-square residuals for selected eclipses given a time shift."""
@@ -201,3 +194,38 @@ class MeasureETV(LogLikelihood):
 
         lc_sq_errors = observed_lc["flux_err"] ** 2 + self._lc_sys_err**2
         return ((observed_lc["flux"] - model_lc) ** 2 / lc_sq_errors).sum()
+
+    def likelihood(self, time_shift, eclipse_indices):
+        """Return the unnormalized likelihood (not log) of given timeshit."""
+
+        return numpy.exp(-self.sum_sq_residuals(time_shift, eclipse_indices))
+
+    def fit_timeshift(self, eclipse_indices):
+        """Find the best-fit common time shift for the given eclipses."""
+
+        return minimize_scalar(
+            self.sum_sq_residuals,
+            (
+                -self._max_abs_etv,
+                0.0,
+                self._max_abs_etv,
+            ),
+            args=(eclipse_indices,),
+        )
+
+    def find_timeshift_cdf(self, eclipse_indices):
+        """Calculate the CDF of the time shift for selected eclipses."""
+
+        best_fit_shift = self.fit_timeshift(eclipse_indices)
+        above_integral = solve_ivp(
+            self.likelihood,
+            (best_fit_shift, self._max_abs_etv),
+            0.0,
+            dense_output=True,
+        )
+        below_integral = solve_ivp(
+            self.likelihood,
+            (best_fit_shift, -self._max_abs_etv),
+            0.0,
+            dense_output=True,
+        )

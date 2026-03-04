@@ -166,15 +166,17 @@ if __name__ == "__main__":
     top_params = SampleParams(
         *backend.get_blobs(discard=0, thin=top_index[0] + 1)[0][top_index[1:]]
     )
-    measure_etv = MeasureETVVisualize(tic_id, top_params, pad_duration=0.1)
-    measure_etv.sum_sq_residuals(0.0, [189, 190])
+    measure_etv = MeasureETVVisualize(
+        tic_id, top_params, pad_duration=0.0, max_abs_etv=0.1
+    )
+    measure_etv.sum_sq_residuals(0.089, [189, 190])
     measure_etv.stop_plotting = True
-    timeshifts = numpy.linspace(-0.01, 0.01, 100)
+    timeshifts = numpy.linspace(-0.1, 0.1, 1000)
     logprob = [
         measure_etv.sum_sq_residuals(dt, [189, 190]) for dt in timeshifts
     ]
     best_fit = measure_etv.fit_timeshift([189, 190])
-    print(f'Best fit result: {best_fit!r}')
+    print(f"Best fit result: {best_fit!r}")
     pyplot.plot(timeshifts, logprob, "-k")
     pyplot.axvline(x=best_fit.x)
     pyplot.xlabel("O-C")
