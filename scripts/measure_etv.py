@@ -1,13 +1,65 @@
 """Define a class for measuring ETVs from TESS lightcurves."""
 
+from functools import partial
+
 import numpy
 from numpy.lib.recfunctions import append_fields
 from scipy.optimize import minimize_scalar
 from scipy.integrate import solve_ivp
+from scipy.stats import rv_continuous
 
 from binary import Binary
 from log_likelihood import LogLikelihood
 from detrending import detrend_with_gaps, get_ooe_variability
+
+
+class TimeShiftDistribution(  # pylint:disable=too-many-instance-attributes
+    rv_continuous
+):
+    """Distribution of time shifts for a given set of eclipses."""
+
+    def _cdf(self, x):  # pylint: disable=arguments-differ
+        """The cumulative distribution up to the given time shift."""
+
+        x = numpy.atleast_1d(x)
+        result = numpy.empty_like(x)
+        result[x < self.a] = 0.0
+        result[x > self.b] = 1.0
+        selection = (x >= self.a) & (x <= self.mode)
+        if selection.any():
+            result[selection] = (
+                self._below_integral(x[selection])[0] - self._min_below
+            ) / self._normalization
+        selection = (x > self.mode) & (x <= self.b)
+        if selection.any():
+            result[selection] = (
+                self._above_integral(x[selection])[0] - self._min_below
+            ) / self._normalization
+        return result
+
+    def _pdf(self, x):  # pylint: disable=arguments-differ
+        """The probability density at the given time shift."""
+
+        return self._likelihood(x) / self._normalization
+
+    def __init__(
+        self,
+        *args,
+        mode,
+        likelihood,
+        above_integral,
+        below_integral,
+        **kwargs,
+    ):
+        """Define from likellihood and integrals above/below best fit O-C."""
+
+        super().__init__(*args, **kwargs)
+        self.mode = mode
+        self._likelihood = likelihood
+        self._above_integral = above_integral
+        self._below_integral = below_integral
+        self._min_below = float(below_integral(self.a))
+        self._normalization = float(above_integral(self.b)) - self._min_below
 
 
 class MeasureETV(LogLikelihood):
@@ -56,11 +108,8 @@ class MeasureETV(LogLikelihood):
             start_phase, duration = self._get_eclipse_range(best_binary)
             start_phase -= pad_duration * duration + max_etv_phase
             duration += 2 * pad_duration * duration + 2 * max_etv_phase
-            near_eclipse_ranges.append(
-                (start_phase, duration)
-            )
+            near_eclipse_ranges.append((start_phase, duration))
         return near_eclipse_ranges
-
 
     def _add_eclipse_flags(self, pad_duration):
         """Add flags to the LCs selecting only and all points near eclipses."""
@@ -119,19 +168,23 @@ class MeasureETV(LogLikelihood):
 
         observed_lc = None
         exptime = None
-        for header, lightcurve in self._lcs:
+        if set(eclipse_indices) <= self._last_eclipse_indices:
+            lc_indices = sorted(self._last_lcs_indices)
+        else:
+            lc_indices = range(len(self._lcs))
+        self._last_eclipse_indices = set(eclipse_indices)
+        self._last_lcs_indices = set()
+
+        for lc_ind in lc_indices:
+            header, lightcurve = self._lcs[lc_ind]
             included = False
             for eclipse_idx in eclipse_indices:
                 eclipse_lc = lightcurve[
                     lightcurve["eclipse_flags"] == eclipse_idx
                 ]
                 if eclipse_lc.size == 0:
-                    print(
-                        f"Sector {header['sector']} does not contain eclipse "
-                        f"{eclipse_idx}, skipping. Contained flags: "
-                        f"{numpy.unique(lightcurve['eclipse_flags'])}."
-                    )
                     continue
+                self._last_lcs_indices.add(lc_ind)
                 included = True
                 if observed_lc is None:
                     observed_lc = numpy.copy(eclipse_lc)
@@ -177,6 +230,8 @@ class MeasureETV(LogLikelihood):
         self._best_binaries[1].swap_components()
         self._lc_sys_err = best_params.lc_sys
         self._max_abs_etv = max_abs_etv
+        self._last_eclipse_indices = set()
+        self._last_lcs_indices = None
         super().__init__(tic_id, **kwargs)
 
     def sum_sq_residuals(self, time_shift, eclipse_indices):
@@ -198,6 +253,8 @@ class MeasureETV(LogLikelihood):
     def likelihood(self, time_shift, eclipse_indices):
         """Return the unnormalized likelihood (not log) of given timeshit."""
 
+        if abs(time_shift) > self._max_abs_etv:
+            return 0.0
         return numpy.exp(-self.sum_sq_residuals(time_shift, eclipse_indices))
 
     def fit_timeshift(self, eclipse_indices):
@@ -213,19 +270,36 @@ class MeasureETV(LogLikelihood):
             args=(eclipse_indices,),
         )
 
-    def find_timeshift_cdf(self, eclipse_indices):
+    def get_timeshift_distro(self, eclipse_indices):
         """Calculate the CDF of the time shift for selected eclipses."""
 
-        best_fit_shift = self.fit_timeshift(eclipse_indices)
+        best_fit_shift = self.fit_timeshift(eclipse_indices).x
+        solve_kwargs = {
+            'y0': [0.0],
+            'dense_output': True,
+            'max_step': 0.1 * max(best_fit_shift, 1/(24 * 60)),
+
+        }
+        print(f"Integrating with options: {solve_kwargs!r}")
         above_integral = solve_ivp(
-            self.likelihood,
+            lambda x, y: [self.likelihood(x, eclipse_indices)],
             (best_fit_shift, self._max_abs_etv),
-            0.0,
-            dense_output=True,
+            **solve_kwargs,
         )
         below_integral = solve_ivp(
-            self.likelihood,
+            lambda x, y: [self.likelihood(x, eclipse_indices)],
             (best_fit_shift, -self._max_abs_etv),
-            0.0,
-            dense_output=True,
+            **solve_kwargs,
+        )
+        print("Constructing distribution")
+        return TimeShiftDistribution(
+            name="ETV distribution",
+            mode=best_fit_shift,
+            likelihood=numpy.vectorize(
+                partial(self.likelihood, eclipse_indices=eclipse_indices)
+            ),
+            above_integral=above_integral.sol,
+            below_integral=below_integral.sol,
+            a=-self._max_abs_etv,
+            b=self._max_abs_etv,
         )

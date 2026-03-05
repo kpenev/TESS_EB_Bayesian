@@ -152,12 +152,52 @@ class MeasureETVVisualize(MeasureETV):
 
         return model_flux
 
+    def get_timeshift_distro(self, eclipse_indices):
+        """Show PDF and CDF of timeshifts from MCMC samples."""
+
+        stop_plotting = self.stop_plotting
+        self.stop_plotting = True
+        timeshift_distro = super().get_timeshift_distro(eclipse_indices)
+        if stop_plotting:
+            self.stop_plotting = True
+            return timeshift_distro
+
+        figure, axes = pyplot.subplots(2, 1, figsize=(12, 12), squeeze=True)
+        plot_x = numpy.linspace(
+            timeshift_distro.ppf(1e-5),
+            timeshift_distro.isf(1e-5),
+            max(
+                1000,
+                int(
+                    10.0
+                    * (timeshift_distro.b - timeshift_distro.a)
+                    / max(timeshift_distro.mode, 1 / (24 * 60))
+                ),
+            ),
+        )
+        pyplot.sca(axes[0])
+        pyplot.plot(plot_x, timeshift_distro.pdf(plot_x), color="black")
+        pyplot.xlabel("O-C")
+        pyplot.ylabel("PDF")
+        pyplot.sca(axes[1])
+        pyplot.plot(plot_x, timeshift_distro.cdf(plot_x), color="black")
+        pyplot.xlabel("O-C")
+        pyplot.ylabel("CDF")
+        figure.suptitle(
+            f"Timeshift distribution for eclipses: {eclipse_indices}"
+        )
+        pyplot.show()
+
+        self.stop_plotting = stop_plotting
+
+        return timeshift_distro
+
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG)
     tic_id = 176591772
     backend = HDFBackend(
-        f"/mnt/md2/TESS_EBs/first1000/tess{tic_id}_samples.h5",
+        f"../results/tess{tic_id}_samples.h5",
         name="mcmc",
         read_only=True,
     )
@@ -182,3 +222,5 @@ if __name__ == "__main__":
     pyplot.xlabel("O-C")
     pyplot.ylabel("log-likelihood")
     pyplot.show()
+    measure_etv.stop_plotting = False
+    measure_etv.get_timeshift_distro([189, 190])
