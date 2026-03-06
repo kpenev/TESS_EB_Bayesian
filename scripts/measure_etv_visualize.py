@@ -174,15 +174,19 @@ class MeasureETVVisualize(MeasureETV):
         )
         pyplot.sca(axes[0])
         pyplot.plot(plot_x, timeshift_distro.pdf(plot_x), color="black")
-        pyplot.axvline(x=0.0)
-        pyplot.axhline(y=timeshift_distro.pdf(0.0))
+        p_value = timeshift_distro.cdf(0.0)
+        if p_value > 1e-6:
+            pyplot.axvline(x=0.0)
+            pyplot.axhline(y=timeshift_distro.pdf(0.0))
+        pyplot.axvline(x=timeshift_distro.mode, color='red')
         pyplot.xlabel("O-C")
         pyplot.ylabel("PDF")
         pyplot.sca(axes[1])
-        p_value = timeshift_distro.cdf(0.0)
         pyplot.plot(plot_x, timeshift_distro.cdf(plot_x), color="black")
-        pyplot.axvline(x=0.0)
-        pyplot.axhline(y=p_value)
+        if p_value > 1e-6:
+            pyplot.axvline(x=0.0)
+            pyplot.axhline(y=p_value)
+        pyplot.axvline(x=timeshift_distro.mode, color='red')
         pyplot.xlabel("O-C")
         pyplot.ylabel("CDF")
         figure.suptitle(
@@ -200,17 +204,20 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG)
     # tic_id = 176591772
     tic_id = 11119600
+
     measure_etv = MeasureETVVisualize(
         tic_id,
         samples_fname="/mnt/md2/TESS_EBs/first1000/tess{tic_id}_samples.h5",
     )
+
+    measure_etv.stop_plotting = True
     primary_eclipse_indices, secondary_eclipse_indices = (
         measure_etv.get_eclipse_indices(0.5)
     )
     print(f"Eclipse indices: {primary_eclipse_indices}")
     eclipses = primary_eclipse_indices[4][1][0]
     print(f"Testing with eclipses: {eclipses}")
-    measure_etv.sum_sq_residuals(0.089, eclipses)
+    measure_etv.sum_sq_residuals(-0.0610584446328522, eclipses)
     measure_etv.stop_plotting = True
     timeshifts = numpy.linspace(-0.1, 0.1, 1000)
     logprob = [measure_etv.sum_sq_residuals(dt, eclipses) for dt in timeshifts]

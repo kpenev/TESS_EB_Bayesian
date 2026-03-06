@@ -42,6 +42,9 @@ class TimeShiftDistribution(  # pylint:disable=too-many-instance-attributes
             result[selection] = (
                 self._above_integral(x[selection])[0] - self._min_below
             ) / self._normalization
+        assert numpy.isfinite(
+            result
+        ).all(), f"Non-finite CDF for x={x!r}: {result!r}"
         return result
 
     def _pdf(self, x):  # pylint: disable=arguments-differ
@@ -61,12 +64,15 @@ class TimeShiftDistribution(  # pylint:disable=too-many-instance-attributes
         """Define from likellihood and integrals above/below best fit O-C."""
 
         super().__init__(*args, **kwargs)
+        print(f"Range: {self.a}, {self.b}")
         self.mode = mode
         self._likelihood = likelihood
         self._above_integral = above_integral
         self._below_integral = below_integral
         self._min_below = float(below_integral(self.a))
+        print(f"Min below: {self._min_below}")
         self._normalization = float(above_integral(self.b)) - self._min_below
+        print(f"Normalization: {self._normalization}")
 
 
 class MeasureETV(LogLikelihood):
@@ -205,7 +211,12 @@ class MeasureETV(LogLikelihood):
                 eclipse_lc = lightcurve[
                     lightcurve["eclipse_flags"] == eclipse_idx
                 ]
-                eclipse_lc = eclipse_lc[numpy.isfinite(eclipse_lc["flux"])]
+                eclipse_lc = eclipse_lc[
+                    numpy.logical_and(
+                        numpy.isfinite(eclipse_lc["flux"]),
+                        numpy.isfinite(eclipse_lc["flux_err"]),
+                    )
+                ]
                 if eclipse_lc.size == 0:
                     continue
                 included = True
@@ -302,12 +313,15 @@ class MeasureETV(LogLikelihood):
         lc_sq_errors = observed_lc["flux_err"] ** 2 + self._lc_sys_err**2
         return ((observed_lc["flux"] - model_lc) ** 2 / lc_sq_errors).sum()
 
-    def likelihood(self, time_shift, eclipse_indices):
+    def likelihood(self, time_shift, eclipse_indices, min_sum_sq_residuals=0.0):
         """Return the unnormalized likelihood (not log) of given timeshit."""
 
         if abs(time_shift) > self._max_abs_etv:
             return 0.0
-        return numpy.exp(-self.sum_sq_residuals(time_shift, eclipse_indices))
+        return numpy.exp(
+            min_sum_sq_residuals
+            - self.sum_sq_residuals(time_shift, eclipse_indices)
+        )
 
     def fit_timeshift(self, eclipse_indices):
         """Find the best-fit common time shift for the given eclipses."""
@@ -325,20 +339,26 @@ class MeasureETV(LogLikelihood):
     def get_timeshift_distro(self, eclipse_indices):
         """Calculate the CDF of the time shift for selected eclipses."""
 
-        best_fit_shift = self.fit_timeshift(eclipse_indices).x
+        shift_fit_result = self.fit_timeshift(eclipse_indices)
+        best_fit_shift = shift_fit_result.x
         solve_kwargs = {
             "y0": [0.0],
             "dense_output": True,
             "max_step": 0.1 * max(best_fit_shift, 1 / (24 * 60)),
+            "jac": numpy.array([[0.0]]),
         }
         print(f"Integrating with options: {solve_kwargs!r}")
         above_integral = solve_ivp(
-            lambda x, y: [self.likelihood(x, eclipse_indices)],
+            lambda x, y: [
+                self.likelihood(x, eclipse_indices, shift_fit_result.fun)
+            ],
             (best_fit_shift, self._max_abs_etv),
             **solve_kwargs,
         )
         below_integral = solve_ivp(
-            lambda x, y: [self.likelihood(x, eclipse_indices)],
+            lambda x, y: [
+                self.likelihood(x, eclipse_indices, shift_fit_result.fun)
+            ],
             (best_fit_shift, -self._max_abs_etv),
             **solve_kwargs,
         )
@@ -347,7 +367,11 @@ class MeasureETV(LogLikelihood):
             name="ETV distribution",
             mode=best_fit_shift,
             likelihood=numpy.vectorize(
-                partial(self.likelihood, eclipse_indices=eclipse_indices)
+                partial(
+                    self.likelihood,
+                    eclipse_indices=eclipse_indices,
+                    min_sum_sq_residuals=shift_fit_result.fun,
+                )
             ),
             above_integral=above_integral.sol,
             below_integral=below_integral.sol,
