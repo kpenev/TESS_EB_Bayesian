@@ -185,7 +185,7 @@ class LogLikelihood(TESSTarget):
                 self,
                 get_ooe_variability,
                 return_mask=True,
-            )
+            )[:2]
             rms = numpy.sqrt(
                 numpy.mean((detrended["flux"] - 1)[detrend_mask] ** 2)
             )

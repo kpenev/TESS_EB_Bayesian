@@ -5,9 +5,6 @@ import logging
 import numpy
 from matplotlib import pyplot
 from measure_etv import MeasureETV
-from sample_params import SampleParams
-
-from hacked_emcee_hdf5_backend import HDFBackend
 
 
 class MeasureETVVisualize(MeasureETV):
@@ -177,14 +174,20 @@ class MeasureETVVisualize(MeasureETV):
         )
         pyplot.sca(axes[0])
         pyplot.plot(plot_x, timeshift_distro.pdf(plot_x), color="black")
+        pyplot.axvline(x=0.0)
+        pyplot.axhline(y=timeshift_distro.pdf(0.0))
         pyplot.xlabel("O-C")
         pyplot.ylabel("PDF")
         pyplot.sca(axes[1])
+        p_value = timeshift_distro.cdf(0.0)
         pyplot.plot(plot_x, timeshift_distro.cdf(plot_x), color="black")
+        pyplot.axvline(x=0.0)
+        pyplot.axhline(y=p_value)
         pyplot.xlabel("O-C")
         pyplot.ylabel("CDF")
         figure.suptitle(
-            f"Timeshift distribution for eclipses: {eclipse_indices}"
+            f"Timeshift distribution for eclipses {eclipse_indices}, p-value: "
+            f"{p_value}"
         )
         pyplot.show()
 
@@ -195,27 +198,23 @@ class MeasureETVVisualize(MeasureETV):
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG)
-    tic_id = 176591772
-    backend = HDFBackend(
-        f"../results/tess{tic_id}_samples.h5",
-        name="mcmc",
-        read_only=True,
-    )
-    log_prob = backend.get_log_prob()
-    top_index = numpy.unravel_index(numpy.argmax(log_prob), log_prob.shape)
-    top_params = SampleParams(
-        *backend.get_blobs(discard=0, thin=top_index[0] + 1)[0][top_index[1:]]
-    )
+    # tic_id = 176591772
+    tic_id = 11119600
     measure_etv = MeasureETVVisualize(
-        tic_id, top_params, pad_duration=0.0, max_abs_etv=0.1
+        tic_id,
+        samples_fname="/mnt/md2/TESS_EBs/first1000/tess{tic_id}_samples.h5",
     )
-    measure_etv.sum_sq_residuals(0.089, [189, 190])
+    primary_eclipse_indices, secondary_eclipse_indices = (
+        measure_etv.get_eclipse_indices(0.5)
+    )
+    print(f"Eclipse indices: {primary_eclipse_indices}")
+    eclipses = primary_eclipse_indices[4][1][0]
+    print(f"Testing with eclipses: {eclipses}")
+    measure_etv.sum_sq_residuals(0.089, eclipses)
     measure_etv.stop_plotting = True
     timeshifts = numpy.linspace(-0.1, 0.1, 1000)
-    logprob = [
-        measure_etv.sum_sq_residuals(dt, [189, 190]) for dt in timeshifts
-    ]
-    best_fit = measure_etv.fit_timeshift([189, 190])
+    logprob = [measure_etv.sum_sq_residuals(dt, eclipses) for dt in timeshifts]
+    best_fit = measure_etv.fit_timeshift(eclipses)
     print(f"Best fit result: {best_fit!r}")
     pyplot.plot(timeshifts, logprob, "-k")
     pyplot.axvline(x=best_fit.x)
@@ -223,4 +222,4 @@ if __name__ == "__main__":
     pyplot.ylabel("log-likelihood")
     pyplot.show()
     measure_etv.stop_plotting = False
-    measure_etv.get_timeshift_distro([189, 190])
+    measure_etv.get_timeshift_distro(eclipses)

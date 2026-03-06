@@ -142,7 +142,7 @@ def get_ooe_variability(
             "Time span of LC portion too small (%s). Discarding",
             repr(masked_time[-1] - masked_time[0]),
         )
-        return numpy.full(masked_time.shape, numpy.nan)
+        return numpy.full(mask.shape, numpy.nan)
 
     ooe_mask = numpy.ones(masked_time.size, dtype=bool)
     while True:
@@ -227,6 +227,19 @@ def get_ooe_variability(
 # pylint: enable=too-many-arguments
 
 
+def get_lc_gap_indices(lc_times, min_gap):
+    """Return indices where to slice the lightcurve to avoid gaps."""
+
+    gap_indices = (
+        numpy.nonzero(
+            lc_times[1:] - lc_times[:-1] > min_gap
+        )[0]
+        + 1
+    )
+    gap_indices = numpy.append(gap_indices, lc_times.size)
+    return gap_indices
+
+
 def detrend_with_gaps(
     lightcurve, min_gap, get_trend, full_output=False, **kwargs
 ):
@@ -253,13 +266,6 @@ def detrend_with_gaps(
     """
 
     print("Detrending with gaps" + ", saving detrending" if full_output else "")
-    gap_indices = (
-        numpy.nonzero(
-            lightcurve["time"][1:] - lightcurve["time"][:-1] > min_gap
-        )[0]
-        + 1
-    )
-    gap_indices = numpy.append(gap_indices, lightcurve["time"].size)
 
     fixed_kwargs = {}
     segment_kwargs = {}
@@ -287,7 +293,7 @@ def detrend_with_gaps(
     good_mask = numpy.ones(detrended.size, dtype=bool)
     if fixed_kwargs.get("return_mask", False):
         eclipse_mask = numpy.zeros(detrended.size, dtype=bool)
-    for end_index in gap_indices:
+    for end_index in get_lc_gap_indices(lightcurve["time"], min_gap):
         if end_index - start_index < 20:
             good_mask[start_index:end_index] = False
             continue
@@ -318,7 +324,7 @@ def detrend_with_gaps(
 
     detrended = detrended[good_mask]
     if fixed_kwargs.get("return_mask", False):
-        return detrended, eclipse_mask[good_mask]
+        return detrended, eclipse_mask[good_mask], good_mask
     return detrended
 
 

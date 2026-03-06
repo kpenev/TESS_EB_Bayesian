@@ -10,7 +10,14 @@ from scipy.stats import rv_continuous
 
 from binary import Binary
 from log_likelihood import LogLikelihood
-from detrending import detrend_with_gaps, get_ooe_variability
+from detrending import (
+    detrend_with_gaps,
+    get_ooe_variability,
+    get_lc_gap_indices,
+)
+import paths
+from hacked_emcee_hdf5_backend import HDFBackend
+from sample_params import SampleParams
 
 
 class TimeShiftDistribution(  # pylint:disable=too-many-instance-attributes
@@ -147,64 +154,83 @@ class MeasureETV(LogLikelihood):
             kwargs.get("pad_duration", 0.0)
         )
         for lc_ind, (header, lightcurve) in enumerate(self._lcs):
-            self._lcs[lc_ind] = (
-                header,
-                detrend_with_gaps(
-                    lightcurve,
-                    mask=lightcurve["eclipse_flags"] == 0,
-                    get_trend=get_ooe_variability,
-                    eclipse_rejection=numpy.inf,
-                    approx_node_spacing=max(
-                        10.0 * max_eclipse_duration,
-                        0.1 * self._best_binaries[0].per,
-                    ),
-                    min_gap=0.5,
-                    full_output=True,
-                ),
+            original = numpy.copy(lightcurve["flux"])
+            lightcurve["flux"] /= self._best_binaries[0].get_lightcurve(
+                lightcurve["time"],
+                supersample_factor=100,
+                exp_time=header["exptime"],
+                exclude=["eclipse"],
             )
+            detrended, _, good_mask = detrend_with_gaps(
+                lightcurve,
+                mask=lightcurve["eclipse_flags"] == 0,
+                get_trend=get_ooe_variability,
+                eclipse_rejection=numpy.inf,
+                approx_node_spacing=max(
+                    10.0 * max_eclipse_duration,
+                    0.1 * self._best_binaries[0].per,
+                ),
+                min_gap=0.5,
+                full_output=True,
+                return_mask=True,
+            )
+            detrended["original"] = original[good_mask]
+
+            self._lcs[lc_ind] = (header, detrended)
 
     def _get_observed_eclipses(self, eclipse_indices):
         """Return the lightcurve near selected eclipse indices."""
 
-        observed_lc = None
-        exptime = None
-        if set(eclipse_indices) <= self._last_eclipse_indices:
-            lc_indices = sorted(self._last_lcs_indices)
-        else:
-            lc_indices = range(len(self._lcs))
-        self._last_eclipse_indices = set(eclipse_indices)
-        self._last_lcs_indices = set()
+        eclipse_indices = set(eclipse_indices)
+        if eclipse_indices == self._eclipse_indices:
+            return self._observed_lc, self._exptime
+        if eclipse_indices < self._eclipse_indices:
+            keep = numpy.zeros(self._observed_lc.shape, dtype=bool)
+            for eclipse_idx in eclipse_indices:
+                keep = numpy.logical_or(
+                    keep, self._observed_lc["eclipse_flags"] == eclipse_idx
+                )
+            self._observed_lc = self._observed_lc[keep]
+            self._eclipse_indices = eclipse_indices
+            return self._observed_lc, self._exptime
 
-        for lc_ind in lc_indices:
-            header, lightcurve = self._lcs[lc_ind]
+        self._eclipse_indices = set(eclipse_indices)
+
+        self._observed_lc = None
+        self._exptime = None
+
+        for header, lightcurve in self._lcs:
             included = False
             for eclipse_idx in eclipse_indices:
                 eclipse_lc = lightcurve[
                     lightcurve["eclipse_flags"] == eclipse_idx
                 ]
+                eclipse_lc = eclipse_lc[numpy.isfinite(eclipse_lc["flux"])]
                 if eclipse_lc.size == 0:
                     continue
-                self._last_lcs_indices.add(lc_ind)
                 included = True
-                if observed_lc is None:
-                    observed_lc = numpy.copy(eclipse_lc)
+                if self._observed_lc is None:
+                    self._observed_lc = numpy.copy(eclipse_lc)
                 else:
-                    observed_lc = numpy.concatenate((observed_lc, eclipse_lc))
+                    self._observed_lc = numpy.concatenate(
+                        (self._observed_lc, eclipse_lc)
+                    )
             if included:
-                if exptime is None:
-                    exptime = header["exptime"]
+                if self._exptime is None:
+                    self._exptime = header["exptime"]
                 else:
-                    assert exptime == header["exptime"], (
+                    assert self._exptime == header["exptime"], (
                         "Attempting to combine eclipses from lightcurves with "
                         "different exposure times."
                     )
-        return observed_lc, exptime
+        assert self._observed_lc is not None
+        return self._observed_lc, self._exptime
 
     def _get_model(self, observed_lc, time_shift, exptime, component):
         """Return a model assuming the given time shift."""
 
         eclipse = self._best_binaries[component].eclipse(
-            observed_lc["time"] - time_shift,
+            observed_lc["time"] + time_shift,
             supersample_factor=100,
             exp_time=exptime,
         )
@@ -215,13 +241,38 @@ class MeasureETV(LogLikelihood):
             1.0 + secondary_flux_fraction
         )
 
-    def __init__(self, tic_id, best_params, max_abs_etv, **kwargs):
+    @staticmethod
+    def _get_best_params(samples_fname):
+        """Return the maximum likelihood parameters in given samples file."""
+
+        backend = HDFBackend(
+            samples_fname,
+            name="mcmc",
+            read_only=True,
+        )
+        log_prob = backend.get_log_prob()
+        top_index = numpy.unravel_index(numpy.argmax(log_prob), log_prob.shape)
+        return SampleParams(
+            *backend.get_blobs(discard=0, thin=top_index[0] + 1)[0][
+                top_index[1:]
+            ]
+        )
+
+    def __init__(
+        self, tic_id, max_abs_etv=None, samples_fname=paths.samples, **kwargs
+    ):
         """
         Prepare ETV measurement using max-likelihood parameters.
 
         Create eclipse flags selecting primary eclipse with positive integers
         and secondary eclipses with negative.
         """
+
+        if "pad_duration" not in kwargs:
+            kwargs["pad_duration"] = 0.0
+        best_params = self._get_best_params(samples_fname.format(tic_id=tic_id))
+        if max_abs_etv is None:
+            max_abs_etv = min(0.1, 0.05 * best_params.per)
 
         self._best_binaries = [
             Binary(from_mcmc=best_params),
@@ -230,8 +281,9 @@ class MeasureETV(LogLikelihood):
         self._best_binaries[1].swap_components()
         self._lc_sys_err = best_params.lc_sys
         self._max_abs_etv = max_abs_etv
-        self._last_eclipse_indices = set()
-        self._last_lcs_indices = None
+        self._eclipse_indices = set()
+        self._observed_lc = None
+        self._exptime = None
         super().__init__(tic_id, **kwargs)
 
     def sum_sq_residuals(self, time_shift, eclipse_indices):
@@ -275,10 +327,9 @@ class MeasureETV(LogLikelihood):
 
         best_fit_shift = self.fit_timeshift(eclipse_indices).x
         solve_kwargs = {
-            'y0': [0.0],
-            'dense_output': True,
-            'max_step': 0.1 * max(best_fit_shift, 1/(24 * 60)),
-
+            "y0": [0.0],
+            "dense_output": True,
+            "max_step": 0.1 * max(best_fit_shift, 1 / (24 * 60)),
         }
         print(f"Integrating with options: {solve_kwargs!r}")
         above_integral = solve_ivp(
@@ -303,3 +354,45 @@ class MeasureETV(LogLikelihood):
             a=-self._max_abs_etv,
             b=self._max_abs_etv,
         )
+
+    def get_eclipse_indices(self, min_gap, allow_partial=False):
+        """
+        Return the eclipse indices split by sector by lightcurve segment.
+
+        Args:
+            min_gap(float):    The minimum gap, in days, which triggers a
+                splitting of the lightcurve.
+
+            allow_partial(bool):    If False (default), indices of eclipses whic
+                touch the ends of a lightcurve segment are not included.
+
+        Returns:
+            Two lists one for primary eclipses and one for secondary eclipses.
+            Each list is formatted as: ``[(sector1, [(piece 1 indices), (piece 2
+            indices), ...]), (sector2, ...]''
+        """
+
+        result = [], []
+        for header, lightcurve in self._lcs:
+            start_index = 0
+            sector_primaries = []
+            sector_secondaries = []
+            for end_index in get_lc_gap_indices(lightcurve["time"], min_gap):
+                segment = lightcurve["eclipse_flags"][start_index:end_index]
+                indices = numpy.unique(segment)
+                split = numpy.searchsorted(indices, 0)
+                primaries = indices[split + 1 :]
+                secondaries = indices[:split]
+                if not allow_partial:
+                    if segment[0] < 0:
+                        assert secondaries[-1] == segment[0]
+                        secondaries = secondaries[:-1]
+                    elif segment[0] > 0:
+                        assert primaries[0] == segment[0]
+                        primaries = primaries[1:]
+                sector_primaries.append(primaries)
+                sector_secondaries.append(secondaries)
+                start_index = end_index
+            result[0].append((header["sector"], sector_primaries))
+            result[1].append((header["sector"], sector_secondaries))
+        return result
