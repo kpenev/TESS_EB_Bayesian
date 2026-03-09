@@ -1,12 +1,18 @@
-"""Define a class for measuring ETVs from TESS lightcurves."""
+"""Define tools for ETVs analysis from TESS lightcurves."""
 
 from functools import partial
+from multiprocessing import Pool
+import pickle
 
 import numpy
 from numpy.lib.recfunctions import append_fields
 from scipy.optimize import minimize_scalar
 from scipy.integrate import solve_ivp
 from scipy.stats import rv_continuous
+
+from general_purpose_python_modules.multiprocessing_util import (
+    setup_process_map,
+)
 
 from binary import Binary
 from log_likelihood import LogLikelihood
@@ -15,9 +21,12 @@ from detrending import (
     get_ooe_variability,
     get_lc_gap_indices,
 )
-import paths
+
 from hacked_emcee_hdf5_backend import HDFBackend
 from sample_params import SampleParams
+
+
+_worker_measure_etv = None
 
 
 class TimeShiftDistribution(  # pylint:disable=too-many-instance-attributes
@@ -52,6 +61,17 @@ class TimeShiftDistribution(  # pylint:disable=too-many-instance-attributes
 
         return self._likelihood(x) / self._normalization
 
+    def to_dict(self):
+        """Return a picklable dict of the distribution's state."""
+
+        return {
+            "mode": self.mode,
+            "a": self.a,
+            "b": self.b,
+            "above_integral": self._above_integral,
+            "below_integral": self._below_integral,
+        }
+
     def __init__(
         self,
         *args,
@@ -63,6 +83,8 @@ class TimeShiftDistribution(  # pylint:disable=too-many-instance-attributes
     ):
         """Define from likellihood and integrals above/below best fit O-C."""
 
+        if "name" not in kwargs:
+            kwargs["name"] = "ETV distribution"
         super().__init__(*args, **kwargs)
         print(f"Range: {self.a}, {self.b}")
         self.mode = mode
@@ -122,6 +144,10 @@ class MeasureETV(LogLikelihood):
             start_phase -= pad_duration * duration + max_etv_phase
             duration += 2 * pad_duration * duration + 2 * max_etv_phase
             near_eclipse_ranges.append((start_phase, duration))
+
+        self._eclipse_durations[0] = near_eclipse_ranges[0][1]
+        self._eclipse_durations[1] = near_eclipse_ranges[1][1]
+
         return near_eclipse_ranges
 
     def _add_eclipse_flags(self, pad_duration):
@@ -129,7 +155,6 @@ class MeasureETV(LogLikelihood):
 
         porb = self._best_binaries[0].per
         near_eclipse_ranges = self._find_near_eclipse_ranges(pad_duration)
-        max_duration = 0.0
 
         for lc_ind, (header, lightcurve) in enumerate(self._lcs):
             lightcurve = append_fields(
@@ -143,7 +168,6 @@ class MeasureETV(LogLikelihood):
             for (start_phase, duration), sign in zip(
                 near_eclipse_ranges, [1, -1]
             ):
-                max_duration = max(max_duration, duration)
                 shifted_time = lightcurve["time"] - start_phase * porb
                 near_eclipses = shifted_time % porb / porb < duration
                 period_ind = numpy.floor(shifted_time / porb).astype(int)
@@ -151,14 +175,12 @@ class MeasureETV(LogLikelihood):
                     sign * period_ind[near_eclipses]
                 )
             self._lcs[lc_ind] = (header, lightcurve)
-        return max_duration
 
     def _prepare_lightcurves(self, *_, **kwargs):
         """Remove the OOE variability of the lightcurve and flag eclipses."""
 
-        max_eclipse_duration = self._add_eclipse_flags(
-            kwargs.get("pad_duration", 0.0)
-        )
+        self._add_eclipse_flags(kwargs.get("pad_duration", 0.0))
+        max_eclipse_duration = self._eclipse_durations.max()
         for lc_ind, (header, lightcurve) in enumerate(self._lcs):
             original = numpy.copy(lightcurve["flux"])
             lightcurve["flux"] /= self._best_binaries[0].get_lightcurve(
@@ -269,9 +291,7 @@ class MeasureETV(LogLikelihood):
             ]
         )
 
-    def __init__(
-        self, tic_id, max_abs_etv=None, samples_fname=paths.samples, **kwargs
-    ):
+    def __init__(self, tic_id, samples_fname, max_abs_etv=None, **kwargs):
         """
         Prepare ETV measurement using max-likelihood parameters.
 
@@ -295,6 +315,7 @@ class MeasureETV(LogLikelihood):
         self._eclipse_indices = set()
         self._observed_lc = None
         self._exptime = None
+        self._eclipse_durations = numpy.array([numpy.nan, numpy.nan])
         super().__init__(tic_id, **kwargs)
 
     def sum_sq_residuals(self, time_shift, eclipse_indices):
@@ -326,15 +347,27 @@ class MeasureETV(LogLikelihood):
     def fit_timeshift(self, eclipse_indices):
         """Find the best-fit common time shift for the given eclipses."""
 
-        return minimize_scalar(
-            self.sum_sq_residuals,
-            (
-                -self._max_abs_etv,
-                0.0,
-                self._max_abs_etv,
-            ),
-            args=(eclipse_indices,),
-        )
+        try:
+            return minimize_scalar(
+                self.sum_sq_residuals,
+                (
+                    -self._max_abs_etv,
+                    0.0,
+                    self._max_abs_etv,
+                ),
+                args=(eclipse_indices,),
+            )
+        except ValueError:
+            print(
+                "Minimizing sum squared residuals for eclispe indices "
+                f"{eclipse_indices} failed, starting from "
+                f"SSR({-self._max_abs_etv}) = "
+                f"{self.sum_sq_residuals(-self._max_abs_etv, eclipse_indices)},"
+                f" SSR(0) = {self.sum_sq_residuals(0, eclipse_indices)}, "
+                f"SSR({self._max_abs_etv}) = "
+                f"{self.sum_sq_residuals(self._max_abs_etv, eclipse_indices)}"
+            )
+            raise
 
     def get_timeshift_distro(self, eclipse_indices):
         """Calculate the CDF of the time shift for selected eclipses."""
@@ -364,7 +397,6 @@ class MeasureETV(LogLikelihood):
         )
         print("Constructing distribution")
         return TimeShiftDistribution(
-            name="ETV distribution",
             mode=best_fit_shift,
             likelihood=numpy.vectorize(
                 partial(
@@ -379,7 +411,37 @@ class MeasureETV(LogLikelihood):
             b=self._max_abs_etv,
         )
 
-    def get_eclipse_indices(self, min_gap, allow_partial=False):
+    def get_mean_time(self, eclipse_indices):
+        """Return the mean of the times of all points for selected eclipses."""
+
+        return numpy.mean(
+            self._get_observed_eclipses(eclipse_indices)[0]["time"]
+        )
+
+    def _eclipse_covered_single(self, eclipse_idx, lightcurve):
+        """Return True iff the given eclipse is well covered in the LC."""
+
+        eclipse_lc = lightcurve[lightcurve["eclipse_flags"] == eclipse_idx]
+        start = eclipse_lc["time"].min()
+        end = eclipse_lc["time"].max()
+        component_idx = 0 if eclipse_lc[0]["eclipse_flags"] > 0 else 1
+        min_points = eclipse_lc.size / 4
+        time_frac = (eclipse_lc["time"] - start) / self._eclipse_durations[
+            component_idx
+        ]
+        return (
+            (end - start > 2 * self._eclipse_durations[component_idx] / 3)
+            and ((time_frac < 1 / 3).sum() > min_points)
+            and (
+                numpy.logical_and(time_frac < 1 / 3, time_frac < 2 / 3).sum()
+                > min_points
+            )
+            and ((time_frac > 2 / 3).sum() > min_points)
+        )
+
+    def get_eclipse_indices(  # pylint: disable=too-many-locals
+        self, min_gap, allow_partial=False
+    ):
         """
         Return the eclipse indices split by sector by lightcurve segment.
 
@@ -398,6 +460,9 @@ class MeasureETV(LogLikelihood):
 
         result = [], []
         for header, lightcurve in self._lcs:
+            eclipse_covered = numpy.vectorize(
+                partial(self._eclipse_covered_single, lightcurve=lightcurve)
+            )
             start_index = 0
             sector_primaries = []
             sector_secondaries = []
@@ -409,14 +474,140 @@ class MeasureETV(LogLikelihood):
                 secondaries = indices[:split]
                 if not allow_partial:
                     if segment[0] < 0:
+                        print(f"Dropping {segment[0]} from secondaries")
                         assert secondaries[-1] == segment[0]
                         secondaries = secondaries[:-1]
+                        print(f"Clean secondaries: {secondaries}")
                     elif segment[0] > 0:
                         assert primaries[0] == segment[0]
                         primaries = primaries[1:]
+                    if segment[-1] < 0:
+                        print(f"Dropping {segment[-1]} from secondaries")
+                        assert secondaries[0] == segment[-1]
+                        secondaries = secondaries[1:]
+                        print(f"Clean secondaries: {secondaries}")
+                    elif segment[-1] > 0:
+                        assert primaries[-1] == segment[-1]
+                        primaries = primaries[:-1]
+                primaries = primaries[eclipse_covered(primaries)]
+                secondaries = secondaries[eclipse_covered(secondaries)]
+
+                assert -2914 not in secondaries
                 sector_primaries.append(primaries)
                 sector_secondaries.append(secondaries)
                 start_index = end_index
             result[0].append((header["sector"], sector_primaries))
             result[1].append((header["sector"], sector_secondaries))
         return result
+
+
+def _get_distro_data(eclipse_indices):
+    """Compute time shift distribution and return serializable data."""
+
+    shift_fit_result = _worker_measure_etv.fit_timeshift(eclipse_indices)
+    distro_dict = _worker_measure_etv.get_timeshift_distro(
+        eclipse_indices
+    ).to_dict()
+    distro_dict["min_sum_sq_residuals"] = shift_fit_result.fun
+    return distro_dict
+
+
+def compute_and_save_etv_distros(
+    measure_etv, tasks, num_parallel, output_fname, **extra_pickle
+):
+    """
+    Compute ETV time shift distributions in parallel and save to file.
+
+    Uses fork-based multiprocessing so workers inherit the already-initialized
+    MeasureETV instance without repeating expensive setup. Each worker
+    computes get_timeshift_distro for one task and returns a serializable
+    dict via TimeShiftDistribution.to_dict().
+
+    Args:
+        measure_etv:    Initialized MeasureETV instance.
+
+        tasks:    List of eclipse-index arrays, one per distribution.
+
+        num_parallel:    How many parallel processes to use.
+
+        output_fname:    Path to write the pickle output file.
+
+        extra_pickle:    Additional data to add to the pickle
+    """
+
+    global _worker_measure_etv  # pylint: disable=global-statement
+    _worker_measure_etv = measure_etv
+    with Pool(
+        processes=num_parallel,
+        initializer=setup_process_map,
+        initargs=[
+            {
+                "task": "compute_and_save_etv_distros",
+                "tic_id": measure_etv.tic_id,
+            }
+        ],
+    ) as pool:
+        distro_data = pool.map(_get_distro_data, tasks)
+    for task, distro_dict in zip(tasks, distro_data):
+        distro_dict["eclipse_indices"] = task
+    extra_pickle["tic_id"] = measure_etv.tic_id
+    extra_pickle["distributions"] = distro_data
+    with open(output_fname, "wb") as out_file:
+        pickle.dump(extra_pickle, out_file)
+
+
+def load_etv_distros(
+    output_fname, restore_likelihood=True, **measure_etv_kwargs
+):
+    """
+    Load ETV distributions previously saved by compute_and_save_distros.
+
+    Args:
+        output_fname:           Path to the pickle file written by
+                                compute_and_save_distros.
+        restore_likelihood:     If True (default), create a MeasureETV instance
+                                from the saved tic_id, samples_fname_pattern,
+                                and max_abs_etv so that the PDF is available on
+                                the recovered distributions.
+        **measure_etv_kwargs:   Extra keyword arguments forwarded to MeasureETV
+                                when restore_likelihood is True.
+
+    Returns:
+        A dict with keys:
+            ``num_primary_tasks``:  Number of leading entries in
+                                    ``distributions`` that correspond to
+                                    primary eclipses.
+            ``distributions``:      List of dicts, each containing
+                                    ``eclipse_indices`` (numpy array) and a
+                                    ``TimeShiftDistribution`` under the key
+                                    ``distro``.
+    """
+
+    with open(output_fname, "rb") as in_file:
+        data = pickle.load(in_file)
+    measure_etv = None
+    if restore_likelihood:
+        measure_etv = MeasureETV(
+            data["tic_id"],
+            data["samples_fname_pattern"],
+            data["max_abs_etv"],
+            **measure_etv_kwargs,
+        )
+    non_init_keys = {"eclipse_indices", "min_sum_sq_residuals"}
+    for entry in data["distributions"]:
+        likelihood = None
+        if measure_etv is not None:
+            likelihood = numpy.vectorize(
+                partial(
+                    measure_etv.likelihood,
+                    eclipse_indices=entry["eclipse_indices"],
+                    min_sum_sq_residuals=entry["min_sum_sq_residuals"],
+                )
+            )
+        distro_params = {
+            k: v for k, v in entry.items() if k not in non_init_keys
+        }
+        entry["distro"] = TimeShiftDistribution(
+            **distro_params, likelihood=likelihood
+        )
+    return data

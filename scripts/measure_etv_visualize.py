@@ -210,12 +210,12 @@ if __name__ == "__main__":
         samples_fname="/mnt/md2/TESS_EBs/first1000/tess{tic_id}_samples.h5",
     )
 
-    measure_etv.stop_plotting = True
     primary_eclipse_indices, secondary_eclipse_indices = (
         measure_etv.get_eclipse_indices(0.5)
     )
     print(f"Eclipse indices: {primary_eclipse_indices}")
     eclipses = primary_eclipse_indices[4][1][0]
+    eclipses = [-2914]
     print(f"Testing with eclipses: {eclipses}")
     measure_etv.sum_sq_residuals(-0.0610584446328522, eclipses)
     measure_etv.stop_plotting = True
