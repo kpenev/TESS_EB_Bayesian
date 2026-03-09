@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Perform ETV analysis on TESS EBs."""
 
-from os import path
+import os
 
 from configargparse import ArgumentParser, DefaultsFormatter
 from matplotlib import pyplot
+from matplotlib.backends.backend_pdf import PdfPages
 import numpy
 from scipy.stats import norm as scipy_norm
 
@@ -26,6 +27,7 @@ def plot_etv(  # pylint: disable=too-many-arguments, too-many-locals
     primary_color="tab:blue",
     secondary_color="tab:orange",
     marker_sizes=None,
+    sector_filter=None,
 ):
     """Plot ETV error bars for all loaded distributions.
 
@@ -34,6 +36,7 @@ def plot_etv(  # pylint: disable=too-many-arguments, too-many-locals
     error bars:   1-sigma interval (CDF^{-1}(norm.cdf(±1)))
     marker size:  sector > segment > eclipse
     color:        primary vs secondary
+    sector_filter: if given, only plot entries whose sector is in this set
 
     Returns the matplotlib Axes.
     """
@@ -41,35 +44,74 @@ def plot_etv(  # pylint: disable=too-many-arguments, too-many-locals
     if marker_sizes is None:
         marker_sizes = {"sector": 10, "segment": 6, "eclipse": 3}
     if ax is None:
-        _, ax = pyplot.subplots()
+        _, ax = pyplot.subplots(layout="constrained")
 
     cdf_lo = scipy_norm.cdf(-1)
     cdf_hi = scipy_norm.cdf(1)
     num_primary = etv_distros["num_primary_tasks"]
     task_types = etv_distros["task_types"]
+    labeled = set()
+    zorder = {"sector": 100, "segment": 110, "eclipse": 120}
+    task_sectors = etv_distros.get("task_sectors")
 
     for i, entry in enumerate(etv_distros["distributions"]):
-        color = primary_color if i < num_primary else secondary_color
-        ms = marker_sizes[task_types[i]]
+        if (
+            sector_filter is not None
+            and task_sectors is not None
+            and task_sectors[i] not in sector_filter
+        ):
+            continue
+        is_primary = i < num_primary
+        component = "Primary" if is_primary else "Secondary"
+        task_type = task_types[i]
+        color = primary_color if is_primary else secondary_color
+        ms = marker_sizes[task_type]
         x = measure_etv.get_mean_time(entry["eclipse_indices"])
         distro = entry["distro"]
-        y_mid = distro.mode
-        y_lo = distro.ppf(cdf_lo)
-        y_hi = distro.ppf(cdf_hi)
+        y_errorbar = (
+            numpy.array([distro.mode, distro.ppf(cdf_lo), distro.ppf(cdf_hi)])
+            * 24
+            * 60
+        )
+        label_key = (component, task_type)
+        label = f"{component} {task_type}" if label_key not in labeled else None
+        labeled.add(label_key)
         ax.errorbar(
             x,
-            y_mid,
-            yerr=[[y_mid - y_lo], [y_hi - y_mid]],
+            y_errorbar[0],
+            yerr=[
+                [y_errorbar[0] - y_errorbar[1]],
+                [y_errorbar[2] - y_errorbar[0]],
+            ],
             fmt="o",
             color=color,
             markersize=ms,
             capsize=ms,
+            label=label,
+            zorder=zorder[task_type],
         )
 
     ax.axhline(0, color="black", linewidth=0.5, linestyle="--")
     ax.set_xlabel("Time (days)")
-    ax.set_ylabel("ETV (days)")
+    ax.set_ylabel("ETV (min)")
+    ax.figure.legend(loc="outside upper center", ncol=2)
     return ax
+
+
+def _consecutive_sector_groups(sectors):
+    """Return list of sets of consecutively-numbered sectors."""
+
+    unique_sorted = sorted(set(sectors))
+    groups = []
+    current = [unique_sorted[0]]
+    for sec in unique_sorted[1:]:
+        if sec == current[-1] + 1:
+            current.append(sec)
+        else:
+            groups.append(set(current))
+            current = [sec]
+    groups.append(set(current))
+    return groups
 
 
 def parse_command_line():
@@ -118,7 +160,7 @@ def parse_command_line():
     )
     parser.add_argument(
         "--etv-distros-fname",
-        default=path.join(results_dir, "tess{tic_id:d}_etv_distros.pkl"),
+        default=os.path.join(results_dir, "tess{tic_id:d}_etv_distros.pkl"),
         help="Filename template for the pickle file of ETV distributions. "
         "May include `{tic_id:d}` substitution.",
     )
@@ -137,7 +179,7 @@ def parse_command_line():
     )
     parser.add_argument(
         "--std-out-err-fname",
-        default=path.join(
+        default=os.path.join(
             results_dir, "logs", "tess{tic_id:d}_{task}_{now!s}_{pid:d}.outerr"
         ),
         help="Filename to redirect worker process stdout and stderr to during "
@@ -147,7 +189,7 @@ def parse_command_line():
     )
     parser.add_argument(
         "--logging-fname",
-        default=path.join(
+        default=os.path.join(
             results_dir, "logs", "tess{tic_id:d}_{task}_{now!s}_{pid:d}.log"
         ),
         help="Filename for log mesasges from sampling. See "
@@ -175,20 +217,22 @@ def parse_command_line():
         help="How to format logging messages. See python logging module "
         "documentation for details.",
     )
+    parser.add_argument(
+        "--ignore-existing-pickle",
+        action="store_true",
+        help="If passed, even if a pickle file exists it is generated from "
+        "scratch.",
+    )
 
     return parser.parse_args()
 
 
-def analyze_eb(config):
-    """Perform ETV analysis for an eclipsing binary."""
+def prepare_tasks(eclipse_indices, config):
+    """Define the computing tasks that need to be carried out."""
 
-    setup_process(task="etv_analysis", **vars(config))
-    measure_etv = MeasureETV(
-        config.tic_id, config.samples_fname_pattern, config.max_abs_etv
-    )
-    eclipse_indices = measure_etv.get_eclipse_indices(0.5)
     tasks = []
     task_types = []
+    task_sectors = []
     num_primary_tasks = None
     for component_eclipse_indices in eclipse_indices:
         if not config.disable_by_sector:
@@ -198,22 +242,40 @@ def analyze_eb(config):
             ]
             tasks.extend(sector_tasks)
             task_types.extend("sector" for _ in sector_tasks)
+            task_sectors.extend(sec for sec, _ in component_eclipse_indices)
         if not config.disable_by_segment:
-            for sector_eclipses in component_eclipse_indices:
-                tasks.extend(sector_eclipses[1])
-                task_types.extend("segment" for _ in sector_eclipses[1])
+            for sec, segs in component_eclipse_indices:
+                tasks.extend(segs)
+                task_types.extend("segment" for _ in segs)
+                task_sectors.extend(sec for _ in segs)
         if not config.disable_by_eclipse:
-            for sector_eclipses in component_eclipse_indices:
-                for segment_eclipses in sector_eclipses[1]:
+            for sec, segs in component_eclipse_indices:
+                for segment_eclipses in segs:
                     tasks.extend(numpy.array([e]) for e in segment_eclipses)
                     task_types.extend("eclipse" for _ in segment_eclipses)
+                    task_sectors.extend(sec for _ in segment_eclipses)
         if num_primary_tasks is None:
             num_primary_tasks = len(tasks)
+    return tasks, task_types, task_sectors, num_primary_tasks
+
+
+def analyze_eb(config):
+    """Perform ETV analysis for an eclipsing binary."""
+
+    setup_process(task="etv_analysis", **vars(config))
+    measure_etv = MeasureETV(
+        config.tic_id, config.samples_fname_pattern, config.max_abs_etv
+    )
+    tasks, task_types, task_sectors, num_primary_tasks = prepare_tasks(
+        measure_etv.get_eclipse_indices(0.5), config
+    )
 
     # print("Tasks:\n\t" + "\n\t".join([str(t) for t in tasks]))
 
     output_fname = config.etv_distros_fname.format(tic_id=config.tic_id)
-    if not path.exists(output_fname):
+    if config.ignore_existing_pickle and os.path.exists(output_fname):
+        os.remove(output_fname)
+    if not os.path.exists(output_fname):
         compute_and_save_etv_distros(
             measure_etv,
             tasks,
@@ -223,12 +285,22 @@ def analyze_eb(config):
             max_abs_etv=config.max_abs_etv,
             num_primary_tasks=num_primary_tasks,
             task_types=task_types,
+            task_sectors=task_sectors,
         )
     etv_distros = load_etv_distros(output_fname)
-    ax = plot_etv(measure_etv, etv_distros)
     plot_fname = output_fname.replace(".pkl", ".pdf")
-    ax.figure.savefig(plot_fname)
-    pyplot.close(ax.figure)
+    with PdfPages(plot_fname) as pdf:
+        ax = plot_etv(measure_etv, etv_distros)
+        pdf.savefig(ax.figure)
+        pyplot.close(ax.figure)
+        for sector_group in _consecutive_sector_groups(
+            etv_distros["task_sectors"]
+        ):
+            ax = plot_etv(measure_etv, etv_distros, sector_filter=sector_group)
+            sectors = sorted(sector_group)
+            ax.set_title(f"Sectors {sectors[0]}\u2013{sectors[-1]}")
+            pdf.savefig(ax.figure)
+            pyplot.close(ax.figure)
 
 
 if __name__ == "__main__":
