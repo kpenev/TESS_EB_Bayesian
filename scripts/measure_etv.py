@@ -3,6 +3,8 @@
 from functools import partial
 from multiprocessing import Pool
 import pickle
+import logging
+import os
 
 import numpy
 from numpy.lib.recfunctions import append_fields
@@ -27,6 +29,7 @@ from sample_params import SampleParams
 
 
 _worker_measure_etv = None
+_logger = logging.getLogger(__name__)
 
 
 class TimeShiftDistribution(  # pylint:disable=too-many-instance-attributes
@@ -147,6 +150,7 @@ class MeasureETV(LogLikelihood):
 
         self._eclipse_durations[0] = near_eclipse_ranges[0][1]
         self._eclipse_durations[1] = near_eclipse_ranges[1][1]
+        self._eclipse_durations *= self._best_binaries[0].per
 
         return near_eclipse_ranges
 
@@ -169,12 +173,32 @@ class MeasureETV(LogLikelihood):
                 near_eclipse_ranges, [1, -1]
             ):
                 shifted_time = lightcurve["time"] - start_phase * porb
-                near_eclipses = shifted_time % porb / porb < duration
+                near_eclipses = ((shifted_time % porb) / porb) < duration
                 period_ind = numpy.floor(shifted_time / porb).astype(int)
                 lightcurve["eclipse_flags"][near_eclipses] = (
                     sign * period_ind[near_eclipses]
                 )
             self._lcs[lc_ind] = (header, lightcurve)
+
+    def _get_ooe_model(self, best_binary, lightcurve, exp_time):
+        """Return a best-fit scaled model of the OOE variability of the LC."""
+
+        ooe_mask = lightcurve["eclipse_flags"] == 0
+        model = best_binary.get_lightcurve(
+            lightcurve["time"],
+            supersample_factor=100,
+            exp_time=exp_time,
+            exclude=["eclipse"],
+        )
+        flux = lightcurve["flux"][ooe_mask]
+        lc_sq_errors = (
+            lightcurve["flux_err"][ooe_mask] ** 2 + self._lc_sys_err**2
+        )
+        ooe_model = model[ooe_mask]
+        model *= (ooe_model * flux / lc_sq_errors).sum() / (
+            ooe_model**2 / lc_sq_errors
+        ).sum()
+        return model, ooe_mask
 
     def _prepare_lightcurves(self, *_, **kwargs):
         """Remove the OOE variability of the lightcurve and flag eclipses."""
@@ -183,24 +207,28 @@ class MeasureETV(LogLikelihood):
         max_eclipse_duration = self._eclipse_durations.max()
         for lc_ind, (header, lightcurve) in enumerate(self._lcs):
             original = numpy.copy(lightcurve["flux"])
-            lightcurve["flux"] /= self._best_binaries[0].get_lightcurve(
-                lightcurve["time"],
-                supersample_factor=100,
-                exp_time=header["exptime"],
-                exclude=["eclipse"],
+            model, ooe_mask = self._get_ooe_model(
+                self._best_binaries[0], lightcurve, header["exptime"]
             )
+            lightcurve["flux"] /= model
             detrended, _, good_mask = detrend_with_gaps(
                 lightcurve,
-                mask=lightcurve["eclipse_flags"] == 0,
+                mask=ooe_mask,
                 get_trend=get_ooe_variability,
                 eclipse_rejection=numpy.inf,
                 approx_node_spacing=max(
-                    10.0 * max_eclipse_duration,
+                    2.0 * max_eclipse_duration,
                     0.1 * self._best_binaries[0].per,
                 ),
                 min_gap=0.5,
                 full_output=True,
                 return_mask=True,
+            )
+            detrended = append_fields(
+                detrended,
+                ["model", "demodeled"],
+                [model[good_mask], detrended["original"]],
+                usemask=False,
             )
             detrended["original"] = original[good_mask]
 
@@ -429,6 +457,15 @@ class MeasureETV(LogLikelihood):
         time_frac = (eclipse_lc["time"] - start) / self._eclipse_durations[
             component_idx
         ]
+        # print(
+        #    f"Eclipse {eclipse_idx}: duration = "
+        #    f"{self._eclipse_durations[component_idx]}, start = {start}, "
+        #    f"end = {end}, Np={eclipse_lc.size}. In first 1/3: "
+        #    f"{(time_frac < 1 / 3).sum()}. In second 1/3: "
+        #    f"{numpy.logical_and(time_frac < 1 / 3, time_frac < 2 / 3).sum()}."
+        #    f" In last 1/3: {(time_frac > 2 / 3).sum()}"
+        # )
+
         return (
             (end - start > 2 * self._eclipse_durations[component_idx] / 3)
             and ((time_frac < 1 / 3).sum() > min_points)
@@ -504,16 +541,26 @@ class MeasureETV(LogLikelihood):
 def _get_distro_data(eclipse_indices):
     """Compute time shift distribution and return serializable data."""
 
-    shift_fit_result = _worker_measure_etv.fit_timeshift(eclipse_indices)
-    distro_dict = _worker_measure_etv.get_timeshift_distro(
-        eclipse_indices
-    ).to_dict()
-    distro_dict["min_sum_sq_residuals"] = shift_fit_result.fun
-    return distro_dict
+    try:
+        shift_fit_result = _worker_measure_etv.fit_timeshift(eclipse_indices)
+        distro_dict = _worker_measure_etv.get_timeshift_distro(
+            eclipse_indices
+        ).to_dict()
+        distro_dict["min_sum_sq_residuals"] = shift_fit_result.fun
+        return distro_dict
+    except Exception as err:
+        _logger.critical(
+            "Failed to construct ETV distribution for TIC %d, "
+            "eclipse_indices %s: %s",
+            _worker_measure_etv.tic_id,
+            repr(eclipse_indices),
+            err,
+        )
+        raise
 
 
 def compute_and_save_etv_distros(
-    measure_etv, tasks, num_parallel, output_fname, **extra_pickle
+    measure_etv, tasks, output_fname, config, **extra_pickle
 ):
     """
     Compute ETV time shift distributions in parallel and save to file.
@@ -537,15 +584,18 @@ def compute_and_save_etv_distros(
 
     global _worker_measure_etv  # pylint: disable=global-statement
     _worker_measure_etv = measure_etv
+    config = vars(config)
+    config.update(
+        {
+            "task": "compute_and_save_etv_distros",
+            "tic_id": measure_etv.tic_id,
+            "parent_pid": os.getpid(),
+        }
+    )
     with Pool(
-        processes=num_parallel,
+        processes=config["num_parallel"],
         initializer=setup_process_map,
-        initargs=[
-            {
-                "task": "compute_and_save_etv_distros",
-                "tic_id": measure_etv.tic_id,
-            }
-        ],
+        initargs=[config],
     ) as pool:
         distro_data = pool.map(_get_distro_data, tasks)
     for task, distro_dict in zip(tasks, distro_data):

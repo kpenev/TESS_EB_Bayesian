@@ -17,6 +17,7 @@ from measure_etv import (
     load_etv_distros,
 )
 from paths import results_dir, samples as samples_fname_pattern
+from exclude_data import exclude_data
 
 
 def plot_etv(  # pylint: disable=too-many-arguments, too-many-locals
@@ -223,6 +224,12 @@ def parse_command_line():
         help="If passed, even if a pickle file exists it is generated from "
         "scratch.",
     )
+    parser.add_argument(
+        "--disable-exclude-data",
+        action="store_true",
+        help="If passed, ETV is fit even for sectors that were not used for "
+        "MCMC",
+    )
 
     return parser.parse_args()
 
@@ -240,11 +247,13 @@ def prepare_tasks(eclipse_indices, config):
                 numpy.concatenate(sector_eclipses[1])
                 for sector_eclipses in component_eclipse_indices
             ]
+            sector_tasks = [t for t in sector_tasks if t.size > 0]
             tasks.extend(sector_tasks)
             task_types.extend("sector" for _ in sector_tasks)
             task_sectors.extend(sec for sec, _ in component_eclipse_indices)
         if not config.disable_by_segment:
             for sec, segs in component_eclipse_indices:
+                segs = [t for t in segs if t.size > 0]
                 tasks.extend(segs)
                 task_types.extend("segment" for _ in segs)
                 task_sectors.extend(sec for _ in segs)
@@ -262,6 +271,8 @@ def prepare_tasks(eclipse_indices, config):
 def analyze_eb(config):
     """Perform ETV analysis for an eclipsing binary."""
 
+    if config.disable_exclude_data:
+        exclude_data.disable_exclusions()
     setup_process(task="etv_analysis", **vars(config))
     measure_etv = MeasureETV(
         config.tic_id, config.samples_fname_pattern, config.max_abs_etv
@@ -279,8 +290,8 @@ def analyze_eb(config):
         compute_and_save_etv_distros(
             measure_etv,
             tasks,
-            config.num_parallel,
             output_fname,
+            config,
             samples_fname_pattern=config.samples_fname_pattern,
             max_abs_etv=config.max_abs_etv,
             num_primary_tasks=num_primary_tasks,
