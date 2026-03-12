@@ -58,6 +58,8 @@ class MeasureETVVisualize(MeasureETV):
     def _prepare_lightcurves(self, *args, **kwargs):
         """Show the removal of OOE variability from lightcurves."""
 
+        self._spline_nodes = []
+
         result = super()._prepare_lightcurves(  # pylint: disable=assignment-from-no-return
             *args, **kwargs
         )
@@ -113,6 +115,7 @@ class MeasureETVVisualize(MeasureETV):
                 label="detrended",
             )
             ax.axhline(y=1.0, color="black", linewidth=5)
+            self._show_spline_nodes(ax)
             ax.legend()
 
         figure.suptitle("OOE variability removal")
@@ -120,6 +123,21 @@ class MeasureETVVisualize(MeasureETV):
         pyplot.show()
 
         return result
+
+    def _select_spline_nodes(self, *args, **kwargs):
+        """Save the selected spline nodes for later display."""
+
+        self._spline_nodes.append(super()._select_spline_nodes(*args, **kwargs))
+        return self._spline_nodes[-1]
+
+    def _show_spline_nodes(self, ax):
+        """Add vertical lines at spline nodes inside current axis."""
+
+        tmin, tmax = ax.get_xlim()
+        for node_list in self._spline_nodes:
+            for node in node_list:
+                if tmin < node < tmax:
+                    ax.axvline(node)
 
     def _get_model(self, observed_lc, time_shift, *args, **kwargs):
         """Show the observed and model lightcurves at given time shift."""
@@ -157,6 +175,7 @@ class MeasureETVVisualize(MeasureETV):
                 color="red",
                 label="model",
             )
+            self._show_spline_nodes(ax)
             ax.legend()
 
         figure.suptitle(f"time shift = {time_shift:.6f}")
@@ -164,6 +183,12 @@ class MeasureETVVisualize(MeasureETV):
         pyplot.show()
 
         return model_flux
+
+    def __init__(self, *args, **kwargs):
+        """Prepare state for visualizing."""
+
+        self._spline_nodes = []
+        super().__init__(*args, **kwargs)
 
     def get_timeshift_distro(self, eclipse_indices):
         """Show PDF and CDF of timeshifts from MCMC samples."""
@@ -194,7 +219,7 @@ class MeasureETVVisualize(MeasureETV):
         if p_value > 1e-6:
             pyplot.axvline(x=0.0)
             pyplot.axhline(y=timeshift_distro.pdf(0.0))
-        pyplot.axvline(x=timeshift_distro.mode, color='red')
+        pyplot.axvline(x=timeshift_distro.mode, color="red")
         pyplot.xlabel("O-C")
         pyplot.ylabel("PDF")
         pyplot.sca(axes[1])
@@ -202,7 +227,7 @@ class MeasureETVVisualize(MeasureETV):
         if p_value > 1e-6:
             pyplot.axvline(x=0.0)
             pyplot.axhline(y=p_value)
-        pyplot.axvline(x=timeshift_distro.mode, color='red')
+        pyplot.axvline(x=timeshift_distro.mode, color="red")
         pyplot.xlabel("O-C")
         pyplot.ylabel("CDF")
         figure.suptitle(
@@ -223,6 +248,7 @@ if __name__ == "__main__":
     measure_etv = MeasureETVVisualize(
         tic_id,
         samples_fname="/mnt/md2/TESS_EBs/first1000/tess{tic_id}_samples.h5",
+        eclipse_tweak_order=2,
     )
 
     primary_eclipse_indices, secondary_eclipse_indices = (
