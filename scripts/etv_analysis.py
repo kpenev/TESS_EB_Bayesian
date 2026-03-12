@@ -6,6 +6,7 @@ import os
 from configargparse import ArgumentParser, DefaultsFormatter
 from matplotlib import pyplot
 from matplotlib.backends.backend_pdf import PdfPages
+from matplotlib.lines import Line2D
 import numpy
 from scipy.stats import norm as scipy_norm
 
@@ -27,19 +28,31 @@ def plot_etv(  # pylint: disable=too-many-arguments, too-many-locals
     *,
     primary_color="tab:blue",
     secondary_color="tab:orange",
+    marker="o",
     marker_sizes=None,
     sector_filter=None,
 ):
-    """Plot ETV error bars for all loaded distributions.
+    """
+    Plot ETV error bars for all loaded distributions.
 
-    x coordinate: mean time of the contributing eclipses
-    y center:     best-fit time shift (distribution mode)
-    error bars:   1-sigma interval (CDF^{-1}(norm.cdf(±1)))
-    marker size:  sector > segment > eclipse
-    color:        primary vs secondary
-    sector_filter: if given, only plot entries whose sector is in this set
+    Args:
+        x coordinate:    mean time of the contributing eclipses
 
-    Returns the matplotlib Axes.
+        y center:    best-fit time shift (distribution mode)
+
+        error bars:    1-sigma interval (CDF^{-1}(norm.cdf(±1)))
+
+        marker:      marker symbol (use different symbols per detrending)
+
+        marker size:    sector > segment > eclipse
+
+        color:    primary vs secondary
+
+        sector_filter:    if given, only plot entries whose sector is in this
+            set
+
+    Returns:
+        The matplotlib Axes.
     """
 
     if marker_sizes is None:
@@ -51,7 +64,6 @@ def plot_etv(  # pylint: disable=too-many-arguments, too-many-locals
     cdf_hi = scipy_norm.cdf(1)
     num_primary = etv_distros["num_primary_tasks"]
     task_types = etv_distros["task_types"]
-    labeled = set()
     zorder = {"sector": 100, "segment": 110, "eclipse": 120}
     task_sectors = etv_distros.get("task_sectors")
 
@@ -63,7 +75,6 @@ def plot_etv(  # pylint: disable=too-many-arguments, too-many-locals
         ):
             continue
         is_primary = i < num_primary
-        component = "Primary" if is_primary else "Secondary"
         task_type = task_types[i]
         color = primary_color if is_primary else secondary_color
         ms = marker_sizes[task_type]
@@ -74,9 +85,6 @@ def plot_etv(  # pylint: disable=too-many-arguments, too-many-locals
             * 24
             * 60
         )
-        label_key = (component, task_type)
-        label = f"{component} {task_type}" if label_key not in labeled else None
-        labeled.add(label_key)
         ax.errorbar(
             x,
             y_errorbar[0],
@@ -84,18 +92,16 @@ def plot_etv(  # pylint: disable=too-many-arguments, too-many-locals
                 [y_errorbar[0] - y_errorbar[1]],
                 [y_errorbar[2] - y_errorbar[0]],
             ],
-            fmt="o",
+            fmt=marker,
             color=color,
             markersize=ms,
             capsize=ms,
-            label=label,
             zorder=zorder[task_type],
         )
 
     ax.axhline(0, color="black", linewidth=0.5, linestyle="--")
     ax.set_xlabel("Time (days)")
     ax.set_ylabel("ETV (min)")
-    ax.figure.legend(loc="outside upper center", ncol=2)
     return ax
 
 
@@ -161,9 +167,17 @@ def parse_command_line():
     )
     parser.add_argument(
         "--etv-distros-fname",
-        default=os.path.join(results_dir, "tess{tic_id:d}_etv_distros.pkl"),
+        default=os.path.join(
+            results_dir, "tess{tic_id:d}_etv_distros_{detrending}.pkl"
+        ),
         help="Filename template for the pickle file of ETV distributions. "
-        "May include `{tic_id:d}` substitution.",
+        "May include `{tic_id:d}` and `{detrending:s}` substitution.",
+    )
+    parser.add_argument(
+        "--plot-fname",
+        default=os.path.join(results_dir, "tess{tic_id:d}_etv_distros.pdf"),
+        help="Filename template for the plots. May include `{tic_id:d}` "
+        "substitution.",
     )
 
     parser.add_argument(
@@ -230,6 +244,22 @@ def parse_command_line():
         help="If passed, ETV is fit even for sectors that were not used for "
         "MCMC",
     )
+    parser.add_argument(
+        "--detrending",
+        choices=["none", "spline", "both"],
+        help="Specify the kind of detrending to apply to the out-of-eclipse "
+        "lightcurve. If ``both``, comparison is shown between no detrending "
+        "and spline detrending.",
+    )
+    parser.add_argument(
+        "--eclipse-tweak-order",
+        nargs="?",
+        type=int,
+        default=1,
+        const=None,
+        help="Specify the polynomial order of the tweaking allowed for the "
+        "eclipse. Invoke with no argument to disable eclipse tweaking.",
+    )
 
     return parser.parse_args()
 
@@ -268,50 +298,116 @@ def prepare_tasks(eclipse_indices, config):
     return tasks, task_types, task_sectors, num_primary_tasks
 
 
+def plot_etv_analysis_results(all_etv_distros, etv_comparisons, config):
+    """Create plots showing the results of the ETV analysis."""
+
+    detrending_list = list(all_etv_distros.keys())
+    markers = ["o", "s", "^", "D"]
+    primary_color = "tab:blue"
+    secondary_color = "tab:orange"
+    marker_sizes = {"sector": 10, "segment": 6, "eclipse": 3}
+
+    all_sectors = set()
+    for etv_distros in all_etv_distros.values():
+        all_sectors.update(etv_distros["task_sectors"])
+    sector_groups = _consecutive_sector_groups(sorted(all_sectors))
+
+    legend_handles = [
+        Line2D(
+            [0], [0], marker="o", color="w",
+            markerfacecolor=primary_color, markersize=8, label="Primary",
+        ),
+        Line2D(
+            [0], [0], marker="o", color="w",
+            markerfacecolor=secondary_color, markersize=8, label="Secondary",
+        ),
+    ] + [
+        Line2D(
+            [0], [0], marker=markers[i % len(markers)],
+            color="black", linestyle="none", markersize=8, label=detrending,
+        )
+        for i, detrending in enumerate(detrending_list)
+    ] + [
+        Line2D(
+            [0], [0], marker="o", color="black",
+            linestyle="none", markersize=ms, label=task_type,
+        )
+        for task_type, ms in marker_sizes.items()
+    ]
+
+    plot_fname = config.plot_fname.format(tic_id=config.tic_id)
+    with PdfPages(plot_fname) as pdf:
+        for page_sector_filter, page_title in [(None, None)] + [
+            (sg, f"Sectors {min(sg)}\u2013{max(sg)}") for sg in sector_groups
+        ]:
+            _, ax = pyplot.subplots(layout="constrained")
+            for i, detrending in enumerate(detrending_list):
+                plot_etv(
+                    etv_comparisons[detrending],
+                    all_etv_distros[detrending],
+                    ax,
+                    primary_color=primary_color,
+                    secondary_color=secondary_color,
+                    marker=markers[i % len(markers)],
+                    marker_sizes=marker_sizes,
+                    sector_filter=page_sector_filter,
+                )
+            ax.figure.legend(
+                handles=legend_handles,
+                loc="outside upper center",
+                ncol=3,
+            )
+            if page_title is not None:
+                ax.set_title(page_title)
+            pdf.savefig(ax.figure)
+            pyplot.close(ax.figure)
+
+
 def analyze_eb(config):
     """Perform ETV analysis for an eclipsing binary."""
 
     if config.disable_exclude_data:
         exclude_data.disable_exclusions()
     setup_process(task="etv_analysis", **vars(config))
-    measure_etv = MeasureETV(
-        config.tic_id, config.samples_fname_pattern, config.max_abs_etv
-    )
-    tasks, task_types, task_sectors, num_primary_tasks = prepare_tasks(
-        measure_etv.get_eclipse_indices(0.5), config
-    )
-
-    # print("Tasks:\n\t" + "\n\t".join([str(t) for t in tasks]))
-
-    output_fname = config.etv_distros_fname.format(tic_id=config.tic_id)
-    if config.ignore_existing_pickle and os.path.exists(output_fname):
-        os.remove(output_fname)
-    if not os.path.exists(output_fname):
-        compute_and_save_etv_distros(
-            measure_etv,
-            tasks,
-            output_fname,
-            config,
-            samples_fname_pattern=config.samples_fname_pattern,
+    etv_comparisons = {
+        detrending: MeasureETV(
+            config.tic_id,
+            config.samples_fname_pattern,
             max_abs_etv=config.max_abs_etv,
-            num_primary_tasks=num_primary_tasks,
-            task_types=task_types,
-            task_sectors=task_sectors,
+            no_detrend=(detrending == "none"),
+            eclipse_tweak_order=config.eclipse_tweak_order,
         )
-    etv_distros = load_etv_distros(output_fname)
-    plot_fname = output_fname.replace(".pkl", ".pdf")
-    with PdfPages(plot_fname) as pdf:
-        ax = plot_etv(measure_etv, etv_distros)
-        pdf.savefig(ax.figure)
-        pyplot.close(ax.figure)
-        for sector_group in _consecutive_sector_groups(
-            etv_distros["task_sectors"]
-        ):
-            ax = plot_etv(measure_etv, etv_distros, sector_filter=sector_group)
-            sectors = sorted(sector_group)
-            ax.set_title(f"Sectors {sectors[0]}\u2013{sectors[-1]}")
-            pdf.savefig(ax.figure)
-            pyplot.close(ax.figure)
+        for detrending in (
+            ["spline", "none"]
+            if config.detrending == "both"
+            else [config.detrending]
+        )
+    }
+    tasks, task_types, task_sectors, num_primary_tasks = prepare_tasks(
+        next(iter(etv_comparisons.values())).get_eclipse_indices(0.5), config
+    )
+    # print("Tasks:\n\t" + "\n\t".join([str(t) for t in tasks]))
+    all_etv_distros = {}
+    for detrending, measure_etv in etv_comparisons.items():
+        output_fname = config.etv_distros_fname.format(
+            tic_id=config.tic_id, detrending=detrending
+        )
+        if config.ignore_existing_pickle and os.path.exists(output_fname):
+            os.remove(output_fname)
+        if not os.path.exists(output_fname):
+            compute_and_save_etv_distros(
+                measure_etv,
+                tasks,
+                output_fname,
+                config,
+                samples_fname_pattern=config.samples_fname_pattern,
+                max_abs_etv=config.max_abs_etv,
+                num_primary_tasks=num_primary_tasks,
+                task_types=task_types,
+                task_sectors=task_sectors,
+            )
+        all_etv_distros[detrending] = load_etv_distros(output_fname)
+    plot_etv_analysis_results(all_etv_distros, etv_comparisons, config)
 
 
 if __name__ == "__main__":

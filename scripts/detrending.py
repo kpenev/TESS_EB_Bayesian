@@ -2,6 +2,7 @@
 
 from argparse import Namespace
 import logging
+from functools import partial
 
 import numpy
 from numpy.polynomial import Polynomial
@@ -108,51 +109,31 @@ def ooe_ends_to_discard(mask, min_tail_points=10):
     return left, right
 
 
-# Hiding argument names or putting in an object is worse for readability
-# pylint: disable=too-many-arguments
-def get_ooe_variability(
+def fit_ooe_model(
     lightcurve,
-    approx_node_spacing=numpy.inf,
-    mask=None,
     *,
-    half_porb=numpy.inf,
+    mask,
+    spline_nodes,
+    eclipse_rejection,
     spline_rejection=(5.0, 3.0),
-    eclipse_rejection=2.0,
-    return_mask=False,
 ):
-    """Remove the out-of-eclipse variability from the lightcurve."""
-
-    if numpy.isfinite(half_porb) and not numpy.isfinite(approx_node_spacing):
-        approx_node_spacing = half_porb / 2
-    _logger.debug(
-        "Extracting OOE variability with mask %s and target node spacing %s",
-        repr(mask),
-        repr(approx_node_spacing),
-    )
-    if mask is None:
-        mask = numpy.ones(lightcurve.size, dtype=bool)
+    """Fit OOE model to the lightcurve iteratively rejecting eclipses."""
 
     masked_time = lightcurve["time"][mask]
     masked_flux = lightcurve["flux"][mask]
 
-    if numpy.isfinite(approx_node_spacing) and masked_time[-1] - masked_time[
-        0
-    ] < min(3 * approx_node_spacing, 5):
-        _logger.warning(
-            "Time span of LC portion too small (%s). Discarding",
-            repr(masked_time[-1] - masked_time[0]),
-        )
-        return numpy.full(mask.shape, numpy.nan)
-
     ooe_mask = numpy.ones(masked_time.size, dtype=bool)
-    while True:
-        spline_nodes = get_ooe_spline_nodes(masked_time, approx_node_spacing)[
-            1:-1
-        ]
-        if spline_nodes.size > 3:
+    refit = True
+    while refit:
+        if callable(spline_nodes):
+            fit_spline_nodes = spline_nodes(masked_time)[1:-1]
+        else:
+            fit_spline_nodes = spline_nodes
+            refit = False
+        if fit_spline_nodes.size > 3:
             _logger.debug(
                 "Using %d nodes spline detrending for %s < t < %s",
-                spline_nodes.size,
+                fit_spline_nodes.size,
                 lightcurve["time"][0],
                 lightcurve["time"][-1],
             )
@@ -161,7 +142,7 @@ def get_ooe_variability(
                 masked_time[ooe_mask],
                 masked_flux[ooe_mask],
                 spline_rejection,
-                t=spline_nodes,
+                t=fit_spline_nodes,
             )(lightcurve["time"])
         else:
             _logger.debug(
@@ -189,6 +170,54 @@ def get_ooe_variability(
         ooe_mask = numpy.logical_and(ooe_mask, new_ooe_mask)
         _logger.debug("Re-fitting trend on %d OOE points.", ooe_mask.sum())
 
+    return ooe_model, ooe_mask
+
+
+# Hiding argument names or putting in an object is worse for readability
+# pylint: disable=too-many-arguments
+def get_ooe_variability(
+    lightcurve,
+    approx_node_spacing=numpy.inf,
+    mask=None,
+    *,
+    half_porb=numpy.inf,
+    spline_rejection=(5.0, 3.0),
+    eclipse_rejection=2.0,
+    return_mask=False,
+):
+    """Remove the out-of-eclipse variability from the lightcurve."""
+
+    if numpy.isfinite(half_porb) and not numpy.isfinite(approx_node_spacing):
+        approx_node_spacing = half_porb / 2
+    _logger.debug(
+        "Extracting OOE variability with mask %s and target node spacing %s",
+        repr(mask),
+        repr(approx_node_spacing),
+    )
+    if mask is None:
+        mask = numpy.ones(lightcurve.size, dtype=bool)
+
+    masked_time = lightcurve["time"][mask]
+
+    if numpy.isfinite(approx_node_spacing) and masked_time[-1] - masked_time[
+        0
+    ] < min(3 * approx_node_spacing, 5):
+        _logger.warning(
+            "Time span of LC portion too small (%s). Discarding",
+            repr(masked_time[-1] - masked_time[0]),
+        )
+        return numpy.full(mask.shape, numpy.nan)
+
+    ooe_model, ooe_mask = fit_ooe_model(
+        lightcurve,
+        mask=mask,
+        spline_nodes=partial(
+            get_ooe_spline_nodes, approx_node_spacing=approx_node_spacing
+        ),
+        spline_rejection=spline_rejection,
+        eclipse_rejection=eclipse_rejection,
+    )
+
     # try:
     #    pyplot.plot(lightcurve["time"], lightcurve["flux"], ".k")
     #    pyplot.plot(masked_time, masked_flux, ".r")
@@ -202,7 +231,10 @@ def get_ooe_variability(
     # except:  # pylint: disable=bare-except
     #    pass
 
-    discard_left, discard_right = ooe_ends_to_discard(mask)
+    result_mask = numpy.copy(mask)
+    result_mask[mask] = ooe_mask
+
+    discard_left, discard_right = ooe_ends_to_discard(result_mask)
     ooe_model[:discard_left] = numpy.nan
     ooe_model[discard_right:] = numpy.nan
     _logger.debug(
@@ -218,8 +250,6 @@ def get_ooe_variability(
 
     if return_mask:
         print(f"OOE model size: {ooe_model.size}, mask size: {mask.size}")
-        result_mask = numpy.copy(mask)
-        result_mask[mask] = ooe_mask
         return ooe_model, result_mask
     return ooe_model
 
@@ -230,12 +260,7 @@ def get_ooe_variability(
 def get_lc_gap_indices(lc_times, min_gap):
     """Return indices where to slice the lightcurve to avoid gaps."""
 
-    gap_indices = (
-        numpy.nonzero(
-            lc_times[1:] - lc_times[:-1] > min_gap
-        )[0]
-        + 1
-    )
+    gap_indices = numpy.nonzero(lc_times[1:] - lc_times[:-1] > min_gap)[0] + 1
     gap_indices = numpy.append(gap_indices, lc_times.size)
     return gap_indices
 
@@ -291,13 +316,12 @@ def detrend_with_gaps(
         )
     start_index = 0
     good_mask = numpy.ones(detrended.size, dtype=bool)
-    if fixed_kwargs.get("return_mask", False):
-        eclipse_mask = numpy.zeros(detrended.size, dtype=bool)
+    eclipse_mask = None
     for end_index in get_lc_gap_indices(lightcurve["time"], min_gap):
         if end_index - start_index < 20:
             good_mask[start_index:end_index] = False
             continue
-        print("Getting trend.")
+        print(f"Getting trend for points {start_index}:{end_index}.")
         scaling = get_trend(
             lightcurve[start_index:end_index],
             **fixed_kwargs,
@@ -306,8 +330,16 @@ def detrend_with_gaps(
                 for key, value in segment_kwargs.items()
             },
         )
-        if fixed_kwargs.get("return_mask", False):
-            eclipse_mask[start_index:end_index] = scaling[1]
+        if isinstance(scaling, tuple):
+            if eclipse_mask is None:
+                eclipse_mask = numpy.zeros(detrended.size, dtype=bool)
+            assert len(scaling) == 2
+            if scaling[1].size == end_index - start_index:
+                eclipse_mask[start_index:end_index] = scaling[1]
+            else:
+                eclipse_mask[start_index:end_index][
+                    segment_kwargs["mask"][start_index:end_index]
+                ] = scaling[1]
             scaling = scaling[0]
 
         good_mask[start_index:end_index] = numpy.isfinite(scaling)
@@ -323,7 +355,7 @@ def detrend_with_gaps(
         start_index = end_index
 
     detrended = detrended[good_mask]
-    if fixed_kwargs.get("return_mask", False):
+    if eclipse_mask is not None:
         return detrended, eclipse_mask[good_mask], good_mask
     return detrended
 
