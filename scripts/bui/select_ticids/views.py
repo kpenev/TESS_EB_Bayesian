@@ -19,11 +19,16 @@ from db_interface import Session
 # pylint: enable=import-error
 from download_lcs import get_available_sectors
 from exclude_data import exclude_data
-from cache_interface import CacheSession, CachedBLS
+from cache_interface import CacheSession, CachedBLS, CachedSED
 
 from .data_model import get_ticid_select_tables
 from .path_util import get_render_dir
 from . import plots
+
+
+_SAMPLING_PLOT_MODES = frozenset(
+    {"starting", "best", "convergence", "sampling"}
+)
 
 
 class TICIdSelectorView(View):
@@ -36,10 +41,15 @@ class TICIdSelectorView(View):
     states = [(1, "selected"), (2, "discarded")]
     grid = {"columns": "1fr", "rows": "1fr"}
 
-    def _get_sector_context(self, ticid):
+    def _get_sector_context(self, ticid, pending_toggles=()):
         """Return the sector info to add to context for given TIC ID."""
 
-        tic_excluded = exclude_data[ticid]
+        tic_excluded = set(exclude_data[ticid])
+        for sel in pending_toggles:
+            if sel in tic_excluded:
+                tic_excluded.remove(sel)
+            else:
+                tic_excluded.add(sel)
         spoc_sectors = get_available_sectors(ticid, "SPOC")
         qlp_sectors = set(get_available_sectors(ticid, "QLP")) - set(
             spoc_sectors
@@ -104,6 +114,7 @@ class TICIdSelectorView(View):
 
     def _get_context(  # pylint: disable=too-many-positional-arguments, too-many-arguments
         self,
+        request,
         displayed_ticid,
         sort_state,
         SelectTICIDs,  # pylint: disable=invalid-name
@@ -111,6 +122,16 @@ class TICIdSelectorView(View):
         db_session,
     ):
         """Return the context to render the view with."""
+
+        mode = self.reviewing.rsplit("_", 1)[
+            1
+        ]  # pylint: disable=unsubscriptable-object
+        pending_changes = {}
+        if mode in _SAMPLING_PLOT_MODES:
+            pending_changes = request.session.get("pending_changes", {}).get(
+                str(displayed_ticid), {}
+            )
+        pending_toggles = pending_changes.get("toggles", [])
 
         select_expr = self._join_rendered(
             select(
@@ -141,7 +162,7 @@ class TICIdSelectorView(View):
             ],
             "decisions": tuple(s[1] for s in self.states) + ("skip",),
             "review": self.reviewing,
-            "mode": self.reviewing.rsplit("_", 1)[1],
+            "mode": mode,
             "grid": self.grid,
             "images": [],
         }
@@ -158,8 +179,27 @@ class TICIdSelectorView(View):
                 )
                 == 0
             )
+            cached_sed = cache.execute(
+                select(CachedSED).filter_by(tic_id=displayed_ticid)
+            ).scalar_one_or_none()
+            db_threshold = (
+                cached_sed.bad_sed_threshold
+                if cached_sed and cached_sed.bad_sed_threshold is not None
+                else ""
+            )
+        pending_threshold = pending_changes.get("bad_sed_threshold")
+        context["bad_sed_threshold"] = (
+            pending_threshold
+            if "bad_sed_threshold" in pending_changes
+            else db_threshold
+        )
+        context["has_pending_changes"] = bool(
+            pending_toggles or "bad_sed_threshold" in pending_changes
+        )
         context["displayed_ticid"] = displayed_ticid
-        context.update(self._get_sector_context(displayed_ticid))
+        context.update(
+            self._get_sector_context(displayed_ticid, pending_toggles)
+        )
         for dirname, area in self.plot_dirs:
             plot_fname = path.join(dirname, f"tess{displayed_ticid}.png")
             if path.exists(plot_fname):
@@ -278,6 +318,7 @@ class TICIdSelectorView(View):
                 print(f"Selected TIC ID: {kwargs['displayed_ticid']}")
 
             context = self._get_context(
+                request,
                 kwargs["displayed_ticid"],
                 kwargs["sort_state"],
                 SelectTICIDs,
@@ -287,28 +328,35 @@ class TICIdSelectorView(View):
         return render(request, "select_ticids/index.html", context)
 
 
-def toggle_data(_, ticid, selection, review_table, mode):
+def toggle_data(request, ticid, selection, review_table, mode):
     """Switch the state (enabled/disabled) for given data for given TIC ID."""
-
-    excluded = exclude_data[ticid]
 
     if selection == "BLS":
         selection = "BLSOOE"
     elif selection not in ["OOE", "SPOC", "QLP"]:
         selection = int(selection)
 
+    if mode in _SAMPLING_PLOT_MODES:
+        pending_changes = request.session.get("pending_changes", {})
+        tic_pending = pending_changes.setdefault(str(ticid), {})
+        pending_toggles = tic_pending.setdefault("toggles", [])
+        if selection in pending_toggles:
+            pending_toggles.remove(selection)
+        else:
+            pending_toggles.append(selection)
+        request.session["pending_changes"] = pending_changes
+        request.session.modified = True
+        return redirect(
+            f"{review_table}_{mode}_jump",
+            sort_state="pending",
+            displayed_ticid=ticid,
+        )
+
+    excluded = exclude_data[ticid]
     if selection in excluded:
         excluded.remove(selection)
     else:
         excluded.add(selection)
-
-    if mode in ["starting", "best", "convergence", "sampling"]:
-        return redirect(
-            f"{review_table}_{mode}_decision",
-            sort_state="continue",
-            decision="changed_likelihood",
-            displayed_ticid=ticid,
-        )
 
     if mode == "lightcurve":
         with CacheSession.begin() as cache:  # pylint: disable=no-member
@@ -334,5 +382,67 @@ def replotlc(_, ticid, review_table):
     return redirect(
         f"{review_table}_lightcurve_jump",
         sort_state="pending",
+        displayed_ticid=ticid,
+    )
+
+
+def update_bad_sed_threshold(request, ticid, review_table, mode):
+    """Stage or apply bad_sed_threshold for the given TIC ID."""
+
+    threshold_str = request.POST.get("bad_sed_threshold", "").strip()
+    if mode in _SAMPLING_PLOT_MODES:
+        if threshold_str:
+            pending_changes = request.session.get("pending_changes", {})
+            tic_pending = pending_changes.setdefault(str(ticid), {})
+            tic_pending["bad_sed_threshold"] = float(threshold_str)
+            request.session["pending_changes"] = pending_changes
+            request.session.modified = True
+        return redirect(
+            f"{review_table}_{mode}_jump",
+            sort_state="pending",
+            displayed_ticid=ticid,
+        )
+    if threshold_str:
+        with CacheSession.begin() as cache:  # pylint: disable=no-member
+            cache.execute(
+                update(CachedSED)
+                .filter_by(tic_id=ticid)
+                .values(bad_sed_threshold=float(threshold_str))
+            )
+    return redirect(
+        f"{review_table}_{mode}_jump",
+        sort_state="pending",
+        displayed_ticid=ticid,
+    )
+
+
+def apply_likelihood_changes(request, ticid, review_table, mode):
+    """Apply all staged likelihood changes for the given TIC ID."""
+
+    pending_changes = request.session.get("pending_changes", {})
+    tic_pending = pending_changes.pop(str(ticid), {})
+    request.session["pending_changes"] = pending_changes
+    request.session.modified = True
+
+    for selection in tic_pending.get("toggles", []):
+        excluded = exclude_data[ticid]
+        if selection in excluded:
+            excluded.remove(selection)
+        else:
+            excluded.add(selection)
+
+    threshold = tic_pending.get("bad_sed_threshold")
+    if threshold is not None:
+        with CacheSession.begin() as cache:  # pylint: disable=no-member
+            cache.execute(
+                update(CachedSED)
+                .filter_by(tic_id=ticid)
+                .values(bad_sed_threshold=float(threshold))
+            )
+
+    return redirect(
+        f"{review_table}_{mode}_decision",
+        sort_state="continue",
+        decision="changed_likelihood",
         displayed_ticid=ticid,
     )

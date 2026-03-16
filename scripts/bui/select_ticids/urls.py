@@ -2,7 +2,13 @@
 
 from django.urls import path
 
-from .views import TICIdSelectorView, toggle_data, replotlc
+from .views import (
+    TICIdSelectorView,
+    toggle_data,
+    replotlc,
+    update_bad_sed_threshold,
+    apply_likelihood_changes,
+)
 from .path_util import get_render_dir
 
 _states = list(
@@ -99,6 +105,18 @@ urlpatterns = sum(
             "replotlc/<int:ticid>/<slug:review_table>",
             replotlc,
             name="replotlc",
+        ),
+        path(
+            "update_sed_threshold/<int:ticid>/<slug:review_table>/"
+            "<slug:mode>",
+            update_bad_sed_threshold,
+            name="update_sed_threshold",
+        ),
+        path(
+            "apply_likelihood_changes/<int:ticid>/<slug:review_table>/"
+            "<slug:mode>",
+            apply_likelihood_changes,
+            name="apply_likelihood_changes",
         ),
     ],
 )
