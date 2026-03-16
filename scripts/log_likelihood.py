@@ -421,6 +421,7 @@ class LogLikelihood(TESSTarget):
             self._sed = Green19Correction(
                 ignore_extinction_flags
             ).get_absolute_magnitudes(tic_id)[0] + ((10.0, 1.0),)
+            overwrite_cache = True
         if "BLS" in overwrite_cache:
             self._best_fit_bls = None
 

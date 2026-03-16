@@ -108,11 +108,13 @@ class CachedSED(DataModelBase):  # pylint: disable=too-few-public-methods
     )
     bad_sed_threshold = mapped_column(
         Float,
+        default=10.0,
         doc="How many sigma away should model be from measured SED before the "
         "bad SED penalty kicks in.",
     )
     bad_sed_penalty = mapped_column(
         Float,
+        default=1.0,
         doc="The factor by which to enhance the SED error bar when the "
         "threshold is exceeded."
     )

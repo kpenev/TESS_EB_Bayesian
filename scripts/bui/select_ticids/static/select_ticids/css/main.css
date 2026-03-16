@@ -118,3 +118,7 @@ a.replot {
     text-align: center;
     align-content: center;
 }
+
+.navbar label {
+    color: white;
+}

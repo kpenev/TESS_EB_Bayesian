@@ -187,14 +187,25 @@ class TICIdSelectorView(View):
                 if cached_sed and cached_sed.bad_sed_threshold is not None
                 else ""
             )
-        pending_threshold = pending_changes.get("bad_sed_threshold")
+            db_penalty = (
+                cached_sed.bad_sed_penalty
+                if cached_sed and cached_sed.bad_sed_penalty is not None
+                else ""
+            )
         context["bad_sed_threshold"] = (
-            pending_threshold
+            pending_changes["bad_sed_threshold"]
             if "bad_sed_threshold" in pending_changes
             else db_threshold
         )
+        context["bad_sed_penalty"] = (
+            pending_changes["bad_sed_penalty"]
+            if "bad_sed_penalty" in pending_changes
+            else db_penalty
+        )
         context["has_pending_changes"] = bool(
-            pending_toggles or "bad_sed_threshold" in pending_changes
+            pending_toggles
+            or "bad_sed_threshold" in pending_changes
+            or "bad_sed_penalty" in pending_changes
         )
         context["displayed_ticid"] = displayed_ticid
         context.update(
@@ -387,14 +398,18 @@ def replotlc(_, ticid, review_table):
 
 
 def update_bad_sed_threshold(request, ticid, review_table, mode):
-    """Stage or apply bad_sed_threshold for the given TIC ID."""
+    """Stage or apply bad SED parameters for the given TIC ID."""
 
     threshold_str = request.POST.get("bad_sed_threshold", "").strip()
+    penalty_str = request.POST.get("bad_sed_penalty", "").strip()
     if mode in _SAMPLING_PLOT_MODES:
+        pending_changes = request.session.get("pending_changes", {})
+        tic_pending = pending_changes.setdefault(str(ticid), {})
         if threshold_str:
-            pending_changes = request.session.get("pending_changes", {})
-            tic_pending = pending_changes.setdefault(str(ticid), {})
             tic_pending["bad_sed_threshold"] = float(threshold_str)
+        if penalty_str:
+            tic_pending["bad_sed_penalty"] = float(penalty_str)
+        if threshold_str or penalty_str:
             request.session["pending_changes"] = pending_changes
             request.session.modified = True
         return redirect(
@@ -402,12 +417,15 @@ def update_bad_sed_threshold(request, ticid, review_table, mode):
             sort_state="pending",
             displayed_ticid=ticid,
         )
-    if threshold_str:
-        with CacheSession.begin() as cache:  # pylint: disable=no-member
+    with CacheSession.begin() as cache:  # pylint: disable=no-member
+        values = {}
+        if threshold_str:
+            values["bad_sed_threshold"] = float(threshold_str)
+        if penalty_str:
+            values["bad_sed_penalty"] = float(penalty_str)
+        if values:
             cache.execute(
-                update(CachedSED)
-                .filter_by(tic_id=ticid)
-                .values(bad_sed_threshold=float(threshold_str))
+                update(CachedSED).filter_by(tic_id=ticid).values(**values)
             )
     return redirect(
         f"{review_table}_{mode}_jump",
@@ -431,13 +449,15 @@ def apply_likelihood_changes(request, ticid, review_table, mode):
         else:
             excluded.add(selection)
 
-    threshold = tic_pending.get("bad_sed_threshold")
-    if threshold is not None:
+    sed_values = {}
+    if "bad_sed_threshold" in tic_pending:
+        sed_values["bad_sed_threshold"] = float(tic_pending["bad_sed_threshold"])
+    if "bad_sed_penalty" in tic_pending:
+        sed_values["bad_sed_penalty"] = float(tic_pending["bad_sed_penalty"])
+    if sed_values:
         with CacheSession.begin() as cache:  # pylint: disable=no-member
             cache.execute(
-                update(CachedSED)
-                .filter_by(tic_id=ticid)
-                .values(bad_sed_threshold=float(threshold))
+                update(CachedSED).filter_by(tic_id=ticid).values(**sed_values)
             )
 
     return redirect(

@@ -55,8 +55,7 @@
                 <input {% if needs_replot %}class="replot" {% endif %}id="TICId" type="text" value="{{ displayed_ticid }}">
                 <form method="post" action="{% url 'update_sed_threshold' ticid=displayed_ticid review_table=review_table mode=mode %}">
                     {% csrf_token %}
-                    <label for="bad_sed_threshold">bad_sed_threshold:</label>
-                    <input id="bad_sed_threshold" type="text" name="bad_sed_threshold" value="{{ bad_sed_threshold }}">
+                    Bad SED: <label for="bad_sed_threshold">threshold=</label><input id="bad_sed_threshold" type="text" name="bad_sed_threshold" value="{{ bad_sed_threshold }}">, <label for="bad_sed_penalty">penalty=</label><input id="bad_sed_penalty" type="text" name="bad_sed_penalty" value="{{ bad_sed_penalty }}">
                     <button type="submit">Update</button>
                 </form>
             </div>
