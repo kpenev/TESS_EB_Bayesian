@@ -185,12 +185,12 @@ class TICIdSelectorView(View):
             db_threshold = (
                 cached_sed.bad_sed_threshold
                 if cached_sed and cached_sed.bad_sed_threshold is not None
-                else ""
+                else CachedSED.default_bad_sed_threshold
             )
             db_penalty = (
                 cached_sed.bad_sed_penalty
                 if cached_sed and cached_sed.bad_sed_penalty is not None
-                else ""
+                else CachedSED.default_bad_sed_penalty
             )
         context["bad_sed_threshold"] = (
             pending_changes["bad_sed_threshold"]

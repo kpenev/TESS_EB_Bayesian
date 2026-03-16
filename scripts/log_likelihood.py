@@ -420,7 +420,12 @@ class LogLikelihood(TESSTarget):
         if self._sed is None or "SED" in overwrite_cache:
             self._sed = Green19Correction(
                 ignore_extinction_flags
-            ).get_absolute_magnitudes(tic_id)[0] + ((10.0, 1.0),)
+            ).get_absolute_magnitudes(tic_id)[0] + (
+                (
+                    CachedSED.default_bad_sed_threshold,
+                    CachedSED.default_bad_sed_penalty,
+                ),
+            )
             overwrite_cache = True
         if "BLS" in overwrite_cache:
             self._best_fit_bls = None

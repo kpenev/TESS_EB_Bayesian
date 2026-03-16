@@ -55,6 +55,9 @@ class CachedSED(DataModelBase):  # pylint: disable=too-few-public-methods
 
     __tablename__ = "sed"
 
+    default_bad_sed_threshold = 10.0
+    default_bad_sed_penalty = 1.0
+
     gp1 = mapped_column(
         Float, doc="The PanSTARRS1 g filter magnitude of the EB"
     )
@@ -108,13 +111,11 @@ class CachedSED(DataModelBase):  # pylint: disable=too-few-public-methods
     )
     bad_sed_threshold = mapped_column(
         Float,
-        default=10.0,
         doc="How many sigma away should model be from measured SED before the "
         "bad SED penalty kicks in.",
     )
     bad_sed_penalty = mapped_column(
         Float,
-        default=1.0,
         doc="The factor by which to enhance the SED error bar when the "
         "threshold is exceeded."
     )
