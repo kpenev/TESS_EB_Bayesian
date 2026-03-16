@@ -136,3 +136,8 @@ a.replot {
     flex-shrink: 0;
     width: min-content;
 }
+
+.navbar .nav-controls .replot {
+    width: 100%;
+    box-sizing: border-box;
+}
