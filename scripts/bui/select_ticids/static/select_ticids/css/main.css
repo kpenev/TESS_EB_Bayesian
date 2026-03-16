@@ -119,6 +119,11 @@ a.replot {
     align-content: center;
 }
 
-.navbar label {
+.navbar label,
+.navbar form {
     color: white;
+}
+
+.navbar form input[type="text"] {
+    width: 7ch;
 }
