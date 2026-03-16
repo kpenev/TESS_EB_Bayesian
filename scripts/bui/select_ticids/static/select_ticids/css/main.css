@@ -127,3 +127,12 @@ a.replot {
 .navbar form input[type="text"] {
     width: 7ch;
 }
+
+.navbar > div:first-child {
+    min-width: 0;
+}
+
+.navbar .nav-controls {
+    flex-shrink: 0;
+    width: min-content;
+}

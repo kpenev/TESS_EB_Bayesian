@@ -36,7 +36,7 @@
                 </div>
             </div>
 
-            <div style="width: min-content">
+            <div class="nav-controls">
                 {% if has_pending_changes %}
                 <form method="post" action="{% url 'apply_likelihood_changes' ticid=displayed_ticid review_table=review_table mode=mode %}">
                     {% csrf_token %}
