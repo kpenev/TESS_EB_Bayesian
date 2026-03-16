@@ -76,6 +76,7 @@ body {
     text-align: center;
     font-size: 1.5em;
     padding: 7px 8px;
+    width: 15em;
 }
 
 .main {
@@ -137,7 +138,8 @@ a.replot {
     width: min-content;
 }
 
-.navbar .nav-controls .replot {
+.navbar .nav-controls button.replot {
+    display: block;
     width: 100%;
     box-sizing: border-box;
 }
