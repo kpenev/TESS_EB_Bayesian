@@ -330,6 +330,8 @@ class TICExcluded(set):
 class ExcludeData:  # pylint: disable=too-few-public-methods
     """Mapping from TIC ID to what to exclude from modeling."""
 
+    _disable = False
+
     def __getitem__(self, tic_id):
         """Query the exclusions for the given TIC ID."""
 
@@ -344,6 +346,8 @@ class ExcludeData:  # pylint: disable=too-few-public-methods
     def get(self, tic_id, default):
         """Get the item or default if it does not exist."""
 
+        if self._disable:
+            return TICExcluded(tic_id, [])
         with CacheSession.begin() as cache:  # pylint: disable=no-member
             exclude_flags = cache.scalars(
                 select(ExcludeDataTable.exclude).filter_by(tic_id=tic_id)
@@ -351,6 +355,11 @@ class ExcludeData:  # pylint: disable=too-few-public-methods
             if not exclude_flags:
                 return default
             return TICExcluded(tic_id, exclude_flags)
+
+    def disable_exclusions(self):
+        """Turn-off excluding data."""
+
+        self._disable = True
 
 
 exclude_data = ExcludeData()

@@ -55,6 +55,9 @@ class CachedSED(DataModelBase):  # pylint: disable=too-few-public-methods
 
     __tablename__ = "sed"
 
+    default_bad_sed_threshold = 10.0
+    default_bad_sed_penalty = 1.0
+
     gp1 = mapped_column(
         Float, doc="The PanSTARRS1 g filter magnitude of the EB"
     )

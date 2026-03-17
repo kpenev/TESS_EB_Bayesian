@@ -41,8 +41,8 @@ def parse_command_line():
     parser.add_argument(
         "--samples-fname-pattern",
         default=paths.samples,
-        help="The filename where to save samples. If the file already exists, "
-        "sampling continues, adding more points to the existing chain.",
+        help="The filename containing the existing MCMC chain to create an "
+        "archive for.",
     )
     parser.add_argument(
         "--chain-name",

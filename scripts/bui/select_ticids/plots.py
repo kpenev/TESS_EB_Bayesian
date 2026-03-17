@@ -397,6 +397,9 @@ def download_samples(fnames):
         rsync_list_fname = path.join(destination, "need_samples.txt")
         with open(rsync_list_fname, "w", encoding="utf-8") as rsync_list:
             rsync_list.write("\n".join([path.basename(f) for f in fnames]))
+        print(
+            f"Attempting to download {len(fnames)} samples files from {source}."
+        )
         subprocess.run(
             [
                 "rsync",
@@ -406,6 +409,7 @@ def download_samples(fnames):
                 destination,
                 "-avz",
                 "--progress",
+                "--ignore-missing-args",
             ],
             check=True,
         )

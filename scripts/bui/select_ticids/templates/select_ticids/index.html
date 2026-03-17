@@ -36,19 +36,28 @@
                 </div>
             </div>
 
-            <div style="width: min-content">
-                {% if needs_replot %}
-                <a href="{% url 'replotlc' ticid=displayed_ticid review_table=review_table %}" 
+            <div class="nav-controls">
+                {% if has_pending_changes %}
+                <form method="post" action="{% url 'apply_likelihood_changes' ticid=displayed_ticid review_table=review_table mode=mode %}">
+                    {% csrf_token %}
+                    <button type="submit" class="replot">Apply Changes</button>
+                </form>
+                {% elif needs_replot %}
+                <a href="{% url 'replotlc' ticid=displayed_ticid review_table=review_table %}"
                     class="replot">
                     Data selection changed: click to replot
                 </a>
-                <input class="replot" id="TICId" type="text" value="{{ displayed_ticid }}">
                 {% else %}
                 <a class="replot" href="{% url review|add:'_update_rendered' displayed_ticid=displayed_ticid %}">
                     Update rendered
                 </a>
-                <input id="TICId" type="text" value="{{ displayed_ticid }}">
                 {% endif %}
+                <input {% if needs_replot %}class="replot" {% endif %}id="TICId" type="text" value="{{ displayed_ticid }}" readonly>
+                <form method="post" action="{% url 'update_sed_threshold' ticid=displayed_ticid review_table=review_table mode=mode %}">
+                    {% csrf_token %}
+                    Bad SED: <label for="bad_sed_threshold">threshold=</label><input id="bad_sed_threshold" type="text" name="bad_sed_threshold" value="{{ bad_sed_threshold }}">, <label for="bad_sed_penalty">penalty=</label><input id="bad_sed_penalty" type="text" name="bad_sed_penalty" value="{{ bad_sed_penalty }}">
+                    <button type="submit">Update</button>
+                </form>
             </div>
         </div>
         <div class="main">

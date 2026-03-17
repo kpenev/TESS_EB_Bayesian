@@ -10,7 +10,6 @@ from autowisp.iterative_rejection_util import (
     iterative_rej_smoothing_spline,
     iterative_rej_polynomial_fit,
 )
-from matplotlib import pyplot
 
 from tess_target import get_bls_eclipse_mask
 
@@ -56,19 +55,19 @@ def get_moving_median(lightcurve, half_porb=None, mask=None, min_points=20):
     return result
 
 
-def get_ooe_spline_nodes(masked_time, half_porb):
+def get_ooe_spline_nodes(masked_time, approx_node_spacing):
     """Return the nodes to use for the out-of-eclipse smoothing spline."""
 
     timespan = masked_time[-1] - masked_time[0]
     node_times = numpy.linspace(
         masked_time[0],
         masked_time[-1],
-        2 * int(numpy.ceil(timespan / half_porb)) + 6,
+        int(numpy.ceil(timespan / approx_node_spacing)) + 6,
     )
     _logger.debug(
-        "Guess node times (timespan=%s, P/2=%s): %s",
+        "Guess node times (timespan=%s, target spacing=%s): %s",
         repr(timespan),
-        repr(half_porb),
+        repr(approx_node_spacing),
         repr(node_times),
     )
     found_nodes = False
@@ -113,19 +112,22 @@ def ooe_ends_to_discard(mask, min_tail_points=10):
 # pylint: disable=too-many-arguments
 def get_ooe_variability(
     lightcurve,
-    half_porb=numpy.inf,
+    approx_node_spacing=numpy.inf,
     mask=None,
     *,
+    half_porb=numpy.inf,
     spline_rejection=(5.0, 3.0),
     eclipse_rejection=2.0,
     return_mask=False,
 ):
     """Remove the out-of-eclipse variability from the lightcurve."""
 
+    if numpy.isfinite(half_porb) and not numpy.isfinite(approx_node_spacing):
+        approx_node_spacing = half_porb / 2
     _logger.debug(
-        "Extracting OOE variability with mask %s and P/2 %s",
+        "Extracting OOE variability with mask %s and target node spacing %s",
         repr(mask),
-        repr(half_porb),
+        repr(approx_node_spacing),
     )
     if mask is None:
         mask = numpy.ones(lightcurve.size, dtype=bool)
@@ -133,18 +135,20 @@ def get_ooe_variability(
     masked_time = lightcurve["time"][mask]
     masked_flux = lightcurve["flux"][mask]
 
-    if numpy.isfinite(half_porb) and masked_time[-1] - masked_time[0] < min(
-        half_porb, 5
-    ):
+    if numpy.isfinite(approx_node_spacing) and masked_time[-1] - masked_time[
+        0
+    ] < min(3 * approx_node_spacing, 5):
         _logger.warning(
             "Time span of LC portion too small (%s). Discarding",
             repr(masked_time[-1] - masked_time[0]),
         )
-        return numpy.full(masked_time.shape, numpy.nan)
+        return numpy.full(mask.shape, numpy.nan)
 
     ooe_mask = numpy.ones(masked_time.size, dtype=bool)
     while True:
-        spline_nodes = get_ooe_spline_nodes(masked_time, half_porb)[1:-1]
+        spline_nodes = get_ooe_spline_nodes(masked_time, approx_node_spacing)[
+            1:-1
+        ]
         if spline_nodes.size > 3:
             _logger.debug(
                 "Using %d nodes spline detrending for %s < t < %s",
@@ -185,7 +189,7 @@ def get_ooe_variability(
         ooe_mask = numpy.logical_and(ooe_mask, new_ooe_mask)
         _logger.debug("Re-fitting trend on %d OOE points.", ooe_mask.sum())
 
-    #try:
+    # try:
     #    pyplot.plot(lightcurve["time"], lightcurve["flux"], ".k")
     #    pyplot.plot(masked_time, masked_flux, ".r")
     #    pyplot.plot(masked_time[ooe_mask], masked_flux[ooe_mask], ".g")
@@ -195,7 +199,7 @@ def get_ooe_variability(
     #        + " detrending"
     #    )
     #    pyplot.show()
-    #except:  # pylint: disable=bare-except
+    # except:  # pylint: disable=bare-except
     #    pass
 
     discard_left, discard_right = ooe_ends_to_discard(mask)
@@ -221,6 +225,19 @@ def get_ooe_variability(
 
 
 # pylint: enable=too-many-arguments
+
+
+def get_lc_gap_indices(lc_times, min_gap):
+    """Return indices where to slice the lightcurve to avoid gaps."""
+
+    gap_indices = (
+        numpy.nonzero(
+            lc_times[1:] - lc_times[:-1] > min_gap
+        )[0]
+        + 1
+    )
+    gap_indices = numpy.append(gap_indices, lc_times.size)
+    return gap_indices
 
 
 def detrend_with_gaps(
@@ -249,13 +266,6 @@ def detrend_with_gaps(
     """
 
     print("Detrending with gaps" + ", saving detrending" if full_output else "")
-    gap_indices = (
-        numpy.nonzero(
-            lightcurve["time"][1:] - lightcurve["time"][:-1] > min_gap
-        )[0]
-        + 1
-    )
-    gap_indices = numpy.append(gap_indices, lightcurve["time"].size)
 
     fixed_kwargs = {}
     segment_kwargs = {}
@@ -283,7 +293,7 @@ def detrend_with_gaps(
     good_mask = numpy.ones(detrended.size, dtype=bool)
     if fixed_kwargs.get("return_mask", False):
         eclipse_mask = numpy.zeros(detrended.size, dtype=bool)
-    for end_index in gap_indices:
+    for end_index in get_lc_gap_indices(lightcurve["time"], min_gap):
         if end_index - start_index < 20:
             good_mask[start_index:end_index] = False
             continue
@@ -314,7 +324,7 @@ def detrend_with_gaps(
 
     detrended = detrended[good_mask]
     if fixed_kwargs.get("return_mask", False):
-        return detrended, eclipse_mask[good_mask]
+        return detrended, eclipse_mask[good_mask], good_mask
     return detrended
 
 

@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Prepare FITS files of samples for public release."""
 
+import os
+
 import numpy
 from matplotlib import pyplot
 from matplotlib.backends.backend_pdf import PdfPages
@@ -48,7 +50,7 @@ def parse_command_line():
         "--diagnostic-quantiles",
         type=float,
         nargs="+",
-        default=list(numpy.linspace(0.1, 0.9, 9)),
+        default=[0.1, 0.5, 0.9],
         help="The quantiles at which to use for the Raftery-Lewis diagnostic to"
         " determine convergence.",
     )
@@ -84,9 +86,14 @@ def get_burnin(plot_data, num_steps, num_walkers, config):
     """Return the burn-in to use for the TIC ID currently set in config."""
 
     if not hasattr(get_burnin, "burnin"):
-        get_burnin.burnin = pandas.read_csv(
-            "release_burnin.txt", sep=r"\s+", header=0, index_col="TIC"
-        )
+        if os.path.exists("release_burnin.txt"):
+            get_burnin.burnin = pandas.read_csv(
+                "release_burnin.txt", sep=r"\s+", header=0, index_col="TIC"
+            )
+        else:
+            get_burnin.burnin = pandas.DataFrame(
+                data={"TIC": [], "burn-in": []}, dtype=int
+            ).set_index("TIC")
     try:
         return int(get_burnin.burnin.loc[config.tic_id])
     except KeyError:
@@ -231,7 +238,7 @@ def create_release(config):
     """Create the release of a single TIC ID."""
 
     plot_data, blobs, log_prob, _, backend = get_plot_data(config, None)
-    num_steps = min(backend.iteration, max_steps)
+    num_steps = log_prob.shape[0]
     num_walkers = backend.shape[0]
 
     burnin = get_burnin(plot_data, num_steps, num_walkers, config)
@@ -240,7 +247,7 @@ def create_release(config):
         f"deciding thinning to release {config.release_num_steps!r} steps."
     )
     thin = (num_steps - burnin) // config.release_num_steps
-    if thin == 0:
+    if thin <= 0:
         raise ValueError(
             f"Insufficient number of MCMC steps ({num_steps - burnin}) after "
             f"burnin ({burnin}) to release {config.release_num_steps} steps!"
@@ -258,6 +265,8 @@ def create_release(config):
         log_prob[burnin::thin, :].flatten() * u.dimensionless_unscaled,
         name="log_prob",
     )
+    ensure_directory(config.release_fname)
+
     print("Generating diagnostic plots")
     plot_data = plot_data.iloc[burnin * num_walkers :]
     pdf_fname = config.release_fname.replace(".fits", "_diag.pdf")
@@ -265,7 +274,6 @@ def create_release(config):
         plot_release_cdf(plot_data, release_data, config, pdf)
         plot_release_quantile_diff(plot_data, release_data, config, pdf)
     print(f"Diagnostic plots saved to: {pdf_fname!r}")
-    ensure_directory(config.release_fname)
     print(f"Release data stats: {release_data.info(['attributes', 'stats'])}")
     release_data.write(config.release_fname, format="fits", overwrite=True)
     print(f"Written to: {config.release_fname!r}")
@@ -282,9 +290,14 @@ def main(config):
         config.release_fname = config.release_fname_pattern.format(
             tic_id=config.tic_id
         )
+        if os.path.exists(config.release_fname):
+            continue
         config.burn_in = 0
         config.thin = 1
-        create_release(config)
+        try:
+            create_release(config)
+        except ValueError as err:
+            print(f"Skipping {config.tic_id}: {err}")
 
 
 if __name__ == "__main__":

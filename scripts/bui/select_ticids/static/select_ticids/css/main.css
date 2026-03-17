@@ -76,6 +76,7 @@ body {
     text-align: center;
     font-size: 1.5em;
     padding: 7px 8px;
+    width: 15em;
 }
 
 .main {
@@ -117,4 +118,28 @@ a.replot {
     color: #000;
     text-align: center;
     align-content: center;
+}
+
+.navbar label,
+.navbar form {
+    color: white;
+}
+
+.navbar form input[type="text"] {
+    width: 7ch;
+}
+
+.navbar > div:first-child {
+    min-width: 0;
+}
+
+.navbar .nav-controls {
+    flex-shrink: 0;
+    width: min-content;
+}
+
+.navbar .nav-controls button.replot {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
 }

@@ -185,7 +185,7 @@ class LogLikelihood(TESSTarget):
                 self,
                 get_ooe_variability,
                 return_mask=True,
-            )
+            )[:2]
             rms = numpy.sqrt(
                 numpy.mean((detrended["flux"] - 1)[detrend_mask] ** 2)
             )
@@ -199,7 +199,7 @@ class LogLikelihood(TESSTarget):
         return phase[phase_sorter], eclipse_mask[phase_sorter]
 
     def _get_near_eclipse_ranges(
-        self, porb, eclipse_fraction, bin_edges, ooe_factor
+        self, porb, eclipse_fraction, bin_edges, pad_duration
     ):
         """Return list of start times and near-eclipse durations."""
 
@@ -268,8 +268,8 @@ class LogLikelihood(TESSTarget):
                 duration = end + 1 - start
             else:
                 duration = end - start
-            start -= ooe_factor * duration
-            result.append((start, duration * (1 + 2 * ooe_factor)))
+            start -= pad_duration * duration
+            result.append((start, duration * (1 + 2 * pad_duration)))
 
         print(f"Near eclipse ranges: {result}")
         return result
@@ -287,7 +287,7 @@ class LogLikelihood(TESSTarget):
             / numpy.histogram(phase, bins=nbins, range=(0, 1))[0]
         ), bin_edges
 
-    def _add_eclipse_flags(self, ooe_factor):
+    def _add_eclipse_flags(self, pad_duration):
         """
         Add flags to the LCs selecting only and all points near eclipses.
 
@@ -306,9 +306,9 @@ class LogLikelihood(TESSTarget):
                 numpy.zeros(lightcurve.size, dtype=int),
             )
             header["near_eclipse_ranges"] = self._get_near_eclipse_ranges(
-                porb, eclipse_fraction, bin_edges, ooe_factor
+                porb, eclipse_fraction, bin_edges, pad_duration
             )
-            header["bls_period"] = porb
+            header["porb"] = porb
 
             for (start_phase, duration), sign in zip(
                 header["near_eclipse_ranges"],
@@ -323,7 +323,9 @@ class LogLikelihood(TESSTarget):
                 )
             self._lcs[lc_ind] = (header, lightcurve)
 
-    def _prepare_lightcurves(self, tic_exclude, save_detrending):
+    def _prepare_lightcurves(
+        self, tic_exclude, save_detrending, *, pad_duration=0.4
+    ):
         """Prepare the lightcurves for sampling."""
 
         detrend_kwargs = {
@@ -336,7 +338,7 @@ class LogLikelihood(TESSTarget):
             detrend_kwargs["get_trend"] = get_ooe_variability
             detrend_kwargs["spline_rejection"] = 5.0
             detrend_kwargs["eclipse_rejection"] = 2.0
-            detrend_kwargs["half_porb"] = cat_info["period"] / 2
+            detrend_kwargs["approx_node_spacing"] = cat_info["period"] / 4
         else:
             self.get_model = self.get_full_model
             detrend_kwargs["get_trend"] = get_moving_median
@@ -368,7 +370,7 @@ class LogLikelihood(TESSTarget):
                 self._lcs = []
                 overwrite_cache = True
 
-        self._add_eclipse_flags(0.4)
+        self._add_eclipse_flags(pad_duration)
 
         return overwrite_cache
 
@@ -397,13 +399,14 @@ class LogLikelihood(TESSTarget):
 
         return getattr(self._range, param)
 
-    def __init__(
+    def __init__( # pylint: disable=too-many-arguments
         self,
         tic_id,
         *,
         overwrite_cache=(),
         ignore_extinction_flags=True,
         save_detrending=False,
+        pad_duration=0.4
     ):
         """Prepare to evaluate the log-likelihood for the given TIC ID."""
 
@@ -417,13 +420,20 @@ class LogLikelihood(TESSTarget):
         if self._sed is None or "SED" in overwrite_cache:
             self._sed = Green19Correction(
                 ignore_extinction_flags
-            ).get_absolute_magnitudes(tic_id)[0] + ((10.0, 1.0),)
+            ).get_absolute_magnitudes(tic_id)[0] + (
+                (
+                    CachedSED.default_bad_sed_threshold,
+                    CachedSED.default_bad_sed_penalty,
+                ),
+            )
+            overwrite_cache = True
         if "BLS" in overwrite_cache:
             self._best_fit_bls = None
 
         overwrite_cache = (
             self._prepare_lightcurves(
-                exclude_data.get(tic_id, []), save_detrending
+                exclude_data.get(tic_id, []), save_detrending,
+                pad_duration=pad_duration
             )
             or overwrite_cache
         )
@@ -565,7 +575,7 @@ class LogLikelihood(TESSTarget):
         eclipse_indices = numpy.unique(lightcurve["eclipse_flags"])
 
         bls_times = [
-            (start + 0.5 * duration) * header["bls_period"]
+            (start + 0.5 * duration) * header["porb"]
             for start, duration in header["near_eclipse_ranges"]
         ]
         eclipse_model = binary.get_lightcurve(
@@ -956,7 +966,7 @@ class LogLikelihood(TESSTarget):
             ) / numpy.maximum(self._sed[1][finite], 0.01)
             bad_sed = nsigma > self._sed[2][0]
             result[bad_sed] *= 10.0 ** (
-                self._sed[2][1] * (nsigma[bad_sed] - self._sed[2][0])**0.5
+                self._sed[2][1] * (nsigma[bad_sed] - self._sed[2][0]) ** 0.5
             )
             result[numpy.isinf(result)] = numpy.finfo(result.dtype).max
         self._logger.debug("After penalty, SED residuals: %s", repr(result))
