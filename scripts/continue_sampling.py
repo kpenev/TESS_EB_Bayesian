@@ -45,6 +45,13 @@ def parse_command_line():
     )
     add_slurm_config(parser)
     parser.add_argument(
+        "--continue-status",
+        type=int,
+        default=2,
+        help="The single status value that mcmc_sampling.py should treat as "
+        "'continue'. Passed directly to mcmc_sampling.py.",
+    )
+    parser.add_argument(
         "--continue-statuses",
         type=int,
         default=None,
@@ -58,8 +65,9 @@ def parse_command_line():
         type=int,
         default=[],
         nargs="+",
-        help="The status(es) assigned to the tics for which likelihood has "
-        "changed and need the ``--changed-likelihood`` argument.",
+        help="The status(es) assigned to the tics for which the likelihood has "
+        "changed since the last sampling run. Passed directly to "
+        "mcmc_sampling.py.",
     )
     parser.add_argument(
         "--submit-jobs",
@@ -170,23 +178,29 @@ def update_job(  # pylint: disable=too-many-arguments
             f"Got {len(job_entries)} instead of {expected_num_tics} entries for"
             f" job group {group_id}, job {job_id} on {config.hpc}"
         )
+    status_extra = f"--continue-status {config.continue_status}"
+    if config.changed_likelihood_statuses:
+        status_extra += " --changed-likelihood-statuses " + " ".join(
+            str(s) for s in config.changed_likelihood_statuses
+        )
+    if config.ignore_git_hash:
+        status_extra += " --ignore-git-hash"
+    elif config.update_git_hash:
+        status_extra += " --update-git-hash"
+
     cmd_substitutions = []
 
     for entry in job_entries:
         substitution = {"job_id": job_id, "ticid": getattr(entry, "id", None)}
-        if (
-            entry is not None
-            and entry.status in config.changed_likelihood_statuses
-        ):
-            substitution["extra_cmdline"] = "--changed-likelihood"
-        elif entry is not None and (
-            (config.continue_statuses is None and entry.status > 0)
+        if entry is not None and (
+            entry.status in config.changed_likelihood_statuses
+            or (config.continue_statuses is None and entry.status > 0)
             or (
                 config.continue_statuses is not None
                 and entry.status in config.continue_statuses
             )
         ):
-            substitution["extra_cmdline"] = ""
+            substitution["extra_cmdline"] = status_extra
         else:
             if entry is not None:
                 entry.job_id = None
@@ -195,14 +209,7 @@ def update_job(  # pylint: disable=too-many-arguments
             replacement.job_group = group_id
             replacement.job_id = job_id
             substitution["ticid"] = replacement.id
-            substitution["extra_cmdline"] = ""
-            if replacement.status in config.changed_likelihood_statuses:
-                substitution["extra_cmdline"] += " --changed-likelihood"
-        if config.ignore_git_hash:
-            substitution["extra_cmdline"] += " --ignore-git-hash"
-        elif config.update_git_hash:
-            substitution["extra_cmdline"] += " --update-git-hash"
-
+            substitution["extra_cmdline"] = status_extra
         cmd_substitutions.append(substitution)
     launcher_cmd = make_file["launcher_cmd"](cmd_substitutions)
     return make_file["slurm"](

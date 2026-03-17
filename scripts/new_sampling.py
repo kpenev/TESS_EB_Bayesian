@@ -62,6 +62,22 @@ def parse_command_line():
         "-d", "--job-description", default="", help="Description of the job."
     )
     add_slurm_config(parser)
+    parser.add_argument(
+        "--continue-status",
+        type=int,
+        default=2,
+        help="The single status value that mcmc_sampling.py should treat as "
+        "'continue'. Passed directly to mcmc_sampling.py.",
+    )
+    parser.add_argument(
+        "--changed-likelihood-statuses",
+        type=int,
+        default=[],
+        nargs="+",
+        help="The status(es) assigned to the tics for which the likelihood has "
+        "changed since the last sampling run. Passed directly to "
+        "mcmc_sampling.py.",
+    )
     return parser.parse_args()
 
 
@@ -128,6 +144,11 @@ class FileFromTemplate:
 def get_file_makers(group_id, config):
     """Return instances of :class:`FileFromTemplate`_ for creating job files."""
 
+    extra_cmdline = f"--continue-status {config.continue_status}"
+    if config.changed_likelihood_statuses:
+        extra_cmdline += " --changed-likelihood-statuses " + " ".join(
+            str(s) for s in config.changed_likelihood_statuses
+        )
     substitutions = {
         "hpc": config.hpc,
         "job_group": group_id,
@@ -138,7 +159,7 @@ def get_file_makers(group_id, config):
         "num_parallel": config.num_parallel,
         "time_limit": config.time_limit,
         "processes_per_job": tic_per_node[config.hpc] * config.nodes_per_job,
-        "extra_cmdline": "",
+        "extra_cmdline": extra_cmdline,
     }
     return {
         "slurm": FileFromTemplate(slurm_fname, substitutions),

@@ -23,6 +23,9 @@ from general_purpose_python_modules.emcee_util import (
     load_initial_positions,
 )
 
+from sqlalchemy import select, update
+from bui.db_interface import Session
+from bui.select_ticids.data_model import JobGroup, get_ticid_select_tables
 from utils import lmfit_and_tweak
 from hacked_emcee_hdf5_backend import HDFBackend
 from log_likelihood import SampleParams, LogLikelihood
@@ -151,12 +154,21 @@ def parse_command_line():
         "restart samples is skipped.",
     )
     parser.add_argument(
-        "--changed-likelihood",
-        action="store_true",
-        default=False,
-        help="If passed, the log-likelihood function is assumed to have changed"
-        " since the last sampling run. This will cause the sampling to restart"
-        " from the last step of the existing chain, rather than continuing.",
+        "--continue-status",
+        type=int,
+        default=2,
+        help="The status assigned to the tics for which sampling should "
+        "continue.",
+    )
+    parser.add_argument(
+        "--changed-likelihood-statuses",
+        type=int,
+        default=[],
+        nargs="+",
+        help="The status(es) assigned to the tics for which likelihood has "
+        "changed since the last sampling run. This will cause the sampling to "
+        "restart from the last step of the existing chain, rather than "
+        "continuing.",
     )
 
     parser.add_argument(
@@ -245,6 +257,48 @@ def parse_command_line():
     )
 
     return parser.parse_args()
+
+
+def detect_likelihood_change(tic_id, config):
+    """Return True if the likelihood changed for tic_id, False to continue.
+
+    Looks up tic_id in the BUI job-group tables and compares its status
+    to --continue-status and --changed-likelihood-statuses.  Raises
+    ValueError if the TIC is not found or its status matches neither.
+    """
+
+    status = None
+    matched_job_group = None
+    with Session.begin() as db_session:  # pylint: disable=no-member
+        job_groups = db_session.execute(select(JobGroup)).scalars().all()
+        for job_group in job_groups:
+            SelectTable = get_ticid_select_tables(
+                job_group.select_tic_table, must_exist=True
+            )[0]
+            tic_entry = db_session.execute(
+                select(SelectTable).filter_by(id=tic_id, job_group=job_group.id)
+            ).scalar_one_or_none()
+            if tic_entry is None:
+                continue
+            assert status is None, f"TIC {tic_id} found in multiple job groups!"
+            status = tic_entry.status
+            matched_job_group = job_group
+
+        if status is None:
+            raise ValueError(f"TIC {tic_id} not found in any job group table.")
+        if status == config.continue_status:
+            return False, matched_job_group.select_tic_table
+        if status in config.changed_likelihood_statuses:
+            return True, matched_job_group.select_tic_table
+        raise ValueError(
+            f"TIC {tic_id} has status {status} in table "
+            f"{matched_job_group.select_tic_table!r} "
+            f"(job group {matched_job_group.id})"
+            f", which is neither the continue status "
+            f"({config.continue_status}) nor one of the "
+            f"changed-likelihood statuses "
+            f"({config.changed_likelihood_statuses})."
+        )
 
 
 def get_backend(samples_fname, config):
@@ -562,6 +616,15 @@ def main(config):
 
     setup_process(task="mcmc_sampling", **vars(config))
 
+    config.changed_likelihood, config.ticid_select_table = (
+        detect_likelihood_change(config.tic_id, config)
+    )
+    _logger.info(
+        "Preparing to sample TIC ID %d, %s log-likelihood change",
+        config.tic_id,
+        "with" if config.changed_likelihood else "without",
+    )
+
     samples_fname = config.samples_fname_pattern.format(tic_id=config.tic_id)
     backend, final_run = get_backend(samples_fname, config)
     if config.force_restart:
@@ -602,6 +665,18 @@ def main(config):
 
     if config.starting_positions_only:
         return
+
+    if config.changed_likelihood:
+        with Session.begin() as db_session:  # pylint: disable=no-member
+            db_session.execute(
+                update(
+                    get_ticid_select_tables(
+                        config.ticid_select_table, must_exist=True
+                    )[0]
+                )
+                .filter_by(id=config.tic_id)
+                .values(status=config.continue_status)
+            )
 
     while True:
         _logger.info(
