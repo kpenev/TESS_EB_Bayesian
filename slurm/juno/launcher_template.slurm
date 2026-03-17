@@ -10,6 +10,7 @@
 #SBATCH --output=/scratch/juno/kxp174430/output/TESS_EBs/render_output/slurm.out
 #SBATCH --mail-user=kxp174430@utdallas.edu
 #SBATCH --mail-type=all
+#SBATCH --dependency=singleton
 #------------------------------------------------------
 
 source ~/module_load_order.sh

@@ -1,11 +1,12 @@
 #!/bin/bash
 
-#SBATCH --nodes=1  #Number of nodes on which to distribute the tasks evenly
-#SBATCH --ntasks-per-node=8 #Total number of tasks to run at one time
-#SBATCH --mem=384000M #Maximum amount of memory likely to be needed
+#SBATCH --nodes=1 	    # Number of nodes on which to distribute the tasks evenly
+#SBATCH --ntasks-per-node=1 # Total number of tasks to run at one time
+#SBATCH --cpus-per-task=16  # Reserve all 64 cores on each node
+#SBATCH --mem=375G          # Full node memory
 #SBATCH --time=48:00:00
 #SBATCH --partition=normal
-#SBATCH --job-name=render_juno
+#SBATCH --job-name=render_juno_@@JOBID@@
 #SBATCH --output=/scratch/juno/kxp174430/output/TESS_EBs/render_output/slurm.out
 #SBATCH --mail-user=kxp174430@utdallas.edu
 #SBATCH --mail-type=all
@@ -28,11 +29,11 @@ render() {
 
     conda run -n py311 python3 -u \
         ${source_dir}/bui/select_ticids/plots.py "${plot_mode}" \
-	--limit-to-statuses 2 7 \
-        --limit-to-jobs 2: 3: \
+	--limit-to-statuses 2 4 \
+	--limit-to-jobs 5:@@JOBID@@ \
 	--samples-fname-template \
 	/scratch/juno/kxp174430/TESS_EBs/juno/samples/tess{tic_id:d}_samples.h5 \
-        --num-parallel 8 \
+        --num-parallel 16 \
         --table-name "${table}" \
         --plot-dir ${plot_dir} \
         --std-out-err-fname \
@@ -50,6 +51,5 @@ source ~/set_environment.sh
 
 render sample_prsa best
 render sample_prsa convergence
-render sample_prsa starting
 
 wait
