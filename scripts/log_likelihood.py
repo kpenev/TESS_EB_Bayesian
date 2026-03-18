@@ -116,6 +116,7 @@ class LogLikelihood(TESSTarget):
                     )
                     for column in bls_columns
                     if not column.endswith("_uncertainty")
+                    and not column == "tic_id"
                 }
                 cls._logger.debug("Loaded cached BLS: %s", repr(bls))
         return sed, bls
@@ -399,14 +400,14 @@ class LogLikelihood(TESSTarget):
 
         return getattr(self._range, param)
 
-    def __init__( # pylint: disable=too-many-arguments
+    def __init__(  # pylint: disable=too-many-arguments
         self,
         tic_id,
         *,
         overwrite_cache=(),
         ignore_extinction_flags=True,
         save_detrending=False,
-        pad_duration=0.4
+        pad_duration=0.4,
     ):
         """Prepare to evaluate the log-likelihood for the given TIC ID."""
 
@@ -426,14 +427,16 @@ class LogLikelihood(TESSTarget):
                     CachedSED.default_bad_sed_penalty,
                 ),
             )
-            overwrite_cache.append("SED")
+            if "SED" not in overwrite_cache:
+                overwrite_cache.append("SED")
         if "BLS" in overwrite_cache:
             self._best_fit_bls = None
 
         overwrite_cache = (
             self._prepare_lightcurves(
-                exclude_data.get(tic_id, []), save_detrending,
-                pad_duration=pad_duration
+                exclude_data.get(tic_id, []),
+                save_detrending,
+                pad_duration=pad_duration,
             )
             or overwrite_cache
         )
