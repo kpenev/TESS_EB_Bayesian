@@ -426,7 +426,7 @@ class LogLikelihood(TESSTarget):
                     CachedSED.default_bad_sed_penalty,
                 ),
             )
-            overwrite_cache = overwrite_cache + ("SED",)
+            overwrite_cache = overwrite_cache.append("SED")
         if "BLS" in overwrite_cache:
             self._best_fit_bls = None
 
