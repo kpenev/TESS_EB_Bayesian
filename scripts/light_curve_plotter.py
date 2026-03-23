@@ -593,6 +593,8 @@ class LightCurvePlotter:
             lightcurve = numpy.copy(lightcurve)
             lightcurve["flux"] /= numpy.median(lightcurve["flux"])
             if binaries:
+                if (lightcurve["eclipse_flags"] != 0).sum() == 0:
+                    continue
                 self._fix_eclipse_flags(lightcurve, log_likelihood, binaries[0])
 
             model_lcs = self._get_model_lcs(
