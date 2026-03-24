@@ -632,6 +632,8 @@ def main(config):
     log_likelihood = (
         LogLikelihoodPriorsOnly if config.priors_only else LogLikelihood
     )(config.tic_id, overwrite_cache=config.overwrite_cache)
+    if log_likelihood.sed_recomputed:
+        config.changed_likelihood = True
 
     initial_state = None
     if backend.iteration == 0:

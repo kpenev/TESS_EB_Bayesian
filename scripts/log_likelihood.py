@@ -418,15 +418,23 @@ class LogLikelihood(TESSTarget):
 
         self._sed, self._best_fit_bls = self.get_cached_sed_and_bls(tic_id)
 
-        if self._sed is None or "SED" in overwrite_cache:
+        threshold_penalty = (
+            self._sed[2]
+            if self._sed is not None and self._sed[2][0] is not None
+            else (
+                CachedSED.default_bad_sed_threshold,
+                CachedSED.default_bad_sed_penalty,
+            )
+        )
+        self.sed_recomputed = (
+            self._sed is None
+            or "SED" in overwrite_cache
+            or numpy.all(numpy.isnan(self._sed[0]))
+        )
+        if self.sed_recomputed:
             self._sed = Green19Correction(
                 ignore_extinction_flags
-            ).get_absolute_magnitudes(tic_id)[0] + (
-                (
-                    CachedSED.default_bad_sed_threshold,
-                    CachedSED.default_bad_sed_penalty,
-                ),
-            )
+            ).get_absolute_magnitudes(tic_id)[0] + (threshold_penalty,)
             if "SED" not in overwrite_cache:
                 overwrite_cache.append("SED")
         if "BLS" in overwrite_cache:

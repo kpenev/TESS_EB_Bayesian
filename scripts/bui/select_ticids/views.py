@@ -397,6 +397,18 @@ def replotlc(_, ticid, review_table):
     )
 
 
+def _record_bad_sed(ticid, values):
+    """Set new bad SED threshold/penalty for the given TIC id."""
+
+    with CacheSession.begin() as cache:  # pylint: disable=no-member
+        cached_sed = cache.get(CachedSED, ticid)
+        if cached_sed is None:
+            cache.add(CachedSED(tic_id=ticid, **values))
+        else:
+            for key, value in values.items():
+                setattr(cached_sed, key, value)
+
+
 def update_bad_sed_threshold(request, ticid, review_table, mode):
     """Stage or apply bad SED parameters for the given TIC ID."""
 
@@ -417,16 +429,13 @@ def update_bad_sed_threshold(request, ticid, review_table, mode):
             sort_state="pending",
             displayed_ticid=ticid,
         )
-    with CacheSession.begin() as cache:  # pylint: disable=no-member
-        values = {}
-        if threshold_str:
-            values["bad_sed_threshold"] = float(threshold_str)
-        if penalty_str:
-            values["bad_sed_penalty"] = float(penalty_str)
-        if values:
-            cache.execute(
-                update(CachedSED).filter_by(tic_id=ticid).values(**values)
-            )
+    values = {}
+    if threshold_str:
+        values["bad_sed_threshold"] = float(threshold_str)
+    if penalty_str:
+        values["bad_sed_penalty"] = float(penalty_str)
+    if values:
+        _record_bad_sed(ticid, values)
     return redirect(
         f"{review_table}_{mode}_jump",
         sort_state="pending",
@@ -451,14 +460,13 @@ def apply_likelihood_changes(request, ticid, review_table, mode):
 
     sed_values = {}
     if "bad_sed_threshold" in tic_pending:
-        sed_values["bad_sed_threshold"] = float(tic_pending["bad_sed_threshold"])
+        sed_values["bad_sed_threshold"] = float(
+            tic_pending["bad_sed_threshold"]
+        )
     if "bad_sed_penalty" in tic_pending:
         sed_values["bad_sed_penalty"] = float(tic_pending["bad_sed_penalty"])
     if sed_values:
-        with CacheSession.begin() as cache:  # pylint: disable=no-member
-            cache.execute(
-                update(CachedSED).filter_by(tic_id=ticid).values(**sed_values)
-            )
+        _record_bad_sed(ticid, sed_values)
 
     return redirect(
         f"{review_table}_{mode}_decision",
