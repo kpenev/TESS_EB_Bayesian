@@ -73,11 +73,14 @@ def parse_command_line():
     )
 
     parser.add_argument(
-        "--release-num-steps",
+        "--release-num-step-range",
         type=int,
-        default=(1024, 512),
-        help="The optimal and nimimum number of steps to include in the "
-        "release. Note that for each step there will be many walkers.",
+        nargs=2,
+        default=(512, 1024),
+        help="The minimum and maximum allowed number of steps to include in the"
+        " release. Note that for each step there will be many walkers. If more "
+        "than maximum steps are left after burn-in thinning is applied. If less"
+        " than minimum, no release is generated."
     )
     return parser.parse_args()
 
@@ -95,7 +98,7 @@ def get_burnin(plot_data, num_steps, num_walkers, config):
                 data={"TIC": [], "burn-in": []}, dtype=int
             ).set_index("TIC")
     try:
-        return int(get_burnin.burnin.loc[config.tic_id])
+        return int(get_burnin.burnin.loc[config.tic_id].iloc[0])
     except KeyError:
         print(f"No cached burnin found for TIC {config.tic_id}, estimating...")
         burnin = 0
@@ -244,29 +247,27 @@ def create_release(config):
     burnin = get_burnin(plot_data, num_steps, num_walkers, config)
     print(
         f"Burn-in for {config.tic_id}: {burnin!r} out of {num_steps!r} steps, "
-        f"deciding thinning to release at least {config.release_num_steps[1]!r}"
-        " steps."
+        "deciding thinning to release between "
+        f"{config.release_num_step_range[0]!r} and "
+        f"{config.release_num_step_range[1]!r} steps."
     )
-    if num_steps - burnin < config.release_num_steps[1]:
+    if (num_steps - burnin) < config.release_num_step_range[0]:
         raise ValueError(
             f"Insufficient number of MCMC steps ({num_steps - burnin}) after "
-            f"burnin ({burnin}) to release {config.release_num_steps[1]} steps!"
+            f"burnin ({burnin}) to release the minimum required "
+            f"{config.release_num_step_range[0]} steps!"
         )
 
-    if num_steps - burnin < config.release_num_steps[0]:
+    if (num_steps - burnin) < config.release_num_step_range[1]:
         thin = 1
-        num_steps -= burnin
+        release_num_steps = num_steps - burnin
     else:
-        thin = (num_steps - burnin) // config.release_num_steps[0]
-        burnin = num_steps - thin * (config.release_num_steps[0] - 1) - 1
-        num_steps = config.release_num_steps[0]
-    print(
-        f"Releasing {num_steps!r} steps with thinning factor {thin!r} and "
-        f"burn-in: {burnin!r}"
-    )
+        release_num_steps = config.release_num_step_range[1]
+        thin = (num_steps - burnin) // config.release_num_step_range[1]
+        burnin = num_steps - thin * (release_num_steps - 1) - 1
     release_data = QTable(
         rows=blobs[burnin::thin, :, :].reshape(
-            num_steps * num_walkers, backend.shape[1]
+            release_num_steps * num_walkers, backend.shape[1]
         ),
         names=SampleParams._fields,
         units=param_units,
