@@ -611,6 +611,34 @@ def reinitialize_sampling(backend, final_run):
     return backend, initial_state
 
 
+def check_log_likelihood_consistency(backend, log_likelihood, config):
+    """Raise if recomputed log-likelihoods differ from those stored in file."""
+
+    _logger.info("Verifying log-likelihood consistency with existing chain.")
+    last_positions = backend.get_chain()[-1]
+    stored_log_probs = backend.get_log_prob()[-1]
+    with Pool(
+        config.num_parallel,
+        initializer=setup_process_map,
+        initargs=[vars(config)],
+        maxtasksperchild=1024,
+    ) as pool:
+        computed = numpy.array(
+            [e[0] for e in pool.map(log_likelihood, last_positions)]
+        )
+    mismatches = computed != stored_log_probs
+    if mismatches.any():
+        raise RuntimeError(
+            f"Log-likelihood mismatch for {mismatches.sum()} walker(s):\n"
+            + "\n".join(
+                f"  Walker {i}: computed {computed[i]}, "
+                f"stored {stored_log_probs[i]}"
+                for i in numpy.flatnonzero(mismatches)
+            )
+        )
+    _logger.info("Log-likelihood consistency check passed.")
+
+
 def main(config):
     """Avoid polluting global namespace."""
 
@@ -661,6 +689,8 @@ def main(config):
             backend, initial_state, final_run = restart_sampling(
                 backend, config, log_likelihood
             )
+        else:
+            check_log_likelihood_consistency(backend, log_likelihood, config)
 
     with h5py.File(backend.filename, "r+") as samples_f:
         samples_f["mcmc"].attrs["final_run"] = final_run
