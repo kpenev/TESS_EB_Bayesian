@@ -8,7 +8,7 @@ from configargparse import ArgumentParser, DefaultsFormatter
 
 from paths import launcher_fname
 
-tic_per_node = {"juno": 4, "ls6": 8, "ganymede": 1}
+tic_per_node = {"juno": 4, "ls6": 8, "ganymede": 1, "vista": 9}
 assumed_num_parallel = 16
 
 
