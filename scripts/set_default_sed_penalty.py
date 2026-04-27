@@ -11,10 +11,10 @@ from bui.select_ticids.data_model import (  # pylint: disable=import-error
     get_ticid_select_tables,
 )
 from cache_interface import CacheSession, CachedSED
-import paths
+from paths import samples as samples_fname_pattern
 
 
-def set_default_sed_penalty(tic_id, dry_run=False):
+def set_default_sed_penalty(tic_id, fname_pattern, dry_run=False):
     """Set default bad-SED penalty for TIC ID if sampling has not started.
 
     Only updates existing cache entries with NULL values — if no entry exists,
@@ -23,8 +23,7 @@ def set_default_sed_penalty(tic_id, dry_run=False):
     Returns a string describing what was done (for logging).
     """
 
-    samples_fname = paths.samples.format(tic_id=tic_id)
-    if path.exists(samples_fname):
+    if path.exists(fname_pattern.format(tic_id=tic_id)):
         return f"TIC {tic_id}: sampling started, skipped"
 
     # pylint: disable=no-member
@@ -44,7 +43,7 @@ def set_default_sed_penalty(tic_id, dry_run=False):
                     CachedSED.default_bad_sed_threshold
                 )
             changed.append(f"threshold={CachedSED.default_bad_sed_threshold}")
-        if cached_sed.bad_sed_penalty is None:
+        if not cached_sed.bad_sed_penalty:
             if not dry_run:
                 cached_sed.bad_sed_penalty = CachedSED.default_bad_sed_penalty
             changed.append(f"penalty={CachedSED.default_bad_sed_penalty}")
@@ -82,6 +81,12 @@ def parse_command_line():
         help="If given, restrict to TICs assigned to this job ID.",
     )
     parser.add_argument(
+        "--samples-fname-pattern",
+        default=samples_fname_pattern,
+        help="Pattern for the samples HDF5 filename, with {tic_id} placeholder "
+        "(default: the standard results directory path).",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Report what would be changed without modifying the database.",
@@ -109,7 +114,14 @@ def main(config):
         tic_ids = [entry.id for entry in db_session.scalars(query).all()]
 
     for tic_id in tic_ids:
-        print(set_default_sed_penalty(tic_id, dry_run=config.dry_run))
+        print(
+            set_default_sed_penalty(
+                tic_id,
+                config.samples_fname_pattern,
+                dry_run=config.dry_run,
+            )
+        )
+
 
 if __name__ == "__main__":
     main(parse_command_line())
