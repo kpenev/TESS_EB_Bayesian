@@ -132,10 +132,11 @@ def parse_command_line():
         "plots arranged vertically. Plot labels in the mosaic should be one "
         "of the following:\n"
         "\t* full: plot the lightcurve for a sector without any folding.\n"
-        "\t* folded: phot the lightcurve folded at the best fit BLS period.\n"
+        "\t* folded: plot the lightcurve folded at the best fit BLS period.\n"
         "\t* zoom_default: plot only vicinity of BLS transit (folded).\n"
         "\t* zoom_even: plot only vicinity of even BLS transits (folded).\n"
         "\t* zoom_odd: plot only vicinity of odd BLS transits (folded).\n"
+        "\t* sed: plot magnitude of each available wavelength.\n"
         "\t* zoom_masked: plot only vicinity of masked BLS transits (folded on "
         "masked period).",
     )
