@@ -709,11 +709,11 @@ class TESSTarget:
         self._time_span = [numpy.inf, -numpy.inf]
 
         for provenance, lc_collection in lcs.items():
-            if provenance in exclude_data.get(tic_id, []):
-                continue
+            # if provenance in exclude_data.get(tic_id, []):
+            #     continue
             for sector, (header, observed_lc) in lc_collection.items():
-                if sector in exclude_data.get(tic_id, []):
-                    continue
+                # if sector in exclude_data.get(tic_id, []):
+                #     continue
                 formatted_lc, formatted_header = self._format_lc(
                     sector, header, provenance, observed_lc
                 )

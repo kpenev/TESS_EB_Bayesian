@@ -59,7 +59,7 @@ class LightCurvePlotter:
         "others": {
             "marker": ".",
             "linestyle": "none",
-            "color": "black",
+            "color": "pink",
             "zorder": 20,
         },
     }
@@ -150,6 +150,8 @@ class LightCurvePlotter:
             else "others"
         )
         for y in model_lcs:
+            if config_key == "others":
+                continue
             pyplot.plot(
                 lightcurve["time"],
                 y,
@@ -235,6 +237,8 @@ class LightCurvePlotter:
         ylim = pyplot.ylim()
         first = getattr(self._config, "highlight_first_model", False)
         for y in model_lcs:
+            if not first:
+                continue
             pyplot.plot(
                 ordered_phase,
                 y[phase_order],
@@ -244,7 +248,8 @@ class LightCurvePlotter:
             )
             first = False
         pyplot.xlabel(xlabel)
-        pyplot.ylabel("Flux [ppm]")
+        pyplot.tick_params('x',labelsize=13)
+        pyplot.ylabel("Flux[ppm]")
         pyplot.ylim(ylim)
 
     def plot_folded(self, lightcurve, model_lcs=(), _=None):
@@ -445,7 +450,7 @@ class LightCurvePlotter:
             )
             config_key = "others"
         pyplot.xlabel(r"Wavelength [$\mu$]")
-        pyplot.ylabel("Absolute magnitude")
+        pyplot.ylabel("Abs. mag.")
 
     def plot_diff(self, mode, lightcurve, model_lcs):
         """Plot the difference between the LC and the first model vs time."""
@@ -492,7 +497,7 @@ class LightCurvePlotter:
 
         full_figure = pyplot.figure(
             figsize=(
-                rcParams["figure.figsize"][0],
+                rcParams["figure.figsize"][0] * 1.5 * num_lcs,
                 rcParams["figure.figsize"][1] * 1.5 * num_lcs,
             ),
             layout="constrained",
@@ -503,6 +508,17 @@ class LightCurvePlotter:
             f"plot {num_lcs} lightcurves."
         )
         print(f"Mosai spec str: {self._config.plot_lightcurve[1]}")
+        result=full_figure.subfigures(1, num_lcs, squeeze=False)
+        # for subfig in full_figure.subfigures(3, 1, squeeze=False):
+        #     result.append(subfig[0])
+        print('nuts')
+        print(result)
+        return result
+        print(result[0])
+        print(result[1])
+        print(result[2])
+        # raise ValueError
+        return list([result[0],result[1],result[2]])
         return [
             subfig[0]
             for subfig in full_figure.subfigures(num_lcs, 1, squeeze=False)
@@ -587,7 +603,9 @@ class LightCurvePlotter:
         title_pre += f"({title_info})"
 
         subfigures = self._setup_figure(len(log_likelihood.lcs))
-        for (header, lightcurve), subfig in zip(log_likelihood.lcs, subfigures):
+        print(subfigures[0])
+        # raise ValueError
+        for (header, lightcurve), subfig in zip(log_likelihood.lcs, subfigures[0]):
             if lightcurve.size <= 10:
                 continue
             lightcurve = numpy.copy(lightcurve)
