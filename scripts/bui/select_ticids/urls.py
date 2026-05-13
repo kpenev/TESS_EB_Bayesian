@@ -54,7 +54,7 @@ def get_review_urls(mode, table_name, states):
                 reviewing=f"{table_name}_{mode}",
                 tablename=table_name,
                 plot_dirs=plot_dirs,
-                rendered_only=False,
+                rendered_only=True,
                 states=states,
                 grid={"columns": "1fr 1fr", "rows": "1fr"},
             ),

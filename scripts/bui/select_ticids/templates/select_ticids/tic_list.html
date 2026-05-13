@@ -1,4 +1,4 @@
-<div class="list-container" id="{{ list_name }}"> 
+<div class="list-container" id="{{ list_name }}">
     <ul>
         <a href="{% url review|add:'_index' sort_state=list_name|slugify %}"> <h3 class="list-name"> {{ list_name }} ({{ list|length }}) </h3></a>
         {% for ticid in list %}
@@ -7,13 +7,10 @@
                 class="displayed"
                 {% endif %}
             >
-            <a href="{% url review|add:'_jump' sort_state=list_name|slugify displayed_ticid=ticid.0 %}" 
-               {% if ticid.1 == 1 %}
-               class="rendered"
-               {% else %}
-               not-rendered
-               {% endif %}> {{ ticid.0 }} 
-            </a> 
+            <a href="{% url review|add:'_jump' sort_state=list_name|slugify displayed_ticid=ticid.0 %}"
+               class="{% if ticid.1 %}rendered{% else %}not-rendered{% endif %}{% if ticid.2 %} review-disabled{% endif %}">
+                {{ ticid.0 }}
+            </a>
         </li>
         {% endfor %}
     </ul>

@@ -12,6 +12,7 @@ from sqlalchemy import (
     func,
     delete,
     insert,
+    text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -114,6 +115,16 @@ def get_ticid_select_tables(
         )
         rendered: Mapped[int] = mapped_column(doc="1 - rendered, 0 - not")
 
+        skip_review: Mapped[bool] = mapped_column(
+            default=False,
+            server_default="0",
+            nullable=False,
+            doc=(
+                "If true, hide this TIC from review listings. "
+                "Independent of status / sampling inclusion."
+            ),
+        )
+
         job_group: Mapped[int] = mapped_column(
             ForeignKey(
                 "job_groups.id", onupdate="CASCADE", ondelete="RESTRICT"
@@ -151,6 +162,19 @@ def get_ticid_select_tables(
         ), f"Table {tablename} must already exist, not creating!"
         assert plot_dirs is not None
         SelectTable.__table__.create(db_engine)
+    else:
+        existing_cols = {
+            c["name"]
+            for c in inspect(db_engine).get_columns(tablename)
+        }
+        if "skip_review" not in existing_cols:
+            with db_engine.begin() as conn:
+                conn.execute(
+                    text(
+                        f"ALTER TABLE {tablename} ADD COLUMN "
+                        "skip_review BOOLEAN NOT NULL DEFAULT 0"
+                    )
+                )
 
     if not inspect(db_engine).has_table(RenderedTable.__tablename__):
         RenderedTable.__table__.create(db_engine)
