@@ -360,6 +360,154 @@ four combinations the user wants:
 
 Every TIC remains clickable regardless of state.
 
+### 7. Auto-re-enable review on chain convergence
+
+A TIC that was marked `skip_review=True` while its chain was still
+churning should have the flag cleared automatically once sampling
+has progressed past burn-in for every parameter — at that point
+there is new information worth re-reviewing, even if the user
+previously flagged the TIC as not interesting.
+
+The convergence predicate (`burnin < num_steps`) is computed inside
+`get_convergence_data`, which is data preparation rather than
+plotting. Today it lives in `scripts/visualize.py` alongside several
+other non-plotting helpers, but a cleaner home is a dedicated
+analysis module — see 7b.
+
+**a. Helper in `scripts/bui/select_ticids/data_model.py`:**
+
+Add `clear_skip_review(tic_id)` that clears the flag in every
+review table known to the BUI:
+
+```python
+def clear_skip_review(tic_id):
+    """Clear skip_review on tic_id across every review table."""
+
+    with Session.begin() as db_session:
+        review_tables = set(
+            db_session.scalars(
+                select(JobGroup.select_tic_table)
+            ).all()
+        )
+    for tablename in review_tables:
+        SelectTable, _ = get_ticid_select_tables(
+            tablename, must_exist=True
+        )
+        with Session.begin() as db_session:
+            db_session.execute(
+                update(SelectTable)
+                .where(
+                    SelectTable.id == tic_id,
+                    # pylint: disable=singleton-comparison
+                    SelectTable.skip_review == True,
+                )
+                .values(skip_review=False)
+            )
+```
+
+Notes:
+- Review tables are discovered via the existing
+  `JobGroup.select_tic_table` column, so any table actively backing
+  a job group is covered without hard-coding names.
+- The `skip_review == True` predicate makes the update idempotent —
+  subsequent calls after the flag is cleared don't bump the
+  `timestamp` column.
+- `must_exist=True` keeps `get_ticid_select_tables` from accidentally
+  creating an unexpected new table.
+
+**b. New module `scripts/chain_analysis.py`:**
+
+Extract the non-plotting MCMC-chain helpers from `visualize.py` into
+a new module. None of these touch matplotlib; they operate on chain
+arrays and config objects, and several of them are reusable outside
+the plotting flow.
+
+Move from `scripts/visualize.py` to `scripts/chain_analysis.py`:
+
+- `get_pickler` (line ~340) — only caller is `get_convergence_data`,
+  and leaving it in `visualize.py` while moving `get_convergence_data`
+  would create a circular import (`visualize` imports
+  `chain_analysis`, which would have to import back).
+- `get_chain_expressions` (line ~367)
+- `get_convergence_data` (line ~472)
+- `get_lstsq_interpreters` (line ~646)
+- `get_initial_positions` (line ~952)
+- `get_walker_step_params` (line ~985)
+- `get_lstsq` (line ~1033)
+
+Leave in `visualize.py`:
+
+- `get_param_binaries` (line ~940) and `get_model_binaries`
+  (line ~1074) — too tightly coupled to plotting flow (build
+  `Binary` objects keyed off `config.show_model_with_lc`,
+  `config.show_lstsq`, etc.).
+- `get_plot_data` (line ~1138) — name aside, its responsibilities
+  (selecting samples, applying `sample_condition`, `max_plot_steps`)
+  are plot-driven.
+- All `create_*` functions, `MovieMaker`, `include_in_axis`,
+  `hex_color`, `parse_command_line`, `main`.
+
+`visualize.py` keeps working by importing the moved helpers back at
+the top of the file, e.g.:
+
+```python
+from chain_analysis import (
+    get_pickler,
+    get_chain_expressions,
+    get_convergence_data,
+    get_lstsq_interpreters,
+    get_initial_positions,
+    get_walker_step_params,
+    get_lstsq,
+)
+```
+
+**c. Hook in `scripts/chain_analysis.py`:**
+
+Inside `get_convergence_data`, right after the existing
+`burnin = convergence_data["burnin"].max()` line, add:
+
+```python
+burnin = convergence_data["burnin"].max()
+if burnin < num_steps:
+    clear_skip_review(config.tic_id)
+print(f"Burnin is {burnin} out of {num_steps} steps.")
+```
+
+Import `clear_skip_review` from
+`bui.select_ticids.data_model` at the top of `chain_analysis.py`.
+`config.tic_id` is already wired through the CLI/config-file parsing
+in `visualize.py` (see `parser.add_argument("tic_id", ...)` around
+line 52), so no plumbing changes are needed at the call site. The
+docstring of `get_convergence_data` should be updated to note the
+side effect (re-enabling review on convergence).
+
+`create_convergence_plot` itself is left untouched — its
+convergence-region overlay continues to read
+`convergence_data["burnin"]` and `convergence_data["num_steps"]`,
+which `get_convergence_data` already produces. The function now
+lives in `chain_analysis.py` and is reusable by any future caller
+that wants a convergence verdict without importing matplotlib.
+
+**Open questions for 7:**
+
+1. ~~Review-table discovery via `JobGroup.select_tic_table` covers
+   every table that has ever backed a job group. If a TIC was
+   inserted into a review table not tied to a job group, it would
+   be missed.~~ **Resolved:** a TIC that is not in a job group has
+   no sampling running for it and therefore cannot accumulate the
+   new steps needed to cross burn-in, so it is impossible for the
+   convergence path to fire on such a TIC. Discovery via
+   `JobGroup.select_tic_table` is sufficient.
+2. ~~Pickling: a re-run that hits the cache would skip the
+   re-enable step.~~ **Resolved:** a pickled
+   `convergence_data` is only reusable when the chain has not
+   accumulated any new steps. With no new steps, the convergence
+   verdict cannot have changed — either the TIC was already past
+   burn-in on the first run (in which case `clear_skip_review` ran
+   then) or it still isn't, so a cache-hit short-circuit
+   correctly skips the call.
+
 ### 6. Things deliberately NOT changed
 
 - **`scripts/new_sampling.py`** (`SelectTICTable.status > 0` at line 195
@@ -408,6 +556,17 @@ Every TIC remains clickable regardless of state.
   rendered, not skipped), (not rendered, skipped); confirm bold vs.
   normal weight tracks `rendered` and strike-through tracks
   `skip_review`, and that all four remain clickable.~~
+- Auto-re-enable on convergence: mark a TIC `skip_review=True`,
+  then run `visualize.py <tic_id>` (or the normal sampling-driven
+  convergence-plot pipeline) once its chain has progressed past
+  burn-in for every parameter. Confirm `get_convergence_data` clears
+  the flag in every review table containing the TIC and that the
+  convergence plot itself is unchanged. Re-run; confirm the
+  `timestamp` column is not bumped a second time (the
+  `skip_review == True` filter makes the update idempotent).
+- Negative case: with a TIC where the chain has *not* yet crossed
+  burn-in (`burnin >= num_steps`), confirm `clear_skip_review` is
+  not called and the flag stays `True`.
 
 ## Open questions for review
 

@@ -12,7 +12,9 @@ from sqlalchemy import (
     func,
     delete,
     insert,
+    select,
     text,
+    update,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -183,3 +185,35 @@ def get_ticid_select_tables(
         set_rendered(RenderedTable, plot_dirs)
 
     return SelectTable, RenderedTable
+
+
+def clear_skip_review(tic_id):
+    """Clear skip_review on tic_id across every review table.
+
+    Discovers review tables via ``JobGroup.select_tic_table`` and runs
+    an idempotent ``UPDATE ... WHERE skip_review = True`` against each,
+    so already-cleared rows don't get their timestamp bumped.
+    """
+
+    with Session.begin() as db_session:  # pylint: disable=no-member
+        review_tables = set(
+            db_session.scalars(
+                select(JobGroup.select_tic_table)
+            ).all()
+        )
+    for tablename in review_tables:
+        # pylint: disable=invalid-name
+        SelectTable, _ = get_ticid_select_tables(
+            tablename, must_exist=True
+        )
+        # pylint: enable=invalid-name
+        with Session.begin() as db_session:  # pylint: disable=no-member
+            db_session.execute(
+                update(SelectTable)
+                .where(
+                    SelectTable.id == tic_id,
+                    # pylint: disable=singleton-comparison
+                    SelectTable.skip_review == True,
+                )
+                .values(skip_review=False)
+            )
