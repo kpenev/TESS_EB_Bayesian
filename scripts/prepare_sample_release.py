@@ -75,9 +75,9 @@ def parse_command_line():
     parser.add_argument(
         "--release-num-steps",
         type=int,
-        default=1024,
-        help="The number of steps to include in the release. Note that for each"
-        " step there will be many walkers.",
+        default=(1024, 512),
+        help="The optimal and nimimum number of steps to include in the "
+        "release. Note that for each step there will be many walkers.",
     )
     return parser.parse_args()
 
@@ -246,12 +246,16 @@ def create_release(config):
         f"Burn-in for {config.tic_id}: {burnin!r} out of {num_steps!r} steps, "
         f"deciding thinning to release {config.release_num_steps!r} steps."
     )
-    thin = (num_steps - burnin) // config.release_num_steps
-    if thin <= 0:
+    if num_steps - burnin < config.release_num_steps[1]:
         raise ValueError(
             f"Insufficient number of MCMC steps ({num_steps - burnin}) after "
             f"burnin ({burnin}) to release {config.release_num_steps} steps!"
         )
+
+    if num_steps - burnin < config.release_num_steps[0]:
+        thin = 1
+    else:
+        thin = (num_steps - burnin) // config.release_num_steps
     burnin = num_steps - thin * (config.release_num_steps - 1) - 1
     release_data = QTable(
         rows=blobs[burnin::thin, :, :].reshape(
