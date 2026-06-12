@@ -253,7 +253,7 @@ def create_release(config):
             f"burnin ({burnin}) to release {config.release_num_steps[1]} steps!"
         )
 
-    if num_steps - burnin < config.release_num_steps[1]:
+    if num_steps - burnin < config.release_num_steps[0]:
         thin = 1
         num_steps -= burnin
     else:
