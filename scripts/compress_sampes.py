@@ -6,6 +6,7 @@ import subprocess
 import os
 import shutil
 from multiprocessing import Pool
+from functools import partial
 
 import h5py
 from configargparse import ArgumentParser, DefaultsFormatter
@@ -17,14 +18,13 @@ from general_purpose_python_modules.multiprocessing_util import (
 from hacked_emcee_hdf5_backend import HDFBackend
 
 
-def truncate(fname):
+def truncate(fname, trunc_fname):
     """Truncate unused parts of datasets and repack the file."""
 
     assert fname.endswith(
         ".h5"
     ), "Input file must be an HDF5 file with .h5 extension."
 
-    trunc_fname = fname[:-3] + "_truncated.h5"
     shutil.copy2(fname, trunc_fname)
     chains_found = []
     with h5py.File(trunc_fname, "r+") as f:
@@ -39,7 +39,17 @@ def truncate(fname):
                 print(f"{dset} has shape: {f[chain][dset].shape}")
                 f[chain][dset].resize((iterations, *f[chain][dset].shape[1:]))
                 print("Truncating")
-    return trunc_fname, chains_found
+    return chains_found
+
+
+def list_chains(fname):
+    """List available MCMC chains in the give file."""
+
+    chains_found = []
+    with h5py.File(fname, "r") as f:
+        for chain in f:
+            chains_found.append(chain)
+    return chains_found
 
 
 def repack(fname):
@@ -97,11 +107,15 @@ def verify(orig_fname, repacked_fname, chains_expected):
         print(f"Verified chain {chain}")
 
 
-def process(fname):
+def process(fname, verify_only=False):
     """Process the file by truncating, repacking, and verifying."""
 
-    trunc_fname, chains_expected = truncate(fname)
-    repack(trunc_fname)
+    trunc_fname = fname[:-3] + "_truncated.h5"
+    if verify_only:
+        chains_expected = list_chains(fname)
+    else:
+        chains_expected = truncate(fname, trunc_fname)
+        repack(trunc_fname)
     verify(fname, trunc_fname, chains_expected)
     os.replace(trunc_fname, fname)
     print(f"Finished processing {fname}.")
@@ -126,15 +140,29 @@ def parse_command_line():
         default=16,
         help="The number of parallel processes to use.",
     )
+    parser.add_argument(
+        "--verify-only",
+        action="store_true",
+        help="Assume all compression steps were already done just run "
+        "verification.",
+    )
     return parser.parse_args()
 
 
-if __name__ == "__main__":
-    args = parse_command_line()
-    with Pool(
-        args.num_parallel,
-        initializer=setup_process_map,
-        initargs=[{"task": "pack_samples"}],
-        maxtasksperchild=1,
-    ) as pool:
-        pool.map(process, args.filenames)
+def main(args):
+    if args.num_parallel > 1:
+        with Pool(
+            args.num_parallel,
+            initializer=setup_process_map,
+            initargs=[{"task": "pack_samples"}],
+            maxtasksperchild=1,
+        ) as pool:
+            pool.map(
+                partial(process, verify_only=args.verify_only), args.filenames
+            )
+    else:
+        for fname in args.filenames:
+            process(fname, verify_only=args.verify_only)
+
+if __name__ == '__main__':
+    main(parse_command_line())
