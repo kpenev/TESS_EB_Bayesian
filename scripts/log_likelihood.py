@@ -41,6 +41,7 @@ class LogLikelihood(TESSTarget):
     max_outlier_iterations = 5
     outlier_thresh2 = 25.0
     outlier_bins = 30
+    skip_ooe_poly=False
 
     @classmethod
     def get_cached_sed_and_bls(cls, tic_id):
@@ -674,9 +675,10 @@ class LogLikelihood(TESSTarget):
                         w=1 / lc_sq_errors[fit_mask] ** 0.5,
                     )
                 )
-            eclipse_model[eclipse_mask] *= ooe_poly(
-                lightcurve["time"][eclipse_mask]
-            )
+            if not self.skip_ooe_poly:
+                eclipse_model[eclipse_mask] *= ooe_poly(
+                    lightcurve["time"][eclipse_mask]
+                )
 
         return eclipse_model, lc_sq_errors, model_mask
 
