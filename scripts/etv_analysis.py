@@ -4,7 +4,7 @@
 import os
 
 from configargparse import ArgumentParser, DefaultsFormatter
-from matplotlib import pyplot
+from matplotlib import use, pyplot
 from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.lines import Line2D
 import numpy
@@ -411,4 +411,5 @@ def analyze_eb(config):
 
 
 if __name__ == "__main__":
+    use("PDF")
     analyze_eb(parse_command_line())
