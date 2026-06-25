@@ -4,7 +4,8 @@
 
 from os import path, makedirs
 import logging
-from multiprocessing import Pool, Process, Queue
+from concurrent.futures import ProcessPoolExecutor
+from multiprocessing import Process, Queue
 from itertools import count
 from traceback import format_exc
 
@@ -513,11 +514,11 @@ def restart_sampling(
             "Log-likelihood function changed since last sampling. "
             "Re-evaluating seed log-likelihoods."
         )
-        with Pool(
-            config.num_parallel,
+        with ProcessPoolExecutor(
+            max_workers=config.num_parallel,
             initializer=setup_process_map,
-            initargs=[vars(config)],
-            maxtasksperchild=1024,
+            initargs=(vars(config),),
+            max_tasks_per_child=1024,
         ) as pool:
             seed_log_prob = numpy.array(
                 [e[0] for e in pool.map(log_likelihood, seed_samples)]
@@ -617,11 +618,11 @@ def check_log_likelihood_consistency(backend, log_likelihood, config):
     _logger.info("Verifying log-likelihood consistency with existing chain.")
     last_positions = backend.get_chain()[-1]
     stored_log_probs = backend.get_log_prob()[-1]
-    with Pool(
-        config.num_parallel,
+    with ProcessPoolExecutor(
+        max_workers=config.num_parallel,
         initializer=setup_process_map,
-        initargs=[vars(config)],
-        maxtasksperchild=1024,
+        initargs=(vars(config),),
+        max_tasks_per_child=1024,
     ) as pool:
         computed = numpy.array(
             [e[0] for e in pool.map(log_likelihood, last_positions)]
@@ -716,11 +717,11 @@ def main(config):
             " final" if final_run else "",
             repr(initial_state),
         )
-        with Pool(
-            config.num_parallel,
+        with ProcessPoolExecutor(
+            max_workers=config.num_parallel,
             initializer=setup_process_map,
-            initargs=[vars(config)],
-            maxtasksperchild=1024,
+            initargs=(vars(config),),
+            max_tasks_per_child=1024,
         ) as pool:
             EnsembleSampler(
                 *backend.shape, log_likelihood, backend=backend, pool=pool
