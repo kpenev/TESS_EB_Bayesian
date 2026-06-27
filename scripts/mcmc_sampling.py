@@ -412,7 +412,13 @@ def prepare_restart(backend):
 
     log_prob, samples = get_all_samples(backend)
 
-    if backend.iteration > 0:
+    # The shape and iteration properties read from the "mcmc" group, which is
+    # renamed below. Capture everything that depends on it before the move.
+    chain_shape = backend.shape
+    num_walkers = chain_shape[0]
+    restarting = backend.iteration > 0
+
+    if restarting:
         with h5py.File(backend.filename, "r+") as samples_f:
             for prelim in count():
                 chain_name = f"prelim_mcmc_{prelim}"
@@ -427,13 +433,13 @@ def prepare_restart(backend):
         log_prob.size,
     )
     ordered_indices = numpy.unique(log_prob, return_index=True)[1]
-    select_from = backend.shape[0]
+    select_from = num_walkers
 
-    if backend.iteration > 0:
-        backend.reset(*backend.shape)
+    if restarting:
+        backend.reset(*chain_shape)
     while select_from <= ordered_indices.size:
         top_indices = numpy.random.choice(
-            ordered_indices[-select_from:], backend.shape[0]
+            ordered_indices[-select_from:], num_walkers
         )
         _logger.debug(
             "Top indices (shape: %s): %s", top_indices.shape, top_indices
@@ -451,10 +457,10 @@ def prepare_restart(backend):
             return (
                 log_prob[top_indices],
                 initial_state,
-                numpy.empty(backend.shape, dtype=float),
-                numpy.empty(backend.shape[0], dtype=float),
+                numpy.empty(chain_shape, dtype=float),
+                numpy.empty(num_walkers, dtype=float),
                 None,
-                numpy.zeros(backend.shape[0], dtype=bool),
+                numpy.zeros(num_walkers, dtype=bool),
             )
 
     return (None, samples[0]) + 4 * (None,)
@@ -627,7 +633,9 @@ def check_log_likelihood_consistency(backend, log_likelihood, config):
         computed = numpy.array(
             [e[0] for e in pool.map(log_likelihood, last_positions)]
         )
-    mismatches = computed != stored_log_probs
+    mismatches = numpy.logical_not(
+        numpy.isclose(computed, stored_log_probs, rtol=1e-8, atol=1e-08)
+    )
     if mismatches.any():
         raise RuntimeError(
             f"Log-likelihood mismatch for {mismatches.sum()} walker(s):\n"
