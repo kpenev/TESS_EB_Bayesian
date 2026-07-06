@@ -24,8 +24,7 @@ from detrending import (
     get_lc_gap_indices,
 )
 
-from hacked_emcee_hdf5_backend import HDFBackend
-from sample_params import SampleParams
+from chain_analysis import get_max_likelihood_params
 
 
 _worker_measure_etv = None
@@ -302,23 +301,6 @@ class MeasureETV(LogLikelihood):
             1.0 + secondary_flux_fraction
         )
 
-    @staticmethod
-    def _get_best_params(samples_fname):
-        """Return the maximum likelihood parameters in given samples file."""
-
-        backend = HDFBackend(
-            samples_fname,
-            name="mcmc",
-            read_only=True,
-        )
-        log_prob = backend.get_log_prob()
-        top_index = numpy.unravel_index(numpy.argmax(log_prob), log_prob.shape)
-        return SampleParams(
-            *backend.get_blobs(discard=0, thin=top_index[0] + 1)[0][
-                top_index[1:]
-            ]
-        )
-
     def __init__(self, tic_id, samples_fname, max_abs_etv=None, **kwargs):
         """
         Prepare ETV measurement using max-likelihood parameters.
@@ -329,7 +311,9 @@ class MeasureETV(LogLikelihood):
 
         if "pad_duration" not in kwargs:
             kwargs["pad_duration"] = 0.0
-        best_params = self._get_best_params(samples_fname.format(tic_id=tic_id))
+        best_params = get_max_likelihood_params(
+            samples_fname.format(tic_id=tic_id)
+        )[0]
         if max_abs_etv is None:
             max_abs_etv = min(0.1, 0.05 * best_params.per)
 

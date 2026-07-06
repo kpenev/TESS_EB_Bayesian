@@ -25,6 +25,30 @@ from general_purpose_python_modules.multi_pickle import MultiPickle
 from sample_params import SampleParams
 from utils import fit_least_squares
 from bui.select_ticids.data_model import clear_skip_review
+from hacked_emcee_hdf5_backend import HDFBackend
+
+
+def get_max_likelihood_params(samples_fname):
+    """Return ``(SampleParams, log_prob)`` for the max-likelihood mcmc sample.
+
+    Only the ``mcmc`` chain is read; preliminary chains may use a different
+    log-probability definition and must be ignored. The single highest
+    ``log_prob`` entry is located, then ``thin`` is used to stride straight to
+    that step so only the one winning blob row is read back (never the whole
+    blobs array). The returned ``log_prob`` is that maximum value.
+    """
+
+    backend = HDFBackend(samples_fname, name="mcmc", read_only=True)
+    log_prob = backend.get_log_prob()
+    top_index = numpy.unravel_index(
+        numpy.nanargmax(log_prob), log_prob.shape
+    )
+    best_params = SampleParams(
+        *backend.get_blobs(discard=0, thin=top_index[0] + 1)[0][
+            top_index[1:]
+        ]
+    )
+    return best_params, float(log_prob[top_index])
 
 
 def get_pickler(filename):
