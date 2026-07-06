@@ -94,28 +94,27 @@ def get_finished_tics(config):
     return sorted(finished)
 
 
-def collect_records(config, todo):
-    """Return ``(tic_id, SampleParams, log_prob)`` records for the TIC IDs."""
+def compute_record(config, tic_id):
+    """Return a ``(tic_id, SampleParams, log_prob)`` record, or None on failure.
 
-    records = []
-    for tic_id in todo:
-        samples_fname = config.samples_fname_pattern.format(tic_id=tic_id)
-        if not os.path.exists(samples_fname):
-            print(
-                f"WARNING: no samples file for TIC {tic_id} "
-                f"({samples_fname!r}); skipping."
-            )
-            continue
-        try:
-            best_params, best_log_prob = get_max_likelihood_params(
-                samples_fname
-            )
-        except (OSError, ValueError, KeyError) as err:
-            print(f"WARNING: could not read chain for TIC {tic_id}: {err}.")
-            continue
-        records.append((tic_id, best_params, best_log_prob))
-        print(f"TIC {tic_id}: max log-prob = {best_log_prob:.6g}")
-    return records
+    Any error while reading or processing a single TIC is caught and logged so
+    that one bad system cannot abort the whole run.
+    """
+
+    samples_fname = config.samples_fname_pattern.format(tic_id=tic_id)
+    if not os.path.exists(samples_fname):
+        print(
+            f"WARNING: no samples file for TIC {tic_id} "
+            f"({samples_fname!r}); skipping."
+        )
+        return None
+    try:
+        best_params, best_log_prob = get_max_likelihood_params(samples_fname)
+    except Exception as err:  # pylint: disable=broad-except
+        print(f"WARNING: could not process TIC {tic_id}: {err}; skipping.")
+        return None
+    print(f"TIC {tic_id}: max log-prob = {best_log_prob:.6g}")
+    return tic_id, best_params, best_log_prob
 
 
 def build_new_table(records):
@@ -140,7 +139,7 @@ def build_new_table(records):
 
 
 def main(config):
-    """Update the FITS table with newly finished TICs."""
+    """Update the FITS table with newly finished TICs, saving after each one."""
 
     finished = get_finished_tics(config)
     print(
@@ -148,11 +147,11 @@ def main(config):
         f"(status == {config.finished_status})."
     )
 
-    existing = None
+    combined = None
     known = set()
     if os.path.exists(config.output_fname) and not config.recompute_all:
-        existing = QTable.read(config.output_fname, format="fits")
-        known = {int(tic) for tic in existing["tic_id"]}
+        combined = QTable.read(config.output_fname, format="fits")
+        known = {int(tic) for tic in combined["tic_id"]}
         print(
             f"{len(known)} TIC(s) already present in {config.output_fname!r}; "
             "they will not be recomputed."
@@ -163,23 +162,24 @@ def main(config):
         print("No new finished TICs to add; output is up to date.")
         return
 
-    print(f"Reading chains for {len(todo)} new TIC(s)...")
-    records = collect_records(config, todo)
-    if not records:
-        print("No new records produced; output left unchanged.")
-        return
-
-    new_table = build_new_table(records)
-    combined = (
-        vstack([existing, new_table]) if existing is not None else new_table
-    )
-
     os.makedirs(
         os.path.dirname(os.path.abspath(config.output_fname)), exist_ok=True
     )
-    combined.write(config.output_fname, format="fits", overwrite=True)
+    print(f"Reading chains for {len(todo)} new TIC(s)...")
+    num_added = 0
+    for tic_id in todo:
+        record = compute_record(config, tic_id)
+        if record is None:
+            continue
+        row = build_new_table([record])
+        combined = row if combined is None else vstack([combined, row])
+        # Persist immediately so a later crash cannot lose finished results.
+        combined.write(config.output_fname, format="fits", overwrite=True)
+        num_added += 1
+
+    total = 0 if combined is None else len(combined)
     print(
-        f"Wrote {len(combined)} TIC(s) ({len(records)} new) to "
+        f"Done: added {num_added} new TIC(s); {total} total in "
         f"{config.output_fname!r}."
     )
 
