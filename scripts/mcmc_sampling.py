@@ -354,33 +354,72 @@ def get_backend(samples_fname, config):
         return backend, samples_file["mcmc"].attrs.get("final_run", False)
 
 
-def get_all_samples(backend):
-    """Return merged current and prelim samples and log-prob from backend."""
+def get_last_chain_source(backend):
+    """Return ``(log_prob, source_chain_name)`` for the most recent chain.
+
+    ``log_prob`` is loaded fully (it is ~``ndim`` times smaller than the chain
+    and needed to rank walkers) from the current ``mcmc`` chain when it has
+    data, otherwise from the most recent non-empty ``prelim_mcmc_*`` chain
+    (recovery when the process was killed mid-restart, after the previous chain
+    was archived but before the first new step was written). The returned name
+    is the group those log-probs came from, so the caller can read the matching
+    chain rows from it without materializing the whole chain.
+
+    Earlier chains are intentionally ignored: some prelim chains are created
+    when the likelihood definition changes, so their log-probabilities are not
+    comparable across chains.
+    """
 
     if backend.iteration > 0:
-        log_prob = backend.get_log_prob()
-        samples = backend.get_chain()
+        return backend.get_log_prob(), "mcmc"
+
+    last_name = None
     with h5py.File(backend.filename, "r") as samples_f:
         for prelim in count():
-            chain_name = f"prelim_mcmc_{prelim}"
-            if chain_name in samples_f:
-                prelim_backend = HDFBackend(
-                    backend.filename, name=chain_name, read_only=True
-                )
-                if prelim_backend.iteration > 0:
-                    if prelim == 0 and backend.iteration == 0:
-                        log_prob = prelim_backend.get_log_prob()
-                        samples = prelim_backend.get_chain()
-                    else:
-                        log_prob = numpy.concatenate(
-                            (log_prob, prelim_backend.get_log_prob())
-                        )
-                        samples = numpy.concatenate(
-                            (samples, prelim_backend.get_chain())
-                        )
-            else:
+            name = f"prelim_mcmc_{prelim}"
+            if name not in samples_f:
                 break
-    return log_prob, samples
+            if samples_f[name].attrs.get("iteration", 0) > 0:
+                last_name = name
+    assert last_name is not None, "No chain with data to restart from."
+    source = HDFBackend(backend.filename, name=last_name, read_only=True)
+    return source.get_log_prob(), last_name
+
+
+def get_restart_source(backend):
+    """Archive the current chain and return ``(log_prob, source_backend)``.
+
+    Picks the chain to seed the restart from (see ``get_last_chain_source``).
+    When the current ``mcmc`` chain has data it is moved to a fresh
+    ``prelim_mcmc_*`` slot and ``mcmc`` is reset, so sampling restarts from an
+    empty chain. Returns that chain's log-probabilities (fully, for ranking)
+    and a read-only backend from which to pull the selected seed rows.
+    """
+
+    log_prob, source_name = get_last_chain_source(backend)
+    chain_shape = backend.shape
+    if backend.iteration > 0:
+        with h5py.File(backend.filename, "r+") as samples_f:
+            for prelim in count():
+                chain_name = f"prelim_mcmc_{prelim}"
+                if chain_name not in samples_f:
+                    samples_f.move("mcmc", chain_name)
+                    # The current chain now lives under its prelim name; read
+                    # the seed rows from there.
+                    source_name = chain_name
+                    break
+        backend.reset(*chain_shape)
+
+    _logger.info(
+        "Restarting sampling. Last step log-likelihood spread: %s. Choosing "
+        "top samples from %d.",
+        repr(log_prob[-1].max() - log_prob[-1].min()),
+        log_prob.size,
+    )
+    return (
+        log_prob,
+        HDFBackend(backend.filename, name=source_name, read_only=True),
+    )
 
 
 def prepare_restart(backend):
@@ -410,52 +449,32 @@ def prepare_restart(backend):
             assert len(result) == 6
             return result
 
-    log_prob, samples = get_all_samples(backend)
-
-    # The shape and iteration properties read from the "mcmc" group, which is
-    # renamed below. Capture everything that depends on it before the move.
+    log_prob, source = get_restart_source(backend)
     chain_shape = backend.shape
     num_walkers = chain_shape[0]
-    restarting = backend.iteration > 0
 
-    if restarting:
-        with h5py.File(backend.filename, "r+") as samples_f:
-            for prelim in count():
-                chain_name = f"prelim_mcmc_{prelim}"
-                if chain_name not in samples_f:
-                    samples_f.move("mcmc", chain_name)
-                    break
-
-    _logger.info(
-        "Restarting sampling. Last step log-likelihood spread: %s. Choosing top"
-        "samples from %d.",
-        repr(log_prob[-1].max() - log_prob[-1].min()),
-        log_prob.size,
-    )
     ordered_indices = numpy.unique(log_prob, return_index=True)[1]
     select_from = num_walkers
-
-    if restarting:
-        backend.reset(*chain_shape)
     while select_from <= ordered_indices.size:
-        top_indices = numpy.random.choice(
+        flat_indices = numpy.random.choice(
             ordered_indices[-select_from:], num_walkers
         )
         _logger.debug(
-            "Top indices (shape: %s): %s", top_indices.shape, top_indices
+            "Top indices (shape: %s): %s", flat_indices.shape, flat_indices
         )
-        top_indices = numpy.unravel_index(top_indices, log_prob.shape)
-        initial_state = samples[top_indices]
+        top_indices = numpy.unravel_index(flat_indices, log_prob.shape)
+        steps, walkers = top_indices[0], top_indices[1]
+        initial_state = source.get_chain_rows(steps, walkers)
         if walkers_independent(initial_state):
             with h5py.File(backend.filename, "r+") as samples_f:
                 samples_f["mcmc"].create_dataset(
-                    "seed_log_prob", data=log_prob[top_indices]
+                    "seed_log_prob", data=log_prob[steps, walkers]
                 )
                 samples_f["mcmc"].create_dataset(
                     "seed_samples", data=initial_state
                 )
             return (
-                log_prob[top_indices],
+                log_prob[steps, walkers],
                 initial_state,
                 numpy.empty(chain_shape, dtype=float),
                 numpy.empty(num_walkers, dtype=float),
@@ -463,7 +482,12 @@ def prepare_restart(backend):
                 numpy.zeros(num_walkers, dtype=bool),
             )
 
-    return (None, samples[0]) + 4 * (None,)
+    return (
+        None,
+        source.get_chain_rows(
+            numpy.zeros(num_walkers, dtype=int), numpy.arange(num_walkers)
+        ),
+    ) + 4 * (None,)
 
 
 def find_restart_samples(input_queue, output_queue, log_likelihood, config):
@@ -524,7 +548,7 @@ def restart_sampling(
             max_workers=config.num_parallel,
             initializer=setup_process_map,
             initargs=(vars(config),),
-            max_tasks_per_child=1024,
+            # no max_tasks_per_child: recycling crashed workers on Vista
         ) as pool:
             seed_log_prob = numpy.array(
                 [e[0] for e in pool.map(log_likelihood, seed_samples)]
@@ -622,13 +646,16 @@ def check_log_likelihood_consistency(backend, log_likelihood, config):
     """Raise if recomputed log-likelihoods differ from those stored in file."""
 
     _logger.info("Verifying log-likelihood consistency with existing chain.")
-    last_positions = backend.get_chain()[-1]
-    stored_log_probs = backend.get_log_prob()[-1]
+    # Read only the last step. get_chain()/get_log_prob() without discard
+    # pull the whole chain into RAM (tens of GB) just to take the last row.
+    last = backend.iteration - 1
+    last_positions = backend.get_chain(discard=last)[0]
+    stored_log_probs = backend.get_log_prob(discard=last)[0]
     with ProcessPoolExecutor(
         max_workers=config.num_parallel,
         initializer=setup_process_map,
         initargs=(vars(config),),
-        max_tasks_per_child=1024,
+        # no max_tasks_per_child: recycling crashed workers on Vista
     ) as pool:
         computed = numpy.array(
             [e[0] for e in pool.map(log_likelihood, last_positions)]
@@ -729,7 +756,7 @@ def main(config):
             max_workers=config.num_parallel,
             initializer=setup_process_map,
             initargs=(vars(config),),
-            max_tasks_per_child=1024,
+            # no max_tasks_per_child: recycling crashed workers on Vista
         ) as pool:
             EnsembleSampler(
                 *backend.shape, log_likelihood, backend=backend, pool=pool

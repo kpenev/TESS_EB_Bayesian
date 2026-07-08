@@ -227,6 +227,36 @@ class HDFBackend(Backend):
                 return v.reshape(s)
             return v
 
+    def get_chain_rows(self, steps, walkers):
+        """Return chain coordinates at paired ``(steps, walkers)`` indices.
+
+        Equivalent to ``get_chain()[steps, walkers]`` (numpy point indexing),
+        but reads only one step-slice at a time from the file, so peak memory
+        is independent of the chain length. Repeated indices are allowed.
+
+        Args:
+            steps(array): Step (iteration) index of each row to read.
+
+            walkers(array): Walker index of each row, same length as ``steps``
+                and paired with it element-wise.
+
+        Returns:
+            numpy array of shape ``(len(steps), ndim)``.
+        """
+
+        steps = np.asarray(steps)
+        walkers = np.asarray(walkers)
+        assert steps.shape == walkers.shape
+        with self.open() as f:
+            chain = f[self.name]["chain"]
+            result = np.empty(
+                (steps.size, chain.shape[2]), dtype=chain.dtype
+            )
+            for step in np.unique(steps):
+                mask = steps == step
+                result[mask] = chain[int(step)][walkers[mask]]
+        return result
+
     @property
     def shape(self):
         with self.open() as f:

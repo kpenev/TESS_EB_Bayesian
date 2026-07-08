@@ -23,6 +23,10 @@ python new_sampling.py <TIC_TABLE> --hpc <juno|ls6|ganymede>
 # Continue existing sampling jobs
 python continue_sampling.py <JOB_GROUP>
 
+# Collect max-likelihood params of all finished-sampling TICs into a FITS table
+# (incremental: only newly finished TICs are read and appended on re-run)
+python collect_max_likelihood.py [--finished-status 5]
+
 # Compare models against PHOEBE reference
 python test_against_phoebe.py
 python test_against_phoebe_eclipsing.py
@@ -74,6 +78,24 @@ Defined in `sample_params.py` as a namedtuple: `mtotal`, `mratio`, `age_gyr`, `m
 - **Input**: TESS light curves downloaded via `astroquery` (`download_lcs.py`), detrended (`detrending.py`), with manual exclusions (`exclude_data.py`)
 - **Caching**: SED fits and BLS periodogram results cached in SQLite (`cache_interface.py` using SQLAlchemy ORM, database at `data/mcmc_cache.sqlite`)
 - **Output**: MCMC chains stored as HDF5 (`results/tess{tic_id}_samples.h5`), release files as FITS (`results/release/tess{tic_id}.fits`)
+
+### MCMC Chain Storage & Max-Likelihood Extraction
+
+Each `results/tess{tic_id}_samples.h5` holds one or more emcee chains as HDF5 groups (`hacked_emcee_hdf5_backend.HDFBackend`). Per group:
+- `chain` (nsteps, nwalkers, ndim) — sampled coordinates
+- `log_prob` (nsteps, nwalkers) — log posterior of each sample
+- `blobs` (nsteps, nwalkers) — the derived 21 `SampleParams` values per sample
+- `attrs["iteration"]` — steps actually written; can be far smaller than the pre-allocated dataset length, so **always slice to `iteration`** (unused rows are zero-filled and would corrupt any `min`/`max`)
+
+The production chain is the group named `mcmc`. Restarts may also leave `prelim_mcmc_N` groups — **only read `mcmc` for max-likelihood / "best" samples**: the log-probability definition can differ between runs, so a preliminary chain could yield a spurious maximum.
+
+`chain_analysis.get_max_likelihood_params(samples_fname)` returns `(SampleParams, log_prob)` for the single highest-`log_prob` `mcmc` sample. It reads the (small) `log_prob`, picks the winner with `nanargmax`, then reads back only that one blob row via the backend stride trick — `get_blobs(discard=0, thin=best_step+1)[0][best_walker]`, which exploits `get_value`'s `discard + thin - 1` slice start so `[0]` lands exactly on `best_step`. Shared by `measure_etv.py` and `collect_max_likelihood.py`.
+
+`chain_analysis.py` holds non-plotting chain helpers extracted from `visualize.py` (which imports them back); it pulls in neither matplotlib nor phoebe, so it is safe to import from lightweight scripts. Note `visualize.get_plot_data` caps reads at `--max-plot-steps` most-recent steps and falls back to `prelim_mcmc_N` groups, so it is *not* suitable for finding a true global maximum.
+
+### TIC Status Tracking (finished sampling / review)
+
+TIC selection and sampling progress live in dynamically-created, per-job-group tables (`bui/select_ticids/data_model.py`, `get_ticid_select_tables(name)`), one row per TIC keyed by `.id == TIC ID`, with an integer `status` column and a `skip_review` boolean. A specific `status` value marks a TIC as finished sampling (5 by current convention, but treat it as configurable). Query outside Django via `bui.db_interface.Session` + `get_ticid_select_tables(tablename, must_exist=True)[0]`; enumerate every review table with the distinct `JobGroup.select_tic_table` values (see `clear_skip_review` and `continue_sampling.py` for the pattern).
 
 ### Path Configuration
 
