@@ -5,7 +5,6 @@ import logging
 import numpy
 from astropy import units, constants
 import batman
-import phoebe
 
 from general_purpose_python_modules.kepler_angles import (
     E_to_nu,
@@ -535,6 +534,11 @@ class BinaryParams(batman.TransitParams):
 
     def to_phoebe(self):
         """Return PHOEBE binary with parameters specified in this object."""
+
+        # Imported lazily: phoebe is heavy (large memory + slow import) and is
+        # only needed for this comparison/test path, never during sampling, so
+        # importing it here keeps it out of the HPC sampling workers.
+        import phoebe  # pylint: disable=import-outside-toplevel
 
         self._fix_evolving_orbit([self._t0_both["primary"]])
         result = phoebe.default_binary()

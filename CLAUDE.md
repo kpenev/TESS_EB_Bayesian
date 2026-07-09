@@ -51,7 +51,7 @@ batman.TransitParams
               └── Binary    (binary.py) - combined light curve generation, BEER coefficient fitting
 ```
 
-`BinaryParams` wraps `batman.TransitParams` and adds stellar evolution via `CMDInterpolator` (from `general_purpose_python_modules`), Kepler angle conversions, and gravity darkening. It uses PHOEBE for radius/temperature lookups.
+`BinaryParams` wraps `batman.TransitParams` and adds stellar evolution via `CMDInterpolator` (from `general_purpose_python_modules`), Kepler angle conversions, and gravity darkening. Radius/temperature come from `CMDInterpolator` — **not** PHOEBE. PHOEBE is only used by the test/comparison paths (`to_phoebe`/`from_phoebe`) and is imported lazily inside `to_phoebe()`, so `mcmc_sampling.py` workers never load it.
 
 ### MCMC Sampling Pipeline
 
@@ -112,7 +112,7 @@ Django app (`bui/`) for managing TIC ID selection and job tracking. Uses SQLAlch
 
 - **`general_purpose_python_modules`** - Project-external package providing `CMDInterpolator` (stellar evolution), `kepler_angles` (orbital mechanics), `emcee_util` (chain I/O), `multiprocessing_util`, and `visuals` (corner plots)
 - **`batman`** - Transit/eclipse light curve modeling (base class for `BinaryParams`)
-- **`phoebe`** - Binary star evolution modeling (used for radius/temperature calculations in `BinaryParams`)
+- **`phoebe`** - Binary star evolution modeling, used **only** by test/comparison and plotting scripts (`test_against_phoebe*`, `phoebe_model.py`, `plot_ebeer.py`, `BinaryParams.to_phoebe`/`from_phoebe`), never on the sampling path. Imported lazily so `mcmc_sampling.py` workers don't load its ~GB footprint.
 - **`emcee`** - Ensemble MCMC sampler
 
 ### HPC Support
