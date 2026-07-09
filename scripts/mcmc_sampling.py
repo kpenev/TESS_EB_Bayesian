@@ -454,8 +454,7 @@ def prepare_restart(backend):
     num_walkers = chain_shape[0]
 
     ordered_indices = numpy.unique(log_prob, return_index=True)[1]
-    select_from = num_walkers
-    while select_from <= ordered_indices.size:
+    for select_from in range(num_walkers, ordered_indices.size + 1):
         flat_indices = numpy.random.choice(
             ordered_indices[-select_from:], num_walkers
         )
