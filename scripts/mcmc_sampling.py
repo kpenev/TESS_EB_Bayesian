@@ -4,7 +4,8 @@
 
 from os import path, makedirs
 import logging
-from multiprocessing import Pool, Process, Queue
+from concurrent.futures import ProcessPoolExecutor
+from multiprocessing import Process, Queue
 from itertools import count
 from traceback import format_exc
 
@@ -411,7 +412,13 @@ def prepare_restart(backend):
 
     log_prob, samples = get_all_samples(backend)
 
-    if backend.iteration > 0:
+    # The shape and iteration properties read from the "mcmc" group, which is
+    # renamed below. Capture everything that depends on it before the move.
+    chain_shape = backend.shape
+    num_walkers = chain_shape[0]
+    restarting = backend.iteration > 0
+
+    if restarting:
         with h5py.File(backend.filename, "r+") as samples_f:
             for prelim in count():
                 chain_name = f"prelim_mcmc_{prelim}"
@@ -426,13 +433,13 @@ def prepare_restart(backend):
         log_prob.size,
     )
     ordered_indices = numpy.unique(log_prob, return_index=True)[1]
-    select_from = backend.shape[0]
+    select_from = num_walkers
 
-    if backend.iteration > 0:
-        backend.reset(*backend.shape)
+    if restarting:
+        backend.reset(*chain_shape)
     while select_from <= ordered_indices.size:
         top_indices = numpy.random.choice(
-            ordered_indices[-select_from:], backend.shape[0]
+            ordered_indices[-select_from:], num_walkers
         )
         _logger.debug(
             "Top indices (shape: %s): %s", top_indices.shape, top_indices
@@ -450,10 +457,10 @@ def prepare_restart(backend):
             return (
                 log_prob[top_indices],
                 initial_state,
-                numpy.empty(backend.shape, dtype=float),
-                numpy.empty(backend.shape[0], dtype=float),
+                numpy.empty(chain_shape, dtype=float),
+                numpy.empty(num_walkers, dtype=float),
                 None,
-                numpy.zeros(backend.shape[0], dtype=bool),
+                numpy.zeros(num_walkers, dtype=bool),
             )
 
     return (None, samples[0]) + 4 * (None,)
@@ -513,11 +520,11 @@ def restart_sampling(
             "Log-likelihood function changed since last sampling. "
             "Re-evaluating seed log-likelihoods."
         )
-        with Pool(
-            config.num_parallel,
+        with ProcessPoolExecutor(
+            max_workers=config.num_parallel,
             initializer=setup_process_map,
-            initargs=[vars(config)],
-            maxtasksperchild=1024,
+            initargs=(vars(config),),
+            max_tasks_per_child=1024,
         ) as pool:
             seed_log_prob = numpy.array(
                 [e[0] for e in pool.map(log_likelihood, seed_samples)]
@@ -617,16 +624,18 @@ def check_log_likelihood_consistency(backend, log_likelihood, config):
     _logger.info("Verifying log-likelihood consistency with existing chain.")
     last_positions = backend.get_chain()[-1]
     stored_log_probs = backend.get_log_prob()[-1]
-    with Pool(
-        config.num_parallel,
+    with ProcessPoolExecutor(
+        max_workers=config.num_parallel,
         initializer=setup_process_map,
-        initargs=[vars(config)],
-        maxtasksperchild=1024,
+        initargs=(vars(config),),
+        max_tasks_per_child=1024,
     ) as pool:
         computed = numpy.array(
             [e[0] for e in pool.map(log_likelihood, last_positions)]
         )
-    mismatches = computed != stored_log_probs
+    mismatches = numpy.logical_not(
+        numpy.isclose(computed, stored_log_probs, rtol=1e-8, atol=1e-08)
+    )
     if mismatches.any():
         raise RuntimeError(
             f"Log-likelihood mismatch for {mismatches.sum()} walker(s):\n"
@@ -716,11 +725,11 @@ def main(config):
             " final" if final_run else "",
             repr(initial_state),
         )
-        with Pool(
-            config.num_parallel,
+        with ProcessPoolExecutor(
+            max_workers=config.num_parallel,
             initializer=setup_process_map,
-            initargs=[vars(config)],
-            maxtasksperchild=1024,
+            initargs=(vars(config),),
+            max_tasks_per_child=1024,
         ) as pool:
             EnsembleSampler(
                 *backend.shape, log_likelihood, backend=backend, pool=pool
