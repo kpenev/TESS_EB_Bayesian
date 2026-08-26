@@ -209,15 +209,14 @@ def parse_command_line():
     parser.add_argument(
         "--verify-only",
         action="store_true",
-        help="Skip compression; only verify that fname[:-3] + '_truncated.h5' "
-        "matches the original fname. Useful when compression already ran but "
-        "verification was not completed.",
-    )
-    parser.add_argument(
-        "--verify-only",
-        action="store_true",
         help="Assume all compression steps were already done just run "
         "verification.",
+    )
+    parser.add_argument(
+        "--num-parallel",
+        type=int,
+        default=1,
+        help="The number of parallel processes to use.",
     )
     return parser.parse_args()
 

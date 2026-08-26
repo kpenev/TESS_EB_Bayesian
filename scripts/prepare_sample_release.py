@@ -277,6 +277,8 @@ def create_release(config):
         log_prob[burnin::thin, :].flatten() * u.dimensionless_unscaled,
         name="log_prob",
     )
+    med_logprob = numpy.median(release_data['log_prob'])
+    release_data = release_data[release_data['log_prob'] > med_logprob - 15]
     ensure_directory(config.release_fname)
 
     print("Generating diagnostic plots")
