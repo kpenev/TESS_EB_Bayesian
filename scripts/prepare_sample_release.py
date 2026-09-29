@@ -95,7 +95,7 @@ def get_burnin(plot_data, num_steps, num_walkers, config):
                 data={"TIC": [], "burn-in": []}, dtype=int
             ).set_index("TIC")
     try:
-        return int(get_burnin.burnin.loc[config.tic_id])
+        return int(get_burnin.burnin.at[config.tic_id, "burn-in"])
     except KeyError:
         print(f"No cached burnin found for TIC {config.tic_id}, estimating...")
         burnin = 0
@@ -116,6 +116,9 @@ def get_burnin(plot_data, num_steps, num_walkers, config):
         get_burnin.burnin.loc[config.tic_id] = burnin
         get_burnin.burnin.to_csv("release_burnin.txt", sep=" ", mode="w")
         return burnin
+    except:
+        print(f"{get_burnin.burnin.loc[config.tic_id]!r} not a valid burnin!")
+        raise
 
 
 def setup_diagnostic_figure(config):

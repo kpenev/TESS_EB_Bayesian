@@ -18,7 +18,7 @@ python mcmc_sampling.py <TIC_ID> [--num-parallel 16] [--config-file myconfig.cfg
 python visualize.py <TIC_ID>
 
 # Create SLURM batch jobs for HPC sampling
-python new_sampling.py <TIC_TABLE> --hpc <juno|ls6|ganymede>
+python new_sampling.py <TIC_TABLE> --hpc <juno|ls6|vista|ganymede>
 
 # Continue existing sampling jobs
 python continue_sampling.py <JOB_GROUP>
@@ -100,13 +100,13 @@ TIC selection and sampling progress live in dynamically-created, per-job-group t
 ### Path Configuration
 
 All file paths defined centrally in `paths.py`. Key directories:
-- `data/` - Isochrone grids, gravity darkening tables, dust maps, EB catalogs
-- `results/` - MCMC chain outputs, SLURM job database, rendered plots
+- `data/` - Isochrone grids, gravity darkening tables, broadband filter data, EB catalogs (dust maps come from the `dustmaps` package's own data directory)
+- `results/` - MCMC chain outputs, release files, rendered plots
 - `slurm/{hpc}/` - SLURM batch script templates per HPC cluster
 
 ### Web Interface (bui/)
 
-Django app (`bui/`) for managing TIC ID selection and job tracking. Uses SQLAlchemy (`bui/db_interface.py`) for the jobs database and Django ORM for the web models. Dynamic table creation in `bui/select_ticids/data_model.py`.
+Django app (`bui/`) for managing TIC ID selection and job tracking. Uses SQLAlchemy (`bui/db_interface.py`) for the jobs database and Django ORM for the web models. The jobs database is `TESS_EBs.db`, opened relative to the current working directory (`paths.jobs_db` is unused); the live copy is `scripts/TESS_EBs.db`, so run everything (including `python bui/manage.py runserver`) from `scripts/`. Review status labels (`bui/select_ticids/urls.py`): 0 pending, 1 bad, 2 continue, 3 fix, 4 changed_likelihood, 5 finished. Dynamic table creation in `bui/select_ticids/data_model.py`.
 
 ### External Dependencies
 
@@ -117,4 +117,4 @@ Django app (`bui/`) for managing TIC ID selection and job tracking. Uses SQLAlch
 
 ### HPC Support
 
-Three supported clusters configured in `command_line_util.py`: `juno` (4 TICs/node), `ls6` (8 TICs/node), `ganymede` (1 TIC/node). SLURM templates live in `slurm/{hpc}/`. The `new_sampling.py` and `continue_sampling.py` scripts generate and manage batch jobs.
+Supported clusters are configured in `command_line_util.py` (`tic_per_node`): `juno` (4 TICs/node), `ls6` (8 TICs/node), `vista` (9 TICs/node), `ganymede` (1 TIC/node). SLURM templates live in `slurm/{hpc}/` (currently only `juno`, `ls6`, `vista` have template directories). The `new_sampling.py` and `continue_sampling.py` scripts generate and manage batch jobs.

@@ -49,19 +49,46 @@ python etv_analysis.py <TIC_ID>
 
 ## How It Works
 
-The model is built up in three layers:
+### Class hierarchy
 
-- `binary_parameters.py` (`BinaryParams`, extends `batman.TransitParams`):
-  orbit, eclipse phases, and stellar radii/temperatures interpolated from
-  isochrone grids for the given masses, age, and metallicity.
-- `ebeer.py` (`EBEERBinary`): out-of-eclipse beaming, reflection, and
-  ellipsoidal variations.
-- `binary.py` (`Binary`): the combined model light curve.
+The binary model and the likelihood are built as two class hierarchies:
 
-`log_likelihood.py` (`LogLikelihood`) combines the TESS light curve likelihood,
-the SED likelihood, and the priors. `mcmc_sampling.py` finds starting walker
-positions by optimization (`find_starting_positions.py`), then runs `emcee`,
-periodically restarting walkers to escape local maxima.
+```
+batman.TransitParams
+  └── BinaryParams      (binary_parameters.py)
+        └── EBEERBinary (ebeer.py)
+              └── Binary (binary.py)
+
+TESSTarget              (tess_target.py)
+  └── LogLikelihood     (log_likelihood.py)
+```
+
+- `BinaryParams`: the orbit (Kepler angle conversions, eclipse phases) and
+  the stars. Stellar radii and temperatures are interpolated from isochrone
+  grids (`CMDInterpolator` from `general_purpose_python_modules`) for the
+  given masses, age, and metallicity, and gravity darkening comes from tables.
+  `to_phoebe`/`from_phoebe` convert to and from PHOEBE, but only for testing
+  against PHOEBE; PHOEBE is not used for sampling.
+- `EBEERBinary`: adds the out-of-eclipse effects: Doppler beaming,
+  reflection, and ellipsoidal variations.
+- `Binary`: combines eclipses and out-of-eclipse effects into the model light
+  curve and fits the BEER coefficients. It can be created directly from a set
+  of sampled parameters (`Binary(from_mcmc=...)`).
+- `TESSTarget`: downloads and prepares the TESS light curves of one TIC,
+  organized by sector (SPOC preferred over QLP). It finds the eclipses with
+  BLS, and the result is used to mask the data around them.
+- `LogLikelihood`: the function being sampled. It detrends the light curve and
+  combines the light curve likelihood (comparing a `Binary` model to the TESS
+  data), the SED likelihood, and the priors.
+
+### Sampling
+
+`mcmc_sampling.py` finds starting walker positions by optimization
+(`FindStartingPositions` in `find_starting_positions.py`) over a grid of age,
+metallicity, and argument of periapsis. It then runs `emcee`, periodically
+restarting the walkers to escape local maxima, and stores the chains in HDF5.
+
+### Parameters
 
 The 21 sampled parameters (`sample_params.py`) are: total mass, mass ratio,
 age, [M/H], period, eccentricity, argument of periapsis, primary impact
@@ -207,7 +234,8 @@ table currently being reviewed.
 3. **Review results**: render `best`, `convergence`, and `starting` plots and
    review them in `sampling` mode. Mark each TIC as *continue*, *fix*,
    *finished*, or *bad*, or change its data selection or SED settings and
-   *Apply Changes*.
+   *Apply Changes*. TICs can also be flagged as not needing further review until
+   autometed convergence checks are satisfied.
 4. **Continue**: `python continue_sampling.py <JOB_GROUP> --continue-statuses 2
    --changed-likelihood-statuses 4` regenerates the job files of the group.
    TICs with those statuses keep their slots. The slots of all other TICs

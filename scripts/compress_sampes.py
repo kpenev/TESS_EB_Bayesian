@@ -70,7 +70,7 @@ def repack(fname):
     os.replace(repacked_fname, fname)
 
 
-def verify(orig_fname, repacked_fname, chains_expected):
+def verify(orig_fname, repacked_fname, chains_expected, max_read_steps):
     """Verify that the truncated file data is identical to original."""
 
     print(f"Verifying {orig_fname!r} vs {repacked_fname!r}.")
@@ -85,29 +85,42 @@ def verify(orig_fname, repacked_fname, chains_expected):
             "original": HDFBackend(orig_fname, name=chain),
             "truncated": HDFBackend(repacked_fname, name=chain),
         }
-        assert (
-            backends["original"].iteration == backends["truncated"].iteration
-        ), (
+        # Steps past this are unused padding in the original and must never be
+        # read (the backend applies the same limit to all its reads).
+        iterations = backends["original"].iteration
+        assert iterations == backends["truncated"].iteration, (
             f"Iteration count mismatch for chain {chain}: "
-            f"{backends['original'].iteration} vs "
-            f"{backends['truncated'].iteration}"
+            f"{iterations} vs {backends['truncated'].iteration}"
         )
-        assert (
-            backends["original"].get_chain()
-            == backends["truncated"].get_chain()
-        ).all(), f"Chain data mismatch for chain {chain}"
-        assert (
-            backends["original"].get_log_prob()
-            == backends["truncated"].get_log_prob()
-        ).all(), f"Log-probability data mismatch for chain {chain}"
-        assert (
-            backends["original"].get_blobs()
-            == backends["truncated"].get_blobs()
-        ).all(), f"Blobs data mismatch for chain {chain}"
+        with h5py.File(orig_fname, "r") as orig_f:
+            with h5py.File(repacked_fname, "r") as trunc_f:
+                for dset in ["blobs", "chain", "log_prob"]:
+                    orig_dset = orig_f[chain][dset]
+                    trunc_dset = trunc_f[chain][dset]
+                    assert (
+                        trunc_dset.shape[0] == iterations
+                        and trunc_dset.shape[1:] == orig_dset.shape[1:]
+                    ), (
+                        f"Shape mismatch in {dset} of chain {chain}: "
+                        f"{orig_dset.shape} vs {trunc_dset.shape} for "
+                        f"{iterations} iterations"
+                    )
+                    for start in range(0, iterations, max_read_steps):
+                        end = min(start + max_read_steps, iterations)
+                        assert (
+                            orig_dset[start:end] == trunc_dset[start:end]
+                        ).all(), (
+                            f"Mismatch in {dset} of chain {chain} among "
+                            f"steps {start} - {end}"
+                        )
+                        print(
+                            f"Verified {dset} steps {start} - {end} of chain "
+                            f"{chain}"
+                        )
         print(f"Verified chain {chain}")
 
 
-def process(fname, verify_only=False):
+def process(fname, verify_only=False, max_read_steps=100000):
     """Process the file by truncating, repacking, and verifying."""
 
     trunc_fname = fname[:-3] + "_truncated.h5"
@@ -116,7 +129,7 @@ def process(fname, verify_only=False):
     else:
         chains_expected = truncate(fname, trunc_fname)
         repack(trunc_fname)
-    verify(fname, trunc_fname, chains_expected)
+    verify(fname, trunc_fname, chains_expected, max_read_steps)
     os.replace(trunc_fname, fname)
     print(f"Finished processing {fname}.")
 
@@ -137,8 +150,15 @@ def parse_command_line():
     parser.add_argument(
         "--num-parallel",
         type=int,
-        default=16,
+        default=1,
         help="The number of parallel processes to use.",
+    )
+    parser.add_argument(
+        "--max-read-steps",
+        type=int,
+        default=100000,
+        help="Verification compares the chains in chunks of at most this many "
+        "steps at a time, to limit the memory used for large files.",
     )
     parser.add_argument(
         "--verify-only",
@@ -158,11 +178,20 @@ def main(args):
             maxtasksperchild=1,
         ) as pool:
             pool.map(
-                partial(process, verify_only=args.verify_only), args.filenames
+                partial(
+                    process,
+                    verify_only=args.verify_only,
+                    max_read_steps=args.max_read_steps,
+                ),
+                args.filenames,
             )
     else:
         for fname in args.filenames:
-            process(fname, verify_only=args.verify_only)
+            process(
+                fname,
+                verify_only=args.verify_only,
+                max_read_steps=args.max_read_steps,
+            )
 
 if __name__ == '__main__':
     main(parse_command_line())
