@@ -353,7 +353,7 @@ class MeasureETV(LogLikelihood):
             return 0.0
         return numpy.exp(
             min_sum_sq_residuals
-            - self.sum_sq_residuals(time_shift, eclipse_indices)
+            - self.sum_sq_residuals(time_shift, eclipse_indices) / 2
         )
 
     def fit_timeshift(self, eclipse_indices):
