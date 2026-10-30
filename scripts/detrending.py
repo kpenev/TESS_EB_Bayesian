@@ -115,7 +115,7 @@ def fit_ooe_model(
     mask,
     spline_nodes,
     eclipse_rejection,
-    spline_rejection=(5.0, 3.0),
+    spline_rejection=(5.0, -3.0),
 ):
     """Fit OOE model to the lightcurve iteratively rejecting eclipses."""
 
@@ -126,7 +126,12 @@ def fit_ooe_model(
     refit = True
     while refit:
         if callable(spline_nodes):
-            fit_spline_nodes = spline_nodes(masked_time)[1:-1]
+            fit_spline_nodes = spline_nodes(masked_time)
+            if fit_spline_nodes is None:
+                # Nothing to detrend (e.g. segment has no eclipses): NaN trend
+                # makes detrend_with_gaps discard the segment.
+                return numpy.full(lightcurve.size, numpy.nan), ooe_mask
+            fit_spline_nodes = fit_spline_nodes[1:-1]
         else:
             fit_spline_nodes = spline_nodes
             refit = False
@@ -181,7 +186,7 @@ def get_ooe_variability(
     mask=None,
     *,
     half_porb=numpy.inf,
-    spline_rejection=(5.0, 3.0),
+    spline_rejection=(5.0, -3.0),
     eclipse_rejection=2.0,
     return_mask=False,
 ):

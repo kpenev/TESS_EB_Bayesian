@@ -135,6 +135,8 @@ class MeasureETVVisualize(MeasureETV):
 
         tmin, tmax = ax.get_xlim()
         for node_list in self._spline_nodes:
+            if node_list is None:
+                continue
             for node in node_list:
                 if tmin < node < tmax:
                     ax.axvline(node)

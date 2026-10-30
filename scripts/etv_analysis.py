@@ -9,6 +9,7 @@ from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.lines import Line2D
 import numpy
 from scipy.stats import norm as scipy_norm
+import sys
 
 from general_purpose_python_modules.multiprocessing_util import setup_process
 
@@ -273,14 +274,17 @@ def prepare_tasks(eclipse_indices, config):
     num_primary_tasks = None
     for component_eclipse_indices in eclipse_indices:
         if not config.disable_by_sector:
-            sector_tasks = [
-                numpy.concatenate(sector_eclipses[1])
-                for sector_eclipses in component_eclipse_indices
-            ]
-            sector_tasks = [t for t in sector_tasks if t.size > 0]
-            tasks.extend(sector_tasks)
-            task_types.extend("sector" for _ in sector_tasks)
-            task_sectors.extend(sec for sec, _ in component_eclipse_indices)
+            # Skip sectors where this component has no eclipses; they are
+            # still used for the other component if it eclipses there.
+            for sector, segments in component_eclipse_indices:
+                if not segments:
+                    continue
+                sector_task = numpy.concatenate(segments)
+                if sector_task.size == 0:
+                    continue
+                tasks.append(sector_task)
+                task_types.append("sector")
+                task_sectors.append(sector)
         if not config.disable_by_segment:
             for sec, segs in component_eclipse_indices:
                 segs = [t for t in segs if t.size > 0]
@@ -312,28 +316,52 @@ def plot_etv_analysis_results(all_etv_distros, etv_comparisons, config):
         all_sectors.update(etv_distros["task_sectors"])
     sector_groups = _consecutive_sector_groups(sorted(all_sectors))
 
-    legend_handles = [
-        Line2D(
-            [0], [0], marker="o", color="w",
-            markerfacecolor=primary_color, markersize=8, label="Primary",
-        ),
-        Line2D(
-            [0], [0], marker="o", color="w",
-            markerfacecolor=secondary_color, markersize=8, label="Secondary",
-        ),
-    ] + [
-        Line2D(
-            [0], [0], marker=markers[i % len(markers)],
-            color="black", linestyle="none", markersize=8, label=detrending,
-        )
-        for i, detrending in enumerate(detrending_list)
-    ] + [
-        Line2D(
-            [0], [0], marker="o", color="black",
-            linestyle="none", markersize=ms, label=task_type,
-        )
-        for task_type, ms in marker_sizes.items()
-    ]
+    legend_handles = (
+        [
+            Line2D(
+                [0],
+                [0],
+                marker="o",
+                color="w",
+                markerfacecolor=primary_color,
+                markersize=8,
+                label="Primary",
+            ),
+            Line2D(
+                [0],
+                [0],
+                marker="o",
+                color="w",
+                markerfacecolor=secondary_color,
+                markersize=8,
+                label="Secondary",
+            ),
+        ]
+        + [
+            Line2D(
+                [0],
+                [0],
+                marker=markers[i % len(markers)],
+                color="black",
+                linestyle="none",
+                markersize=8,
+                label=detrending,
+            )
+            for i, detrending in enumerate(detrending_list)
+        ]
+        + [
+            Line2D(
+                [0],
+                [0],
+                marker="o",
+                color="black",
+                linestyle="none",
+                markersize=ms,
+                label=task_type,
+            )
+            for task_type, ms in marker_sizes.items()
+        ]
+    )
 
     plot_fname = config.plot_fname.format(tic_id=config.tic_id)
     with PdfPages(plot_fname) as pdf:

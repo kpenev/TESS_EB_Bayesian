@@ -1,7 +1,7 @@
 """Define tools for ETVs analysis from TESS lightcurves."""
 
 from functools import partial
-from multiprocessing import Pool
+from multiprocessing import get_context
 import pickle
 import logging
 import os
@@ -94,9 +94,9 @@ class TimeShiftDistribution(  # pylint:disable=too-many-instance-attributes
         self._likelihood = likelihood
         self._above_integral = above_integral
         self._below_integral = below_integral
-        self._min_below = float(below_integral(self.a))
+        self._min_below = float(below_integral(self.a)[0])
         print(f"Min below: {self._min_below}")
-        self._normalization = float(above_integral(self.b)) - self._min_below
+        self._normalization = float(above_integral(self.b)[0]) - self._min_below
         print(f"Normalization: {self._normalization}")
 
 
@@ -127,8 +127,8 @@ class MeasureETV(LogLikelihood):
         model_flux = best_binary.eclipse(time_grid)
 
         transitions = numpy.diff((model_flux < 1.0).astype(int))
-        start_idx = numpy.where(transitions == 1)[0] + 1
-        end_idx = numpy.where(transitions == -1)[0] + 1
+        start_idx = numpy.where(transitions == 1)[0][0] + 1
+        end_idx = numpy.where(transitions == -1)[0][0] + 1
 
         assert start_idx.size == 1
         assert end_idx.size == 1
@@ -780,7 +780,9 @@ def compute_and_save_etv_distros(
             "parent_pid": os.getpid(),
         }
     )
-    with Pool(
+    # Explicitly request fork: Python 3.14+ defaults to forkserver on Linux,
+    # which would leave _worker_measure_etv as None in the workers.
+    with get_context("fork").Pool(
         processes=config["num_parallel"],
         initializer=setup_process_map,
         initargs=[config],
