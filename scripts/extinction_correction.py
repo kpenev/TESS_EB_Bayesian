@@ -22,6 +22,9 @@ from panstarrs import get_panstarrs_mags
 
 _logger = logging.getLogger(__name__)
 
+# Factor TIC-8 applied to SFD-scale E(B-V) (Stassun et al. 2019)
+tic_ebv_recalibration = 0.884
+
 
 def verify_monotonic():
     """Verify that Gaia IDs are monotonic in individual datasats."""
@@ -139,10 +142,14 @@ class Green19Correction:
                 + reddening[1, 1]
             )
         else:
+            # TIC E(B-V) includes the Schlafly & Finkbeiner (2011)
+            # recalibration (Stassun et al. 2019, Sec. 2.3.3), while
+            # Bayestar19 units match the raw SFD scale (Green et al. 2019,
+            # Sec. 2.1), so undo the recalibration.
             reddening = (
                 numpy.array([-tic_entry["e_ebv"], 0.0, tic_entry["e_ebv"]])
                 + tic_entry["ebv"]
-            )
+            ) / tic_ebv_recalibration
         result = {
             "dm": (5.0 * numpy.log10(distance) - 5.0),
             "E": reddening,
@@ -275,8 +282,8 @@ class Green19Correction:
                 0.7927,
                 0.4690,
                 0.3026,
-                0.132,
                 0.179,
+                0.132,
             ]
         )
 

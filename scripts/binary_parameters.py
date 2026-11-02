@@ -255,7 +255,7 @@ class BinaryParams(batman.TransitParams):
                         interpolated[component],
                         interpolator(
                             self._passbands[photsys],
-                            Mini=mprimary,
+                            Mini=mass,
                             **interp_kwargs,
                         ),
                     )
