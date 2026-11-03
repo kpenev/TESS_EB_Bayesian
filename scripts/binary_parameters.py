@@ -109,6 +109,11 @@ class BinaryParams(batman.TransitParams):
             (photsys, CMDInterpolator(cmd_data_fname.format(photsys=photsys)))
             for photsys in ["panstarss1", "2mass_spitzer_wise"]
         )
+        # Kept separate from the SED interpolators above: only used for the
+        # TESS-band flux ratio of the two stars.
+        cls._tess_interpolator = CMDInterpolator(
+            cmd_data_fname.format(photsys="tess_2mass")
+        )
         cls._gravdark_interp = GravDarkInterpolator()
 
         cls._meh_range = cls._cmd_interpolators[0][1].get_range("MH")
@@ -328,6 +333,18 @@ class BinaryParams(batman.TransitParams):
             10.0 ** (-interpolated["primary"][3:] / 2.5)
             + 10.0 ** (-interpolated["secondary"][3:] / 2.5)
         )
+        tess_mag = {
+            component: self._tess_interpolator(
+                ("TESSmag",), Mini=mass, **interp_kwargs
+            )[0]
+            for component, mass in [
+                ("primary", mprimary),
+                ("secondary", mprimary * sample_params.mratio),
+            ]
+        }
+        self._tess_flux_ratio = 10.0 ** (
+            -(tess_mag["secondary"] - tess_mag["primary"]) / 2.5
+        )
 
     def _calc_perpass_eclipse_time_diff(self):
         """Return the time between periapsis passage and primary eclipse."""
@@ -500,6 +517,9 @@ class BinaryParams(batman.TransitParams):
         self.t0_perpass = None
         self.inverted = False
         self.absmag = None
+        # Secondary to primary flux ratio in the TESS band (None unless set
+        # from stellar evolution, e.g. not for binaries built from PHOEBE).
+        self._tess_flux_ratio = None
         self._primary_impact_param = None
         self._out_of_range = []
         for attr in self._per_star_attr:
@@ -618,7 +638,18 @@ class BinaryParams(batman.TransitParams):
         return result
 
     def secondary_flux_fraction(self):
-        """Return the ratio of secondary to primary flux."""
+        """
+        Return the ratio of secondary to primary flux in the TESS band.
+
+        Uses the TESS magnitudes from stellar evolution when available.
+        Otherwise (e.g. for binaries built from PHOEBE) falls back to the
+        bolometric ratio, corrected for limb darkening.
+        """
+
+        if self._tess_flux_ratio is not None:
+            if self.inverted:
+                return 1.0 / self._tess_flux_ratio
+            return self._tess_flux_ratio
 
         result = self.teff_ratio**4 * (self.rp) ** 2
         for i, component in enumerate(
