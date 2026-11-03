@@ -62,25 +62,32 @@ def get_last_healpix(fname):
 
 
 def get_gaia_distance(gaia_id):
-    """Return 50-th, 16-th, & 84-th pencentiles of the Gaia distance estimate"""
+    """
+    Return 16-th, 50-th, & 84-th percentiles of the geometric distance.
+
+    Uses the Bailer-Jones et al. (2021) geometric distances, which depend only
+    on the parallax (identical in Gaia EDR3 and DR3) and a Galactic prior, not
+    on single-star models of the photometry. Returns None if the distance is
+    not available.
+    """
 
     gaia = GaiaClass()
     gaia_distance_entry = gaia.launch_job_async(
-        "SELECT distance_gspphot_lower, distance_gspphot, "
-        "distance_gspphot_upper FROM gaiadr3.gaia_source WHERE source_id = "
-        f"{gaia_id};",
+        "SELECT r_lo_geo, r_med_geo, r_hi_geo FROM external.gaiaedr3_distance "
+        f"WHERE source_id = {gaia_id};",
         verbose=True,
     ).get_results()
     print("Gaia distance entry: ", gaia_distance_entry)
     if len(gaia_distance_entry) == 0:
         return None
-    quantiles = ["_lower", "", "_upper"]
     result = numpy.array(
         [
-            float(gaia_distance_entry[f"distance_gspphot{quant}"])
-            for quant in quantiles
+            float(gaia_distance_entry[f"r_{quantile}_geo"])
+            for quantile in ["lo", "med", "hi"]
         ]
     )
+    if not numpy.isfinite(result).all():
+        return None
     return result
 
 
