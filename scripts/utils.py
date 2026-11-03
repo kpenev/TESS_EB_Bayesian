@@ -54,7 +54,7 @@ def fit_least_squares(
             _logger.warning(
                 "Least squares encountered unphysical parameters:\n%s\n%s",
                 repr(sample_params),
-                format_exc()
+                format_exc(),
             )
             return numpy.full(num_residuals, numpy.inf)
         lc_residuals = log_likelihood.calc_lc_log_likelihood(
@@ -356,6 +356,7 @@ def params_to_sample(params, log_likelihood, reset_sys_err=False):
     def get_mcmc_sample(params):
         """Return the MCMC sample corresponding to the given parameters."""
 
+        params = log_likelihood.limb_darkening_to_q(params)
         return numpy.array(
             [
                 log_likelihood.inverse_prior(param, value)[1]

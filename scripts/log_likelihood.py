@@ -41,7 +41,7 @@ class LogLikelihood(TESSTarget):
     max_outlier_iterations = 5
     outlier_thresh2 = 25.0
     outlier_bins = 30
-    skip_ooe_poly=False
+    skip_ooe_poly = False
 
     @classmethod
     def get_cached_sed_and_bls(cls, tic_id):
@@ -734,16 +734,56 @@ class LogLikelihood(TESSTarget):
             return param_ind, numpy.inf
         return param_ind, norm.ppf((value - low) / (high - low))
 
+    @staticmethod
+    def limb_darkening_from_q(params):
+        """
+        Convert Kipping (2013) q1, q2 limb darkening in ``params`` to u1, u2.
+
+        The prior transform produces q1 and q2 uniform in (0, 1) in the limb
+        darkening fields. This replaces them with the quadratic coefficients
+        u1 = 2 sqrt(q1) q2 and u2 = sqrt(q1) (1 - 2 q2), which are then uniform
+        over the physically allowed region u1 > 0, u1 + u2 < 1, u1 + 2 u2 > 0.
+        """
+
+        replacements = {}
+        for component in ["primary", "secondary"]:
+            total_root = numpy.sqrt(getattr(params, f"{component}_limb_dark_1"))
+            fraction = getattr(params, f"{component}_limb_dark_2")
+            replacements[f"{component}_limb_dark_1"] = (
+                2.0 * total_root * fraction
+            )
+            replacements[f"{component}_limb_dark_2"] = total_root * (
+                1.0 - 2.0 * fraction
+            )
+        return params._replace(**replacements)
+
+    @staticmethod
+    def limb_darkening_to_q(params):
+        """Inverse of `limb_darkening_from_q()`."""
+
+        replacements = {}
+        for component in ["primary", "secondary"]:
+            linear = getattr(params, f"{component}_limb_dark_1")
+            total = linear + getattr(params, f"{component}_limb_dark_2")
+            replacements[f"{component}_limb_dark_1"] = total**2
+            # q2 has no effect when u1 = u2 = 0, so any value works there.
+            replacements[f"{component}_limb_dark_2"] = (
+                linear / (2.0 * total) if total > 0 else 0.5
+            )
+        return params._replace(**replacements)
+
     def get_sample_params(self, mcmc_sample):
         """Return prior-transformed parameters given sample."""
 
-        return SampleParams(
-            *[
-                self.prior_transform(param, sample_entry)
-                for param, sample_entry in zip(
-                    SampleParams._fields, mcmc_sample
-                )
-            ]
+        return self.limb_darkening_from_q(
+            SampleParams(
+                *[
+                    self.prior_transform(param, sample_entry)
+                    for param, sample_entry in zip(
+                        SampleParams._fields, mcmc_sample
+                    )
+                ]
+            )
         )
 
     def _bin_lightcurve(self, lightcurve, num_bins, phase):
