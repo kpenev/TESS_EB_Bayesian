@@ -826,10 +826,9 @@ class LogLikelihood(TESSTarget):
                 )
                 assert numpy.isfinite(var)
                 new_outliers = square_dev > self.outlier_thresh2 * var
-                if outliers is None:
-                    outliers = new_outliers
-                elif (outliers == new_outliers).all():
+                if outliers is not None and (outliers == new_outliers).all():
                     break
+                outliers = new_outliers
             return var, outliers
 
         combined_lc = self.get_combined_lc()
@@ -934,7 +933,9 @@ class LogLikelihood(TESSTarget):
                 residuals.
         """
 
-        if binary.a < 1 + binary.rp or binary.out_of_range:
+        # Reject stars that overlap at periastron (a is in units of the
+        # primary radius and rp is the radius ratio).
+        if binary.a * (1.0 - binary.ecc) < 1 + binary.rp or binary.out_of_range:
             self._logger.warning(
                 "Unphysical binary parameters (assuming zero likelihood): %s",
                 binary,
