@@ -5,6 +5,11 @@ results
 *.sqlite
 *.sqlite3
 
+# Vendored dynesty: demo notebooks, the paper and the docs are not needed
+dynesty-3.1.0/demos/
+dynesty-3.1.0/paper/
+dynesty-3.1.0/docs/
+
 ## Core latex/pdflatex auxiliary files:
 *.aux
 *.lof

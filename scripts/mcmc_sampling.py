@@ -32,7 +32,10 @@ from hacked_emcee_hdf5_backend import HDFBackend
 from log_likelihood import SampleParams, LogLikelihood
 from log_likelihood_priors import LogLikelihoodPriorsOnly
 from paths import results_dir, samples as samples_fname_pattern
-from find_starting_positions import FindStartingPositions
+from find_starting_positions import (
+    FindStartingPositions,
+    add_scenario_grid_arguments,
+)
 
 _logger = logging.getLogger(__name__)
 _git_hash = str(
@@ -80,50 +83,7 @@ def parse_command_line():
         "``--num-random-walkers`` + ``--initial-num-ages`` * "
         "``--initial-num-mehs`` * ``--initial-num-ws``.",
     )
-    parser.add_argument(
-        "--initial-num-ages",
-        type=int,
-        default=8,
-        help="The number of different initial ages to optimize starting "
-        "positions for.",
-    )
-    parser.add_argument(
-        "--initial-logage-smear",
-        type=float,
-        default=0.02,
-        help="The initial log age are approximately on a log-uniform grid "
-        "between the minimum and maximum age allowed by the stellar evolution "
-        "interpolation for the given star, with this much smear added to the "
-        "fractional log-age (i.e. each log10(age) gets an independent uniform "
-        "random variable with range +- half of this value * the interpolation "
-        "range added to it.",
-    )
-    parser.add_argument(
-        "--initial-num-mehs",
-        type=int,
-        default=4,
-        help="The number of different initial [M/H] to optimize starting "
-        "positions for.",
-    )
-    parser.add_argument(
-        "--initial-meh-smear",
-        type=float,
-        default=0.1,
-        help="See ``--initial-logage-smear``",
-    )
-    parser.add_argument(
-        "--initial-num-ws",
-        type=int,
-        default=8,
-        help="The number of different initial arguments of periapses to "
-        "optimize starting positions for.",
-    )
-    parser.add_argument(
-        "--initial-w-smear",
-        type=float,
-        default=10.0,
-        help="See ``--initial-logage-smear``",
-    )
+    add_scenario_grid_arguments(parser)
     parser.add_argument(
         "--restart-steps",
         type=int,

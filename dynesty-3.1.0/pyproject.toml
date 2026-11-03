@@ -1,0 +1,64 @@
+[build-system]
+requires = ["setuptools", "setuptools-scm[simple]"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["py"]
+
+[tool.setuptools_scm]
+
+[project]
+dynamic = ["version"]
+name = "dynesty"
+requires-python = ">= 3.8"
+description = "A dynamic nested sampling package for computing Bayesian posteriors and evidences."
+readme = {file = "README.md", content-type = "text/markdown"}
+authors = [
+    {name = "Sergey E Koposov", email = "skoposov@ed.ac.uk"},
+    {name = "Joshua S Speagle", email = "j.speagle@utoronto.ca"}
+]
+# license = "MIT"
+# commented out because of this https://github.com/pypa/setuptools/issues/4903
+
+dependencies = [
+    "numpy>=1.17.0",
+    "scipy>=1.4.0",
+    "matplotlib"
+]
+keywords = [
+    "nested sampling", "dynamic",
+    "monte carlo", "bayesian", "inference",
+    "modeling"
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Natural Language :: English",
+    "Programming Language :: Python",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering",
+    "Intended Audience :: Science/Research"
+]
+
+[project.optional-dependencies]
+dev = [
+    'pytest',
+    'pytest-cov',
+    'pytest-xdist',
+    'coveralls',
+    'dill',
+    'h5py',
+    'tqdm',
+    'jupyter',
+    'ipyparallel',
+    'pylint',
+    'sphinx',
+    'sphinx-rtd-theme',
+    'numpydoc'
+]
+
+[project.urls]
+Homepage = "https://github.com/joshspeagle/dynesty/"
+

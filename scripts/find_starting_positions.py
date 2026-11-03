@@ -477,7 +477,7 @@ class FindStartingPositions:
             return params
         return get_params(result.x)
 
-    def _get_init_scenarios(self, config):
+    def get_init_scenarios(self, config):
         """Return log10(age), [M/H] and w values to base initial positions on"""
 
         def wmax_eq(wmax):
@@ -576,14 +576,7 @@ class FindStartingPositions:
             for scenario_ind, scenario in iter(scenario_queue.get, "STOP"):
                 _logger.debug("Looking for position %d", scenario_ind)
                 try:
-                    params = self.optimize(
-                        scenario["logage_fraction"],
-                        scenario["meh"],
-                        scenario["w"],
-                        scenario_ind > 0
-                        and self._bls_eclipses["shallower"] != "masked"
-                        and self._bls_eclipses["deeper"] != "masked",
-                    )
+                    params = self.optimize_scenario(scenario_ind, scenario)
                 except ValueError:
                     _logger.warning(
                         "Proposed initial position scenario (%s) appears "
@@ -784,6 +777,24 @@ class FindStartingPositions:
 
         return params
 
+    def optimize_scenario(self, scenario_index, scenario):
+        """
+        Find a local maximum starting from a scenario of
+        ``get_init_scenarios()``.
+
+        Eccentricity is randomized for all scenarios except the first, unless
+        BLS masked one of the eclipses.
+        """
+
+        return self.optimize(
+            scenario["logage_fraction"],
+            scenario["meh"],
+            scenario["w"],
+            scenario_index > 0
+            and self._bls_eclipses["shallower"] != "masked"
+            and self._bls_eclipses["deeper"] != "masked",
+        )
+
     # Trying to address makes function less readable
     # pylint: disable=too-many-locals
     def __call__(self, config):
@@ -793,7 +804,7 @@ class FindStartingPositions:
             f"Log-likelihood TIC ID ({self._log_likelihood.tic_id}) does not "
             f"match config TIC ID ({config.tic_id})!"
         )
-        initial_scenarios = self._get_init_scenarios(config)
+        initial_scenarios = self.get_init_scenarios(config)
         num_params = len(SampleParams._fields)
         num_walkers = initial_scenarios.size + config.num_random_walkers
         samples_fname = config.samples_fname_pattern.format(
@@ -905,6 +916,55 @@ class FindStartingPositions:
         return starting_positions
 
     # pylint: enable=too-many-locals
+
+
+def add_scenario_grid_arguments(parser):
+    """Add the command line options defining the grid of initial scenarios."""
+
+    parser.add_argument(
+        "--initial-num-ages",
+        type=int,
+        default=8,
+        help="The number of different initial ages to optimize starting "
+        "positions for.",
+    )
+    parser.add_argument(
+        "--initial-logage-smear",
+        type=float,
+        default=0.02,
+        help="The initial log age are approximately on a log-uniform grid "
+        "between the minimum and maximum age allowed by the stellar evolution "
+        "interpolation for the given star, with this much smear added to the "
+        "fractional log-age (i.e. each log10(age) gets an independent uniform "
+        "random variable with range +- half of this value * the interpolation "
+        "range added to it.",
+    )
+    parser.add_argument(
+        "--initial-num-mehs",
+        type=int,
+        default=4,
+        help="The number of different initial [M/H] to optimize starting "
+        "positions for.",
+    )
+    parser.add_argument(
+        "--initial-meh-smear",
+        type=float,
+        default=0.1,
+        help="See ``--initial-logage-smear``",
+    )
+    parser.add_argument(
+        "--initial-num-ws",
+        type=int,
+        default=8,
+        help="The number of different initial arguments of periapses to "
+        "optimize starting positions for.",
+    )
+    parser.add_argument(
+        "--initial-w-smear",
+        type=float,
+        default=10.0,
+        help="See ``--initial-logage-smear``",
+    )
 
 
 def _estimate_mass(logg, teff):
