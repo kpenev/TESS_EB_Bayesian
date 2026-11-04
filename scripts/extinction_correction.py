@@ -94,6 +94,23 @@ def get_gaia_distance(gaia_id):
 class Green19Correction:
     """Querry Green et. al. (2019) broad band magnitudes and extinction"""
 
+    # Extinction per unit Bayestar19 reddening. Order is: PANSTARRS (g, r, i,
+    # z, y) 2MASS (J, H, Ks), WISE (W1, W2)
+    extinction_coef = numpy.array(
+        [
+            3.518,
+            2.617,
+            1.971,
+            1.549,
+            1.263,
+            0.7927,
+            0.4690,
+            0.3026,
+            0.179,
+            0.132,
+        ]
+    )
+
     def _evaluate_bayestar_map(self, tic_entry):
         """Return the same information as direct stellar params but from map."""
 
@@ -127,40 +144,25 @@ class Green19Correction:
                 _logger.warning(message)
             else:
                 raise RuntimeError(message)
+        # reddening[i, j]: i indexes the distance (16th, 50th, 84th
+        # percentile), j the percentile of the map at that distance.
         if numpy.isfinite(reddening[1, 1]) or not self._tic_fallback:
-            reddening = (
-                numpy.array(
-                    [
-                        -(
-                            (
-                                (reddening[0, 1] - reddening[1, 1]) ** 2
-                                + (reddening[1, 0] - reddening[1, 1]) ** 2
-                            )
-                            ** 0.5
-                        ),
-                        0.0,
-                        (
-                            (reddening[2, 1] - reddening[1, 1]) ** 2
-                            + (reddening[1, 2] - reddening[1, 1]) ** 2
-                        )
-                        ** 0.5,
-                    ],
-                )
-                + reddening[1, 1]
-            )
+            result = {
+                "E": reddening[1, 1],
+                "E_distance_err": (reddening[2, 1] - reddening[0, 1]) / 2,
+                "E_map_err": (reddening[1, 2] - reddening[1, 0]) / 2,
+            }
         else:
             # TIC E(B-V) includes the Schlafly & Finkbeiner (2011)
             # recalibration (Stassun et al. 2019, Sec. 2.3.3), while
             # Bayestar19 units match the raw SFD scale (Green et al. 2019,
             # Sec. 2.1), so undo the recalibration.
-            reddening = (
-                numpy.array([-tic_entry["e_ebv"], 0.0, tic_entry["e_ebv"]])
-                + tic_entry["ebv"]
-            ) / tic_ebv_recalibration
-        result = {
-            "dm": (5.0 * numpy.log10(distance) - 5.0),
-            "E": reddening,
-        }
+            result = {
+                "E": tic_entry["ebv"] / tic_ebv_recalibration,
+                "E_distance_err": 0.0,
+                "E_map_err": tic_entry["e_ebv"] / tic_ebv_recalibration,
+            }
+        result["dm"] = 5.0 * numpy.log10(distance) - 5.0
         return result
 
     def _get_magnitudes(self, tic_entry):
@@ -278,22 +280,6 @@ class Green19Correction:
                 for fname in sorted(glob(path.join(broadband_data_dir, "*.h5")))
             ]
         )
-        # Order is: PANSTARRS (g, r, i, z, y) 2MASS (J, H, Ks), WISE (W1, W2)
-        self._extinction_coef = numpy.array(
-            [
-                3.518,
-                2.617,
-                1.971,
-                1.549,
-                1.263,
-                0.7927,
-                0.4690,
-                0.3026,
-                0.179,
-                0.132,
-            ]
-        )
-
         self._1sigma_pct = 100.0 * norm.cdf([-1, 0, 1])
         self._bayestar = BayestarQuery(version="bayestar2019")
         self._ignore_flags = ignore_flags
@@ -311,34 +297,40 @@ class Green19Correction:
         ]
 
     def get_absolute_magnitudes(self, tic_ids):
-        """Return absolute mags and uncertainties per Green et. al. (2019)."""
+        """
+        Return absolute mags and uncertainties per Green et. al. (2019).
 
-        return [
-            (
+        Returns:
+            [(array, array, dict)]:
+                For each TIC: the absolute magnitudes, their photometric-only
+                uncertainties, and the uncertainties shared by all bands:
+                ``distance_modulus_err``, ``reddening_distance_err`` (the
+                change in reddening with a 1-sigma change in distance) and
+                ``reddening_map_err`` (the map uncertainty at fixed
+                distance). Band ``i`` shifts by ``extinction_coef[i]`` per unit
+                reddening.
+        """
+
+        result = []
+        for map_data in self.get_map_data(tic_ids):
+            percentiles = map_data["percentiles"]
+            result.append(
                 (
                     map_data["mag"]
-                    - map_data["percentiles"]["dm"][1]
-                    - map_data["percentiles"]["E"][1] * self._extinction_coef
-                ),
-                numpy.sqrt(
-                    map_data["mag_err"] ** 2
-                    + (
-                        map_data["percentiles"]["dm"][2]
-                        - map_data["percentiles"]["dm"][0]
-                    )
-                    ** 2
-                    / 4
-                    + (
-                        map_data["percentiles"]["E"][2]
-                        - map_data["percentiles"]["E"][0]
-                    )
-                    ** 2
-                    * self._extinction_coef**2
-                    / 4
-                ),
+                    - percentiles["dm"][1]
+                    - percentiles["E"] * self.extinction_coef,
+                    map_data["mag_err"],
+                    {
+                        "distance_modulus_err": (
+                            percentiles["dm"][2] - percentiles["dm"][0]
+                        )
+                        / 2,
+                        "reddening_distance_err": percentiles["E_distance_err"],
+                        "reddening_map_err": percentiles["E_map_err"],
+                    },
+                )
             )
-            for map_data in self.get_map_data(tic_ids)
-        ]
+        return result
 
 
 if __name__ == "__main__":

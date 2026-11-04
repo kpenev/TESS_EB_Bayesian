@@ -57,6 +57,12 @@ class CachedSED(DataModelBase):  # pylint: disable=too-few-public-methods
 
     default_bad_sed_threshold = 10.0
     default_bad_sed_penalty = 1.0
+    # The uncertainties shared by all bands (see the columns below).
+    shared_error_columns = (
+        "distance_modulus_err",
+        "reddening_distance_err",
+        "reddening_map_err",
+    )
 
     gp1 = mapped_column(
         Float, doc="The PanSTARRS1 g filter magnitude of the EB"
@@ -109,6 +115,20 @@ class CachedSED(DataModelBase):  # pylint: disable=too-few-public-methods
     w2_err = mapped_column(
         Float, doc="The WISE W2 filter magnitude uncertainty of the EB"
     )
+    # The *_err columns above hold photometric uncertainties only. The
+    # uncertainties below are shared by all bands (band i shifts by
+    # Green19Correction.extinction_coef[i] per unit reddening). Rows where
+    # they are NULL predate this split and must be recomputed.
+    distance_modulus_err = mapped_column(
+        Float, doc="Uncertainty of the distance modulus [mag]"
+    )
+    reddening_distance_err = mapped_column(
+        Float,
+        doc="Change in reddening for a 1-sigma change in distance",
+    )
+    reddening_map_err = mapped_column(
+        Float, doc="Uncertainty of the reddening map at fixed distance"
+    )
     bad_sed_threshold = mapped_column(
         Float,
         doc="How many sigma away should model be from measured SED before the "
@@ -117,7 +137,7 @@ class CachedSED(DataModelBase):  # pylint: disable=too-few-public-methods
     bad_sed_penalty = mapped_column(
         Float,
         doc="The factor by which to enhance the SED error bar when the "
-        "threshold is exceeded."
+        "threshold is exceeded.",
     )
 
     def __str__(self):

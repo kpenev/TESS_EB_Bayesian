@@ -96,7 +96,14 @@ class LogLikelihood(TESSTarget):
                         ]
                     ),
                     (cached_sed.bad_sed_threshold, cached_sed.bad_sed_penalty),
+                    {
+                        name: getattr(cached_sed, name)
+                        for name in CachedSED.shared_error_columns
+                    },
                 )
+                if None in sed[3].values():
+                    # Cached before the shared uncertainties were split out.
+                    sed = sed[:3] + (None,)
 
             if cached_bls:
                 cls._logger.debug("Found cached BLS: %s", repr(cached_bls))
@@ -154,6 +161,10 @@ class LogLikelihood(TESSTarget):
                     w2_err=self._sed[1][9],
                     bad_sed_threshold=self._sed[2][0],
                     bad_sed_penalty=self._sed[2][1],
+                    **{
+                        name: float(value)
+                        for name, value in self._sed[3].items()
+                    },
                 )
             )
             cache_session.add(
@@ -431,11 +442,18 @@ class LogLikelihood(TESSTarget):
             self._sed is None
             or "SED" in overwrite_cache
             or numpy.all(numpy.isnan(self._sed[0]))
+            or self._sed[3] is None
         )
         if self.sed_recomputed:
-            self._sed = Green19Correction(
+            magnitudes, magnitude_errors, shared_errors = Green19Correction(
                 ignore_extinction_flags
-            ).get_absolute_magnitudes(tic_id)[0] + (threshold_penalty,)
+            ).get_absolute_magnitudes(tic_id)[0]
+            self._sed = (
+                magnitudes,
+                magnitude_errors,
+                threshold_penalty,
+                shared_errors,
+            )
             if "SED" not in overwrite_cache:
                 overwrite_cache.append("SED")
         if "BLS" in overwrite_cache:
@@ -1003,43 +1021,97 @@ class LogLikelihood(TESSTarget):
             result /= 2
         return result
 
+    def get_sed_covariance(self, finite, sed_sys_err):
+        """
+        Return the covariance matrix of the SED bands selected by ``finite``.
+
+        Photometric and systematic errors are independent between bands. A
+        distance error shifts every band by the same distance modulus change
+        plus the extinction change that comes with it, and a reddening map
+        error shifts each band in proportion to its extinction coefficient.
+        """
+
+        coefficients = Green19Correction.extinction_coef[finite]
+        shared = self._sed[3]
+        distance_shift = (
+            shared["distance_modulus_err"]
+            + shared["reddening_distance_err"] * coefficients
+        )
+        map_shift = shared["reddening_map_err"] * coefficients
+        return (
+            numpy.diag(self._sed[1][finite] ** 2 + sed_sys_err**2)
+            + numpy.outer(distance_shift, distance_shift)
+            + numpy.outer(map_shift, map_shift)
+        )
+
     def calc_sed_log_likelihood(
         self, binary, sed_sys_err, return_residuals=False
     ):
-        """Return log-likelihood of observed SED for given binary."""
+        """
+        Return log-likelihood of observed SED for given binary.
+
+        The band errors are correlated through the shared distance and
+        reddening uncertainties (see `get_sed_covariance()`).
+
+        If ``return_residuals`` is True, return the residuals whitened by the
+        covariance, followed (if ``sed_sys_err > 0``) by one entry per band
+        whose squares add up to log(det(covariance)) minus its value for
+        photometric errors alone, so the sum of squares is -2 log-likelihood
+        up to a constant.
+        """
 
         self._logger.debug("SED: %s", repr(self._sed))
         finite = numpy.isfinite(self._sed[0])
         self._logger.debug("Finite SED flags: %s", repr(finite))
-        sed_errors = (self._sed[1][finite] ** 2 + sed_sys_err**2) ** 0.5
-        result = (self._sed[0][finite] - binary.absmag[finite]) / sed_errors
-        self._logger.debug("SED residuals: %s", repr(result))
+        if not finite.any():
+            return numpy.array([]) if return_residuals else 0.0
+        residuals = self._sed[0][finite] - binary.absmag[finite]
+        self._logger.debug("SED residuals: %s", repr(residuals))
         if self._sed[2][1]:
-            nsigma = numpy.abs(
-                self._sed[0][finite] - binary.absmag[finite]
-            ) / numpy.maximum(self._sed[1][finite], 0.01)
+            # Measured against the total per-band error (photometric, distance
+            # and reddening), excluding sed_sys.
+            band_errors = numpy.sqrt(
+                numpy.diag(self.get_sed_covariance(finite, 0.0))
+            )
+            nsigma = numpy.abs(residuals) / numpy.maximum(band_errors, 0.01)
             bad_sed = nsigma > self._sed[2][0]
-            result[bad_sed] *= 10.0 ** (
+            residuals[bad_sed] *= 10.0 ** (
                 self._sed[2][1] * (nsigma[bad_sed] - self._sed[2][0]) ** 0.5
             )
-            result[numpy.isinf(result)] = numpy.finfo(result.dtype).max
-        self._logger.debug("After penalty, SED residuals: %s", repr(result))
+        self._logger.debug("After penalty, SED residuals: %s", repr(residuals))
+
+        # numpy returns the lower-triangular L with covariance = L L^T, so
+        # residuals^T covariance^-1 residuals = |L^-1 residuals|^2.
+        cholesky = numpy.linalg.cholesky(
+            self.get_sed_covariance(finite, sed_sys_err)
+        )
+        whitened = numpy.linalg.solve(cholesky, residuals)
+        log_det = 2.0 * numpy.log(numpy.diag(cholesky)).sum()
 
         if return_residuals:
             if sed_sys_err > 0:
-                result = numpy.concatenate(
+                # log det(covariance) = sum(log(L_ii^2)) and each L_ii^2 >=
+                # photometric error^2 + sed_sys^2. The clip at 0 only absorbs
+                # rounding when the extra variance is below double precision
+                # (e.g. sed_sys = 1e-10), which can make the log -1e-16.
+                whitened = numpy.concatenate(
                     (
-                        result,
+                        whitened,
                         numpy.sqrt(
-                            numpy.log(sed_errors**2 / self._sed[1][finite] ** 2)
+                            numpy.maximum(
+                                numpy.log(
+                                    numpy.diag(cholesky) ** 2
+                                    / self._sed[1][finite] ** 2
+                                ),
+                                0.0,
+                            )
                         ),
                     )
                 )
-            return result
-        result = max(
-            numpy.finfo(result.dtype).min,
-            -(result**2 + numpy.log(sed_errors**2)).sum() / 2,
-        )
+            return numpy.nan_to_num(whitened)
+        result = -((whitened**2).sum() + log_det) / 2
+        if not numpy.isfinite(result):
+            result = numpy.finfo(float).min
         self._logger.debug("SED log-likelihood: %s", result)
         return result
 
