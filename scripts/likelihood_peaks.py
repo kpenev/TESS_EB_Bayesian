@@ -71,9 +71,7 @@ def scenario_grid_starts(log_likelihood, config):
     ``refine()``, so it runs in parallel.
     """
 
-    scenarios = FindStartingPositions(log_likelihood).get_init_scenarios(
-        config
-    )
+    scenarios = FindStartingPositions(log_likelihood).get_init_scenarios(config)
     return [
         StartingPoint(f"scenario_grid:{index}", None, index, scenario)
         for index, scenario in enumerate(scenarios)
@@ -85,10 +83,13 @@ def previous_fit_start(log_likelihood, samples_fname, release_fname):
     Return the highest log-probability sample of a previous emcee fit.
 
     The samples file is used if it exists: only ``log_prob`` for the filled
-    iterations of each group and the selected chain entry are read, giving
-    the maximum over all saved samples, already in latent coordinates. The
-    release file, which holds a subset of the samples in physical
-    parameters, is used only if there is no samples file.
+    iterations of each group and the selected blob are read, giving the
+    maximum over all saved samples. The blobs hold the physical parameters,
+    which are converted to the current latent coordinates; the chain itself is
+    not used because its latent coordinates may follow an older transform
+    (e.g. the limb darkening before the Kipping parametrization). Groups
+    without blobs are skipped. The release file, which holds a subset of the
+    samples in physical parameters, is used only if there is no samples file.
 
     Returns:
         StartingPoint or None:
@@ -96,11 +97,15 @@ def previous_fit_start(log_likelihood, samples_fname, release_fname):
     """
 
     if path.exists(samples_fname):
-        best_log_prob, best_sample, best_group = -numpy.inf, None, None
+        best_log_prob, best_params, best_group = -numpy.inf, None, None
         with h5py.File(samples_fname, "r") as samples_file:
             for group_name, group in samples_file.items():
                 num_filled = group.attrs.get("iteration", 0)
-                if "log_prob" not in group or num_filled == 0:
+                if (
+                    "log_prob" not in group
+                    or "blobs" not in group
+                    or num_filled == 0
+                ):
                     continue
                 log_prob = group["log_prob"][:num_filled]
                 # (step, walker) of the largest log_prob in this group
@@ -109,9 +114,9 @@ def previous_fit_start(log_likelihood, samples_fname, release_fname):
                 )
                 if log_prob[index] > best_log_prob:
                     best_log_prob = log_prob[index]
-                    best_sample = group["chain"][index]
+                    best_params = SampleParams(*group["blobs"][index])
                     best_group = group_name
-        if best_sample is not None:
+        if best_params is not None:
             _logger.info(
                 "Previous fit maximum log_prob %s found in %s/%s",
                 repr(best_log_prob),
@@ -120,7 +125,7 @@ def previous_fit_start(log_likelihood, samples_fname, release_fname):
             )
             return StartingPoint(
                 f"previous_fit:{samples_fname}:{best_group}",
-                best_sample,
+                params_to_sample(best_params, log_likelihood),
                 None,
                 None,
             )
@@ -143,9 +148,7 @@ def previous_fit_start(log_likelihood, samples_fname, release_fname):
             None,
         )
 
-    _logger.info(
-        "No previous fit found (%s, %s)", samples_fname, release_fname
-    )
+    _logger.info("No previous fit found (%s, %s)", samples_fname, release_fname)
     return None
 
 

@@ -494,7 +494,7 @@ class LogLikelihood(TESSTarget):
             primary_beaming_coef=(-2, 2),
             secondary_beaming_coef=(-2, 2),
             lc_sys=(min(numpy.log10(self._find_syserr_and_outliers()), -1), 0),
-            sed_sys=(-10, -1.5),
+            sed_sys=(-10, -1),
         )
 
         self._logger.debug("LCs: %s", repr(self._lcs))

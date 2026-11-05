@@ -27,7 +27,7 @@ from general_purpose_python_modules.emcee_util import (
 from sqlalchemy import select, update
 from bui.db_interface import Session
 from bui.select_ticids.data_model import JobGroup, get_ticid_select_tables
-from utils import lmfit_and_tweak
+from utils import lmfit_and_tweak, params_to_sample
 from hacked_emcee_hdf5_backend import HDFBackend
 from log_likelihood import SampleParams, LogLikelihood
 from log_likelihood_priors import LogLikelihoodPriorsOnly
@@ -215,6 +215,16 @@ def parse_command_line():
         default=None,
         help="The maximum number of steps the MCMC sampler is allowed to add. "
         "If specified, restarting to eliminate bad local minima is disabled.",
+    )
+    parser.add_argument(
+        "--initial-state-from",
+        default=None,
+        help="A samples file from a previous run (keep it outside the results "
+        "directory so names do not clash). If the samples file for this run "
+        "has no chain yet, the walkers start from the last step of this "
+        "file's ``mcmc`` chain instead of searching for starting positions. "
+        "The physical parameters stored in the blobs are used, so the file "
+        "may come from an older parametrization.",
     )
 
     return parser.parse_args()
@@ -559,9 +569,85 @@ def restart_sampling(
     return (
         backend,
         initial_state,
-        seed_log_prob[-1].max() - seed_log_prob[-1].min()
+        seed_log_prob.max() - seed_log_prob.min()
         < config.restart_log_likelihood_range,
     )
+
+
+def get_previous_last_step(previous_fname, log_likelihood, config, num_walkers):
+    """
+    Return walkers from the last step of a previous samples file.
+
+    The blobs (physical parameters) of the last step of the ``mcmc`` chain are
+    converted to the current latent coordinates. The chain itself is not used
+    because its latent coordinates may follow an older transform. The walkers
+    are evaluated with the new log-likelihood: if their log-probability
+    spread is already within ``config.restart_log_likelihood_range`` (and no
+    restart is forced), sampling can go straight to the final run.
+
+    Args:
+        previous_fname(str):    The samples file of the previous run.
+
+        log_likelihood(LogLikelihood):    The log-likelihood of the new run,
+            defining the latent coordinates.
+
+        config:    The command line configuration (TIC ID, parallelism and
+            restart settings).
+
+        num_walkers(int):    The number of walkers of the new run; must match
+            the file.
+
+    Returns:
+        (array, bool):
+            The initial state, shape (num_walkers, number of parameters), and
+            whether to start the final run.
+    """
+
+    with h5py.File(previous_fname, "r") as previous_file:
+        if previous_file.attrs["TICID"] != config.tic_id:
+            raise ValueError(
+                f"{previous_fname!r} is for TIC {previous_file.attrs['TICID']}"
+                f", not {config.tic_id}."
+            )
+        chain = previous_file["mcmc"]
+        num_steps = chain.attrs["iteration"]
+        if num_steps == 0:
+            raise ValueError(f"{previous_fname!r} has an empty mcmc chain.")
+        last_blobs = chain["blobs"][num_steps - 1]
+    if last_blobs.shape[0] != num_walkers:
+        raise ValueError(
+            f"{previous_fname!r} has {last_blobs.shape[0]} walkers, but this "
+            f"run has {num_walkers}; adjust the walker configuration."
+        )
+    initial_state = numpy.array(
+        [
+            params_to_sample(SampleParams(*blob), log_likelihood)
+            for blob in last_blobs
+        ]
+    )
+    with ProcessPoolExecutor(
+        max_workers=config.num_parallel,
+        initializer=setup_process_map,
+        initargs=(vars(config),),
+        max_tasks_per_child=1024,
+    ) as pool:
+        initial_log_prob = numpy.array(
+            [entry[0] for entry in pool.map(log_likelihood, initial_state)]
+        )
+    log_prob_spread = initial_log_prob.max() - initial_log_prob.min()
+    final_run = (
+        not config.force_restart
+        and log_prob_spread < config.restart_log_likelihood_range
+    )
+    _logger.info(
+        "Starting from step %d of %s. Log-probability spread of the walkers: "
+        "%s, %s.",
+        num_steps,
+        repr(previous_fname),
+        repr(log_prob_spread),
+        "starting the final run" if final_run else "not final yet",
+    )
+    return initial_state, final_run
 
 
 def reinitialize_sampling(backend, final_run):
@@ -640,10 +726,22 @@ def main(config):
             backend, initial_state, final_run = restart_sampling(
                 backend, config, log_likelihood
             )
+        elif config.initial_state_from:
+            initial_state, final_run = get_previous_last_step(
+                config.initial_state_from,
+                log_likelihood,
+                config,
+                backend.shape[0],
+            )
         else:
             initial_state = FindStartingPositions(log_likelihood)(config)
         _logger.info("Full set of initial positions found. Starting sampling.")
     else:
+        if config.initial_state_from:
+            _logger.info(
+                "Ignoring --initial-state-from: %s already has a chain.",
+                repr(backend.filename),
+            )
         if config.changed_likelihood:
             backend, initial_state = reinitialize_sampling(backend, final_run)
             if initial_state is not None:
