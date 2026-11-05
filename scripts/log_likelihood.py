@@ -253,10 +253,14 @@ class LogLikelihood(TESSTarget):
             else:
                 start = 0
             end = numpy.searchsorted(down_crossings, phase, side="right")
-            if end == down_crossings.size:
-                end = 0
-            else:
+            if end < down_crossings.size:
                 end = down_crossings[end]
+            elif down_crossings.size:
+                # The window wraps past phase 1 and ends at the first down
+                # crossing of the next cycle (start >= end below adds the 1).
+                end = down_crossings[0]
+            else:
+                end = 0
             if start >= end:
                 duration = end + 1 - start
             else:
@@ -457,9 +461,18 @@ class LogLikelihood(TESSTarget):
             mratio=(0.01, 2),
             age_gyr=(-3, 1.1),
             meh=Binary.meh_range,
-            per=(
-                self.bls_porb - 10.0 * self._best_fit_bls["period"][1],
-                self.bls_porb + 10.0 * self._best_fit_bls["period"][1],
+            # bls_porb may be twice the BLS period; the fractional uncertainty
+            # is the same either way.
+            per=tuple(
+                self.bls_porb
+                * (
+                    1.0
+                    + sign
+                    * 10.0
+                    * self._best_fit_bls["period"][1]
+                    / self._best_fit_bls["period"][0]
+                )
+                for sign in (-1, 1)
             ),
             ecc=(0, self.max_ecc),
             w=(-360, 360),
@@ -491,14 +504,7 @@ class LogLikelihood(TESSTarget):
         """
         Return True iff the masked BLS fit appears to fit real eclipses.
 
-        To be marked as significant all of the following must be satisfied:
-
-          * maked period should be close to unmasked period (within 5 unmasked
-            uncertanties)
-
-          * depth should exceed its uncertanity by at least a factor of 5
-
-          * masked_harmonic_delta_log_likelihood < -5
+        See `TESSTarget.masked_bls_is_significant()` for the criteria.
         """
 
         return self.masked_bls_is_significant(self._best_fit_bls)

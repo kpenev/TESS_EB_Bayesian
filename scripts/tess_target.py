@@ -271,7 +271,7 @@ class TESSTarget:
         ):
             index_range[1] = (
                 numpy.where(periodogram.power[best_index:] < cutoff)[0][0]
-                + best_index,
+                + best_index
             )
         # pyplot.plot(periodogram.period, periodogram.power, "-k")
         # for color, i in zip(
@@ -338,7 +338,7 @@ class TESSTarget:
         if in_eclipse.all():
             return None
 
-        #try:
+        # try:
         #    pyplot.subplot(231)
         #    pyplot.plot(periods, periodogram["power"], ".k")
         #    pyplot.subplot(232)
@@ -362,7 +362,7 @@ class TESSTarget:
         #        "-r",
         #    )
         #    pyplot.show()
-        #except:  # pylint: disable=bare-except
+        # except:  # pylint: disable=bare-except
         #    pass
 
         if in_eclipse[0] or in_eclipse[-1]:
@@ -422,12 +422,12 @@ class TESSTarget:
 
             bls_results.append(result)
 
-        #assert (
+        # assert (
         #    bls_results[0] is None
         #    or bls_results[0]["period"][0] > 10
         #    or TESSTarget.masked_bls_is_significant(bls_results[0])
-        #)
-        #assert not TESSTarget.masked_bls_is_significant(bls_results[2])
+        # )
+        # assert not TESSTarget.masked_bls_is_significant(bls_results[2])
 
         if bls_results[1] is not None:
             if not TESSTarget.masked_bls_is_significant(bls_results[1]):
@@ -815,12 +815,14 @@ class TESSTarget:
 
         To be marked as significant all of the following must be satisfied:
 
-          * maked period should be close to unmasked period (within 5 unmasked
-            uncertanties)
+          * the masked depth should exceed its uncertainty by at least a
+            factor of 10
 
-          * depth should exceed its uncertanity by at least a factor of 5
+          * masked_harmonic_delta_log_likelihood < -10
 
-          * masked_harmonic_delta_log_likelihood < -5
+          * either nearly all points fall in only the odd or only the even
+            eclipses, or the odd and even depths agree to within the larger of
+            10 times their combined uncertainty and the masked depth
         """
 
         # bls = self._best_fit_bls
