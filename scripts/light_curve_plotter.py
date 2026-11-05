@@ -95,6 +95,12 @@ class LightCurvePlotter:
     }
 
     sed_filters = {
+        # Effective wavelengths for red clump stars (Wang & Chen 2019)
+        "Gaia": {
+            "G": 0.642,
+            "BP": 0.539,
+            "RP": 0.767,
+        },
         "SDSS": {
             "u": 0.354,
             "g": 0.477,
@@ -422,7 +428,7 @@ class LightCurvePlotter:
         """Create a plot of the SED of the target along with model."""
 
         plot_x = numpy.array(
-            [self.sed_filters["PanSTARRS"][filter] for filter in "grizy"]
+            [self.sed_filters["Gaia"][filter] for filter in ["G", "BP", "RP"]]
             + [self.sed_filters["2MASS"][filter] for filter in ["J", "H", "Ks"]]
             + [self.sed_filters["WISE"][filter] for filter in ["W1", "W2"]]
         )
@@ -441,11 +447,13 @@ class LightCurvePlotter:
             if bnry == "bls":
                 continue
             pyplot.plot(
-                plot_x, bnry.absmag, **self.model_sed_plot_config[config_key]
+                plot_x,
+                tess_target.get_model_sed(bnry)[0],
+                **self.model_sed_plot_config[config_key],
             )
             config_key = "others"
         pyplot.xlabel(r"Wavelength [$\mu$]")
-        pyplot.ylabel("Absolute magnitude")
+        pyplot.ylabel("Distance corrected mag")
 
     def plot_diff(self, mode, lightcurve, model_lcs):
         """Plot the difference between the LC and the first model vs time."""

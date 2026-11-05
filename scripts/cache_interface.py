@@ -51,54 +51,50 @@ class DataModelBase(DeclarativeBase):  # pylint: disable=too-few-public-methods
 
 
 class CachedSED(DataModelBase):  # pylint: disable=too-few-public-methods
-    """Cache absolute magnitudes in PannSTARRS and WISE passbands."""
+    """Cache Gaia, 2MASS and WISE magnitudes minus the distance modulus."""
 
     __tablename__ = "sed"
 
     default_bad_sed_threshold = 10.0
     default_bad_sed_penalty = 1.0
-    # The uncertainties shared by all bands (see the columns below).
-    shared_error_columns = (
+    # The magnitude columns in SED order; each has a matching *_err column.
+    band_columns = (
+        "gaia_g",
+        "gaia_bp",
+        "gaia_rp",
+        "j2m",
+        "h2m",
+        "k2m",
+        "w1",
+        "w2",
+    )
+    # The quantities shared by all bands (see the columns below).
+    shared_columns = (
+        "reddening",
         "distance_modulus_err",
         "reddening_distance_err",
         "reddening_map_err",
     )
 
-    gp1 = mapped_column(
-        Float, doc="The PanSTARRS1 g filter magnitude of the EB"
-    )
-    rp1 = mapped_column(
-        Float, doc="The PanSTARRS1 r filter magnitude of the EB"
-    )
-    ip1 = mapped_column(
-        Float, doc="The PanSTARRS1 i filter magnitude of the EB"
-    )
-    zp1 = mapped_column(
-        Float, doc="The PanSTARRS1 z filter magnitude of the EB"
-    )
-    yp1 = mapped_column(
-        Float, doc="The PanSTARRS1 y filter magnitude of the EB"
-    )
+    # The magnitudes are apparent minus the distance modulus. Extinction is
+    # not subtracted; it is applied to the model.
+    gaia_g = mapped_column(Float, doc="The Gaia DR3 G magnitude of the EB")
+    gaia_bp = mapped_column(Float, doc="The Gaia DR3 BP magnitude of the EB")
+    gaia_rp = mapped_column(Float, doc="The Gaia DR3 RP magnitude of the EB")
     j2m = mapped_column(Float, doc="The 2MASS J filter magnitude of the EB")
     h2m = mapped_column(Float, doc="The 2MASS H filter magnitude of the EB")
     k2m = mapped_column(Float, doc="The 2MASS Kz filter magnitude of the EB")
     w1 = mapped_column(Float, doc="The WISE W1 filter magnitude of the EB")
     w2 = mapped_column(Float, doc="The WISE W2 filter magnitude of the EB")
 
-    gp1_err = mapped_column(
-        Float, doc="The PanSTARRS1 g filter magnitude uncertainty of the EB"
+    gaia_g_err = mapped_column(
+        Float, doc="The Gaia DR3 G magnitude uncertainty of the EB"
     )
-    rp1_err = mapped_column(
-        Float, doc="The PanSTARRS1 r filter magnitude uncertainty of the EB"
+    gaia_bp_err = mapped_column(
+        Float, doc="The Gaia DR3 BP magnitude uncertainty of the EB"
     )
-    ip1_err = mapped_column(
-        Float, doc="The PanSTARRS1 i filter magnitude uncertainty of the EB"
-    )
-    zp1_err = mapped_column(
-        Float, doc="The PanSTARRS1 z filter magnitude uncertainty of the EB"
-    )
-    yp1_err = mapped_column(
-        Float, doc="The PanSTARRS1 y filter magnitude uncertainty of the EB"
+    gaia_rp_err = mapped_column(
+        Float, doc="The Gaia DR3 RP magnitude uncertainty of the EB"
     )
     j2m_err = mapped_column(
         Float, doc="The 2MASS J filter magnitude uncertainty of the EB"
@@ -115,10 +111,11 @@ class CachedSED(DataModelBase):  # pylint: disable=too-few-public-methods
     w2_err = mapped_column(
         Float, doc="The WISE W2 filter magnitude uncertainty of the EB"
     )
-    # The *_err columns above hold photometric uncertainties only. The
-    # uncertainties below are shared by all bands (band i shifts by
-    # Green19Correction.extinction_coef[i] per unit reddening). Rows where
-    # they are NULL predate this split and must be recomputed.
+    # The *_err columns above hold photometric uncertainties only (including
+    # any blending inflation). The quantities below are shared by all bands.
+    # Rows where any of them is NULL predate the current SED scheme and must
+    # be recomputed.
+    reddening = mapped_column(Float, doc="Bayestar19 reddening E")
     distance_modulus_err = mapped_column(
         Float, doc="Uncertainty of the distance modulus [mag]"
     )
@@ -141,10 +138,7 @@ class CachedSED(DataModelBase):  # pylint: disable=too-few-public-methods
     )
 
     def __str__(self):
-        return (
-            f"{self.tic_id}: "
-            f"{self.gp1}, {self.rp1}, {self.ip1}, {self.zp1}, {self.yp1}"
-        )
+        return f"{self.tic_id}: {self.gaia_g}, {self.gaia_bp}, {self.gaia_rp}"
 
 
 class CachedBLS(DataModelBase):  # pylint: disable=too-few-public-methods

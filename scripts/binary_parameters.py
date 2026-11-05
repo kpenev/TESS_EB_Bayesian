@@ -107,7 +107,7 @@ class BinaryParams(batman.TransitParams):
             return
         cls._cmd_interpolators = tuple(
             (photsys, CMDInterpolator(cmd_data_fname.format(photsys=photsys)))
-            for photsys in ["panstarss1", "2mass_spitzer_wise"]
+            for photsys in ["gaiaEDR3", "2mass_spitzer_wise"]
         )
         # Kept separate from the SED interpolators above: only used for the
         # TESS-band flux ratio of the two stars.
@@ -329,10 +329,16 @@ class BinaryParams(batman.TransitParams):
         self.teff_ratio = 10.0 ** (
             interpolated["secondary"][2] - interpolated["primary"][2]
         )
-        self.absmag = -2.5 * numpy.log10(
-            10.0 ** (-interpolated["primary"][3:] / 2.5)
-            + 10.0 ** (-interpolated["secondary"][3:] / 2.5)
-        )
+        # Kept per star (not combined) because each star is reddened with its
+        # own Teff-dependent extinction before the fluxes are added.
+        self.component_absmag = {
+            component: comp_interp[3:]
+            for component, comp_interp in interpolated.items()
+        }
+        self.component_teff = {
+            component: 10.0 ** comp_interp[2]
+            for component, comp_interp in interpolated.items()
+        }
         tess_mag = {
             component: self._tess_interpolator(
                 ("TESSmag",), Mini=mass, **interp_kwargs
@@ -513,7 +519,8 @@ class BinaryParams(batman.TransitParams):
         self.teff_ratio = None
         self.t0_perpass = None
         self.inverted = False
-        self.absmag = None
+        self.component_absmag = None
+        self.component_teff = None
         # Secondary to primary flux ratio in the TESS band (None unless set
         # from stellar evolution, e.g. not for binaries built from PHOEBE).
         self._tess_flux_ratio = None
@@ -523,7 +530,7 @@ class BinaryParams(batman.TransitParams):
             setattr(self, f"_{attr}_both", {"primary": None, "secondary": None})
 
         self._passbands = {
-            "panstarss1": tuple(b + "P1mag" for b in "grizy"),
+            "gaiaEDR3": ("Gmag", "G_BPmag", "G_RPmag"),
             "2mass_spitzer_wise": tuple(
                 b + "mag" for b in ["J", "H", "Ks", "W1", "W2"]
             ),
@@ -729,7 +736,7 @@ class BinaryParams(batman.TransitParams):
             f"GDcoef={self._gravdark_both}, reflect "
             f"coef={self._reflection_coef_both}, "
             f"beaming coef={self._beaming_coef_both}, "
-            f"Absolute magnitudes={self.absmag}. Out of range: "
+            f"Absolute magnitudes={self.component_absmag}. Out of range: "
             f"{self.out_of_range}"
         )
         # pylint: enable=no-member

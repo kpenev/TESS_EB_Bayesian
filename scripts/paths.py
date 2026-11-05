@@ -7,6 +7,9 @@ data_dir = path.join(path.dirname(path.dirname(path.abspath(__file__))), "data")
 grav_dark = {"TESS": path.join(data_dir, "claret_gravity_darkening_TESS.fits")}
 cmd_data_fname = path.join(data_dir, "isochrone_data_{photsys}.ssv")
 broadband_data_dir = path.join(data_dir, "Green_et_al_2019_reddening")
+gaia_extinction_model = path.join(
+    data_dir, "dustapprox", "oct2025_a0r0_gaia_dr3_kurucz_F99_teff_A0_R0.ecsv"
+)
 prsa_ebs = path.join(data_dir, "prsa_ebs.fits")
 
 cache_db = path.join(data_dir, "mcmc_cache.sqlite")

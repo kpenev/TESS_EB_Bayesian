@@ -15,7 +15,7 @@ from detrending import (
     get_ooe_variability,
     detrend_with_gaps,
 )
-from extinction_correction import Green19Correction
+from extinction_correction import Green19Correction, GaiaExtinctionCoefficients
 from binary import Binary
 from cache_interface import CacheSession, CachedSED, CachedBLS
 from sample_params import SampleParams
@@ -69,40 +69,24 @@ class LogLikelihood(TESSTarget):
                 sed = (
                     numpy.array(
                         [
-                            none_to_nan(getattr(cached_sed, f + "p1"))
-                            for f in "grizy"
-                        ]
-                        + [
-                            none_to_nan(getattr(cached_sed, f + "2m"))
-                            for f in "jhk"
-                        ]
-                        + [
-                            none_to_nan(cached_sed.w1),
-                            none_to_nan(cached_sed.w2),
+                            none_to_nan(getattr(cached_sed, column))
+                            for column in CachedSED.band_columns
                         ]
                     ),
                     numpy.array(
                         [
-                            none_to_nan(getattr(cached_sed, f + "p1_err"))
-                            for f in "grizy"
-                        ]
-                        + [
-                            none_to_nan(getattr(cached_sed, f + "2m_err"))
-                            for f in "jhk"
-                        ]
-                        + [
-                            none_to_nan(cached_sed.w1_err),
-                            none_to_nan(cached_sed.w2_err),
+                            none_to_nan(getattr(cached_sed, column + "_err"))
+                            for column in CachedSED.band_columns
                         ]
                     ),
                     (cached_sed.bad_sed_threshold, cached_sed.bad_sed_penalty),
                     {
                         name: getattr(cached_sed, name)
-                        for name in CachedSED.shared_error_columns
+                        for name in CachedSED.shared_columns
                     },
                 )
                 if None in sed[3].values():
-                    # Cached before the shared uncertainties were split out.
+                    # Cached before the current SED scheme.
                     sed = sed[:3] + (None,)
 
             if cached_bls:
@@ -143,22 +127,18 @@ class LogLikelihood(TESSTarget):
             cache_session.add(
                 CachedSED(
                     tic_id=tic_id,
-                    **{f + "p1": mag for f, mag in zip("grizy", self._sed[0])},
                     **{
-                        f + "2m": mag for f, mag in zip("jhk", self._sed[0][5:])
-                    },
-                    w1=self._sed[0][8],
-                    w2=self._sed[0][9],
-                    **{
-                        f + "p1_err": err
-                        for f, err in zip("grizy", self._sed[1])
+                        column: float(mag)
+                        for column, mag in zip(
+                            CachedSED.band_columns, self._sed[0]
+                        )
                     },
                     **{
-                        f + "2m_err": err
-                        for f, err in zip("jhk", self._sed[1][5:])
+                        column + "_err": float(err)
+                        for column, err in zip(
+                            CachedSED.band_columns, self._sed[1]
+                        )
                     },
-                    w1_err=self._sed[1][8],
-                    w2_err=self._sed[1][9],
                     bad_sed_threshold=self._sed[2][0],
                     bad_sed_penalty=self._sed[2][1],
                     **{
@@ -429,6 +409,7 @@ class LogLikelihood(TESSTarget):
         # https://outerspace.stsci.edu/display/TESS/2.0+-+Data+Product+Overview#id-2.0-DataProductOverview-Table:CadenceQualityFlags
 
         self._sed, self._best_fit_bls = self.get_cached_sed_and_bls(tic_id)
+        self._gaia_extinction = GaiaExtinctionCoefficients()
 
         threshold_penalty = (
             self._sed[2]
@@ -445,14 +426,14 @@ class LogLikelihood(TESSTarget):
             or self._sed[3] is None
         )
         if self.sed_recomputed:
-            magnitudes, magnitude_errors, shared_errors = Green19Correction(
+            magnitudes, magnitude_errors, shared = Green19Correction(
                 ignore_extinction_flags
-            ).get_absolute_magnitudes(tic_id)[0]
+            ).get_distance_corrected_magnitudes(tic_id)[0]
             self._sed = (
                 magnitudes,
                 magnitude_errors,
                 threshold_penalty,
-                shared_errors,
+                shared,
             )
             if "SED" not in overwrite_cache:
                 overwrite_cache.append("SED")
@@ -1021,7 +1002,58 @@ class LogLikelihood(TESSTarget):
             result /= 2
         return result
 
-    def get_sed_covariance(self, finite, sed_sys_err):
+    def get_model_sed(self, binary):
+        """
+        Return the model SED of the binary and its extinction coefficients.
+
+        Each star is reddened with its own extinction (the Gaia coefficients
+        depend on its Teff) before the fluxes of the two stars are added.
+
+        Returns:
+            (array, array):
+                The reddened model magnitudes minus the distance modulus, in
+                the same bands as the observed SED, and the change of each
+                with reddening (the flux-weighted extinction coefficients of
+                the two stars).
+        """
+
+        reddening = self._sed[3]["reddening"]
+        components = ("primary", "secondary")
+        coefficients = numpy.concatenate(
+            [
+                self._gaia_extinction(
+                    [
+                        binary.component_teff[component]
+                        for component in components
+                    ],
+                    reddening,
+                ),
+                numpy.repeat(
+                    Green19Correction.infrared_extinction_coef[:, None],
+                    len(components),
+                    axis=1,
+                ),
+            ]
+        )
+        reddened_flux = 10.0 ** (
+            -0.4
+            * (
+                numpy.column_stack(
+                    [
+                        binary.component_absmag[component]
+                        for component in components
+                    ]
+                )
+                + reddening * coefficients
+            )
+        )
+        total_flux = reddened_flux.sum(axis=1)
+        return (
+            -2.5 * numpy.log10(total_flux),
+            (reddened_flux * coefficients).sum(axis=1) / total_flux,
+        )
+
+    def get_sed_covariance(self, finite, sed_sys_err, coefficients):
         """
         Return the covariance matrix of the SED bands selected by ``finite``.
 
@@ -1029,19 +1061,38 @@ class LogLikelihood(TESSTarget):
         distance error shifts every band by the same distance modulus change
         plus the extinction change that comes with it, and a reddening map
         error shifts each band in proportion to its extinction coefficient.
+        The extinction law adds a gray offset common to all bands and a
+        change of the curve shape, both proportional to the reddening.
+
+        Args:
+            finite(array):    Flags selecting the SED bands to use.
+
+            sed_sys_err(float):    Systematic error added to every band.
+
+            coefficients(array):    Extinction coefficient of each SED band
+                (all bands, as returned by `get_model_sed()`).
         """
 
-        coefficients = Green19Correction.extinction_coef[finite]
+        coefficients = coefficients[finite]
         shared = self._sed[3]
         distance_shift = (
             shared["distance_modulus_err"]
             + shared["reddening_distance_err"] * coefficients
         )
         map_shift = shared["reddening_map_err"] * coefficients
+        gray_shift = numpy.full(
+            coefficients.size,
+            Green19Correction.extinction_gray_err * shared["reddening"],
+        )
+        shape_shift = (
+            Green19Correction.extinction_shape_err[finite] * shared["reddening"]
+        )
         return (
             numpy.diag(self._sed[1][finite] ** 2 + sed_sys_err**2)
             + numpy.outer(distance_shift, distance_shift)
             + numpy.outer(map_shift, map_shift)
+            + numpy.outer(gray_shift, gray_shift)
+            + numpy.outer(shape_shift, shape_shift)
         )
 
     def calc_sed_log_likelihood(
@@ -1065,13 +1116,14 @@ class LogLikelihood(TESSTarget):
         self._logger.debug("Finite SED flags: %s", repr(finite))
         if not finite.any():
             return numpy.array([]) if return_residuals else 0.0
-        residuals = self._sed[0][finite] - binary.absmag[finite]
+        model_sed, coefficients = self.get_model_sed(binary)
+        residuals = self._sed[0][finite] - model_sed[finite]
         self._logger.debug("SED residuals: %s", repr(residuals))
         if self._sed[2][1]:
             # Measured against the total per-band error (photometric, distance
             # and reddening), excluding sed_sys.
             band_errors = numpy.sqrt(
-                numpy.diag(self.get_sed_covariance(finite, 0.0))
+                numpy.diag(self.get_sed_covariance(finite, 0.0, coefficients))
             )
             nsigma = numpy.abs(residuals) / numpy.maximum(band_errors, 0.01)
             bad_sed = nsigma > self._sed[2][0]
@@ -1083,7 +1135,7 @@ class LogLikelihood(TESSTarget):
         # numpy returns the lower-triangular L with covariance = L L^T, so
         # residuals^T covariance^-1 residuals = |L^-1 residuals|^2.
         cholesky = numpy.linalg.cholesky(
-            self.get_sed_covariance(finite, sed_sys_err)
+            self.get_sed_covariance(finite, sed_sys_err, coefficients)
         )
         whitened = numpy.linalg.solve(cholesky, residuals)
         log_det = 2.0 * numpy.log(numpy.diag(cholesky)).sum()
