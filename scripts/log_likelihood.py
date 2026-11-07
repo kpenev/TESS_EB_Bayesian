@@ -1179,10 +1179,44 @@ class LogLikelihood(TESSTarget):
         self._logger.debug("SED log-likelihood: %s", result)
         return result
 
-    def calc_prior_loglikelihood(self, mcmc_sample):
-        """Return the sum of prior log-likelihoods."""
+    def get_age_prior_residual(self, mcmc_sample):
+        """
+        Return the residual that makes the age prior uniform in age.
 
-        return norm.logpdf(mcmc_sample).sum()
+        The prior transform makes log10(age) uniform. A prior uniform in age
+        (a constant star formation rate, so short phases like the pre-main
+        sequence are correspondingly unlikely to be observed) has a density in
+        log10(age) proportional to age: an extra ln(10) * log10(age) in the
+        log-prior. As a residual r, -r^2 / 2 = ln(10) * (log10(age) - u0) with
+        u0 the largest allowed log10(age). r is zero there, but its derivative
+        with respect to the latent coordinate (what least squares uses) stays
+        finite, since the prior transform flattens out at the same place.
+        """
+
+        log_age = numpy.log10(
+            self.prior_transform(
+                "age_gyr", mcmc_sample[SampleParams._fields.index("age_gyr")]
+            )
+        )
+        # Clipped at zero: at the top of the range, rounding can put log_age
+        # slightly above it.
+        return numpy.sqrt(
+            2.0 * numpy.log(10.0) * max(self._range.age_gyr[1] - log_age, 0.0)
+        )
+
+    def calc_prior_loglikelihood(self, mcmc_sample):
+        """
+        Return the sum of prior log-likelihoods for a latent sample.
+
+        The latent parameters have unit normal priors, which
+        `prior_transform()` turns into the priors of the physical parameters;
+        `get_age_prior_residual()` then makes the age prior uniform in age.
+        """
+
+        return (
+            norm.logpdf(mcmc_sample).sum()
+            - 0.5 * self.get_age_prior_residual(mcmc_sample) ** 2
+        )
 
     def save_jktebob_lc(self, filename, provenance="SPOC"):
         """Create a file with given name suitable to run through JKTEBOB."""
@@ -1201,7 +1235,7 @@ class LogLikelihood(TESSTarget):
                         "noerr\n"
                     )
 
-    def __call__(self, mcmc_sample, exclude_priors=False):
+    def __call__(self, mcmc_sample):
         """Return the log-likelihood of the given MCMC sample."""
 
         sample_params = self.get_sample_params(mcmc_sample)
@@ -1225,9 +1259,7 @@ class LogLikelihood(TESSTarget):
         self._logger.debug("Binary: %s", binary)
 
         result = (
-            self.calc_prior_loglikelihood(
-                mcmc_sample[numpy.logical_not(exclude_priors)]
-            )
+            self.calc_prior_loglikelihood(mcmc_sample)
             + self.calc_lc_log_likelihood(binary, sample_params.lc_sys)
             + self.calc_sed_log_likelihood(binary, sample_params.sed_sys)
         )

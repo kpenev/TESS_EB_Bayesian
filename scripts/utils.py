@@ -29,7 +29,9 @@ def get_lstsq_residuals(log_likelihood, sample, grid_excess_scale=1e-6):
     Return the least squares residuals for a latent sample.
 
     The residuals are those of the light curve and the SED, the latent sample
-    itself (its prior is unit normal), and for each star how far outside the
+    itself (its prior is unit normal), the residual making the age prior
+    uniform in age (`LogLikelihood.get_age_prior_residual()`), and for each
+    star how far outside the
     isochrones its mass is [Msun] divided by ``grid_excess_scale``. The last
     two are zero inside the isochrones, where the sum of squares is -2
     log-probability up to a constant. Outside them the masses are clipped to
@@ -75,6 +77,7 @@ def get_lstsq_residuals(log_likelihood, sample, grid_excess_scale=1e-6):
             lc_residuals,
             sed_residuals,
             sample,
+            [log_likelihood.get_age_prior_residual(sample)],
             grid_excess / grid_excess_scale,
         )
     )

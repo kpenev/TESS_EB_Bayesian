@@ -6,17 +6,16 @@ from scipy.stats import truncnorm
 from log_likelihood import LogLikelihood
 from sample_params import SampleParams
 
+
 class LogLikelihoodPriorsOnly(LogLikelihood):
     """Allows MCMC sampling using just the priors for testing."""
 
-    def __call__(self, mcmc_sample, exclude_priors=False):
+    def __call__(self, mcmc_sample):
         """Return the log-likelihood of the given MCMC sample."""
 
-        return (
-            self.calc_prior_loglikelihood(
-                mcmc_sample[numpy.logical_not(exclude_priors)]
-            ),
-        ) + self.get_sample_params(mcmc_sample)
+        return (self.calc_prior_loglikelihood(mcmc_sample),) + (
+            self.get_sample_params(mcmc_sample)
+        )
 
 
 class LogLikelihoodUnitCubePriors(LogLikelihood):
@@ -51,6 +50,11 @@ class LogLikelihoodUnitCubePriors(LogLikelihood):
         return param_ind, (value - low) / (high - low)
 
     def calc_prior_loglikelihood(self, mcmc_sample):
-        """Return the sum of prior log-likelihoods."""
+        """
+        Return the sum of prior log-likelihoods.
 
-        return 0.0
+        The unit cube priors are uniform, so only the term making the age
+        prior uniform in age remains (see `get_age_prior_residual()`).
+        """
+
+        return -0.5 * self.get_age_prior_residual(mcmc_sample) ** 2
