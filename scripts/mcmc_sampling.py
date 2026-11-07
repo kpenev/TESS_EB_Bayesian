@@ -11,6 +11,7 @@ from traceback import format_exc
 
 from configargparse import ArgumentParser, DefaultsFormatter
 from emcee import EnsembleSampler, walkers_independent
+from emcee.moves import DEMove, StretchMove
 import h5py
 import numpy
 import git.repo
@@ -217,6 +218,16 @@ def parse_command_line():
         "If specified, restarting to eliminate bad local minima is disabled.",
     )
     parser.add_argument(
+        "--mode-hop-fraction",
+        type=float,
+        default=0.1,
+        help="Fraction of steps that propose moving each walker by the full "
+        "difference between two other walkers (differential evolution with "
+        "gamma = 1, ter Braak 2006) instead of the stretch move. This lets "
+        "walkers jump between separated solutions (e.g. young and old) in "
+        "proportion to their posterior mass.",
+    )
+    parser.add_argument(
         "--initial-state-from",
         default=None,
         help="A samples file from a previous run (keep it outside the results "
@@ -225,6 +236,15 @@ def parse_command_line():
         "file's ``mcmc`` chain instead of searching for starting positions. "
         "The physical parameters stored in the blobs are used, so the file "
         "may come from an older parametrization.",
+    )
+    parser.add_argument(
+        "--initial-points",
+        default=None,
+        help="A .npy file with the initial position of each walker (latent "
+        "samples of the current log-likelihood, one per row, e.g. from "
+        "initial_walkers.py). If the samples file for this run has no chain "
+        "yet, the walkers start there instead of searching for starting "
+        "positions. Cannot be combined with --initial-state-from.",
     )
 
     return parser.parse_args()
@@ -625,6 +645,54 @@ def get_previous_last_step(previous_fname, log_likelihood, config, num_walkers):
             for blob in last_blobs
         ]
     )
+    return initial_state, is_final_start(
+        initial_state,
+        log_likelihood,
+        config,
+        f"step {num_steps} of {previous_fname!r}",
+    )
+
+
+def get_initial_points_state(points_fname, log_likelihood, config, num_walkers):
+    """
+    Return the walkers saved in a .npy file (one latent sample per row).
+
+    Returns:
+        (array, bool):
+            The initial state and whether to start the final run (see
+            `is_final_start()`).
+    """
+
+    initial_state = numpy.load(points_fname)
+    expected_shape = (num_walkers, len(SampleParams._fields))
+    if initial_state.shape != expected_shape:
+        raise ValueError(
+            f"{points_fname!r} has shape {initial_state.shape}, but this run "
+            f"needs {expected_shape} (walkers, parameters)."
+        )
+    return initial_state, is_final_start(
+        initial_state, log_likelihood, config, repr(points_fname)
+    )
+
+
+def is_final_start(initial_state, log_likelihood, config, source):
+    """
+    Return whether sampling from the given walkers can be the final run.
+
+    It can if the log-probability spread of the walkers is already within
+    ``config.restart_log_likelihood_range`` and no restart is forced.
+
+    Args:
+        initial_state(array):    The walkers, one latent sample per row.
+
+        log_likelihood(LogLikelihood):    Evaluates the walkers.
+
+        config:    The command line configuration (parallelism and restart
+            settings).
+
+        source(str):    Where the walkers came from, for the log message.
+    """
+
     with ProcessPoolExecutor(
         max_workers=config.num_parallel,
         initializer=setup_process_map,
@@ -640,14 +708,12 @@ def get_previous_last_step(previous_fname, log_likelihood, config, num_walkers):
         and log_prob_spread < config.restart_log_likelihood_range
     )
     _logger.info(
-        "Starting from step %d of %s. Log-probability spread of the walkers: "
-        "%s, %s.",
-        num_steps,
-        repr(previous_fname),
+        "Starting from %s. Log-probability spread of the walkers: %s, %s.",
+        source,
         repr(log_prob_spread),
         "starting the final run" if final_run else "not final yet",
     )
-    return initial_state, final_run
+    return final_run
 
 
 def reinitialize_sampling(backend, final_run):
@@ -726,9 +792,21 @@ def main(config):
             backend, initial_state, final_run = restart_sampling(
                 backend, config, log_likelihood
             )
+        elif config.initial_state_from and config.initial_points:
+            raise ValueError(
+                "Specify at most one of --initial-state-from and "
+                "--initial-points."
+            )
         elif config.initial_state_from:
             initial_state, final_run = get_previous_last_step(
                 config.initial_state_from,
+                log_likelihood,
+                config,
+                backend.shape[0],
+            )
+        elif config.initial_points:
+            initial_state, final_run = get_initial_points_state(
+                config.initial_points,
                 log_likelihood,
                 config,
                 backend.shape[0],
@@ -737,9 +815,10 @@ def main(config):
             initial_state = FindStartingPositions(log_likelihood)(config)
         _logger.info("Full set of initial positions found. Starting sampling.")
     else:
-        if config.initial_state_from:
+        if config.initial_state_from or config.initial_points:
             _logger.info(
-                "Ignoring --initial-state-from: %s already has a chain.",
+                "Ignoring --initial-state-from and --initial-points: %s "
+                "already has a chain.",
                 repr(backend.filename),
             )
         if config.changed_likelihood:
@@ -790,7 +869,14 @@ def main(config):
             max_tasks_per_child=1024,
         ) as pool:
             EnsembleSampler(
-                *backend.shape, log_likelihood, backend=backend, pool=pool
+                *backend.shape,
+                log_likelihood,
+                backend=backend,
+                pool=pool,
+                moves=[
+                    (StretchMove(), 1.0 - config.mode_hop_fraction),
+                    (DEMove(gamma0=1.0), config.mode_hop_fraction),
+                ],
             ).run_mcmc(
                 initial_state,
                 nsteps=config.max_mcmc_steps

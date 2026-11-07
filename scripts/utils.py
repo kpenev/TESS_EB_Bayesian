@@ -24,6 +24,62 @@ class _StopFit(Exception):
     """Raised from inside the residual function to end a fit early."""
 
 
+def get_lstsq_residuals(log_likelihood, sample, grid_excess_scale=1e-6):
+    """
+    Return the least squares residuals for a latent sample.
+
+    The residuals are those of the light curve and the SED, the latent sample
+    itself (its prior is unit normal), and for each star how far outside the
+    isochrones its mass is [Msun] divided by ``grid_excess_scale``. The last
+    two are zero inside the isochrones, where the sum of squares is -2
+    log-probability up to a constant. Outside them the masses are clipped to
+    the isochrones (see `BinaryParams`).
+
+    Returns:
+        array or None:
+            The residuals, or None if the parameters are unphysical or the
+            light curve residuals are not finite.
+    """
+
+    sample_params = log_likelihood.get_sample_params(sample)
+    try:
+        binary = Binary(from_mcmc=sample_params, clip_to_grid=True)
+    except ValueError:
+        _logger.warning(
+            "Least squares encountered unphysical parameters:\n%s\n%s",
+            repr(sample_params),
+            format_exc(),
+        )
+        return None
+    lc_residuals = log_likelihood.calc_lc_log_likelihood(
+        binary, sample_params.lc_sys, return_residuals=True
+    )
+    if not numpy.isfinite(lc_residuals).all():
+        return None
+    sed_residuals = log_likelihood.calc_sed_log_likelihood(
+        binary, sample_params.sed_sys, return_residuals=True
+    )
+    _logger.debug(
+        "Concatenating %d LC, %d SED residuals, and %d prior residuals:\n"
+        "%s\n%s\n%s",
+        lc_residuals.size,
+        sed_residuals.size,
+        sample.size,
+        repr(lc_residuals),
+        repr(sed_residuals),
+        repr(sample),
+    )
+    grid_excess = numpy.array(list(binary.grid_excess.values()))
+    return numpy.concatenate(
+        (
+            lc_residuals,
+            sed_residuals,
+            sample,
+            grid_excess / grid_excess_scale,
+        )
+    )
+
+
 # pylint: disable=too-many-arguments
 # pylint: disable=too-many-locals
 def fit_least_squares(
@@ -106,46 +162,12 @@ def fit_least_squares(
         _logger.debug("LSTSQ Function evaluation %d", residuals.num_eval)
         x = template.copy()
         x[free] = free_values
-        sample_params = log_likelihood.get_sample_params(x)
-        try:
-            binary = Binary(from_mcmc=sample_params, clip_to_grid=True)
-        except ValueError:
-            _logger.warning(
-                "Least squares encountered unphysical parameters:\n%s\n%s",
-                repr(sample_params),
-                format_exc(),
-            )
+        result = get_lstsq_residuals(log_likelihood, x, grid_excess_scale)
+        if result is None:
             return numpy.full(num_residuals, numpy.inf)
-        lc_residuals = log_likelihood.calc_lc_log_likelihood(
-            binary, sample_params.lc_sys, return_residuals=True
-        )
-        if not numpy.isfinite(lc_residuals).all():
-            return numpy.full(num_residuals, numpy.inf)
-        sed_residuals = log_likelihood.calc_sed_log_likelihood(
-            binary, sample_params.sed_sys, return_residuals=True
-        )
-        _logger.debug(
-            "Concatenating %d LC, %d SED residuals, and %d prior residuals:\n"
-            "%s\n%s\n%s",
-            lc_residuals.size,
-            sed_residuals.size,
-            x.size,
-            repr(lc_residuals),
-            repr(sed_residuals),
-            repr(x),
-        )
-        grid_excess = numpy.array(list(binary.grid_excess.values()))
-        result = numpy.concatenate(
-            (
-                lc_residuals,
-                sed_residuals,
-                x,
-                grid_excess / grid_excess_scale,
-            )
-        )
         cost = 0.5 * numpy.dot(result, result)
         # Outside the grid the model is not valid, only a way back in.
-        in_grid = not grid_excess.any()
+        in_grid = not result[-2:].any()
         if in_grid and cost < residuals.best_cost * (1.0 - stall_tolerance):
             residuals.last_improvement = residuals.num_eval
         if in_grid and cost < residuals.best_cost:
