@@ -306,7 +306,16 @@ def main(config):
             ]
         )
     numpy.save(config.output, walkers)
-    _logger.info("Saved %d walkers to %s.", len(walkers), config.output)
+    # The family (row of the points file) each walker was drawn around, for
+    # plot_init_models.py.
+    labels_fname = config.output.rsplit(".", 1)[0] + "_family.npy"
+    numpy.save(labels_fname, numpy.repeat(numpy.arange(len(counts)), counts))
+    _logger.info(
+        "Saved %d walkers to %s and their families to %s.",
+        len(walkers),
+        config.output,
+        labels_fname,
+    )
 
 
 if __name__ == "__main__":
