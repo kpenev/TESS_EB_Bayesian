@@ -12,33 +12,36 @@
 # best fit with its initial walkers (plot_init_models.py) are made along the
 # way; a failed plot does not stop the pipeline.
 #
-# Usage: prepare_sampling.sh TIC OUTPUT_DIR [NUM_PARALLEL [NUM_WALKERS]]
+# Usage:
+#   prepare_sampling.sh TIC OUTPUT_DIR SAMPLES_FNAME [NUM_PARALLEL [NUM_WALKERS]]
 #
 # Environment:
 #   PYTHON       the Python command (default python3), e.g.
 #                "conda run -n py311 python3"
 #   WALKER_SEED  random seed for initial_walkers.py (default: random)
 #
-# Runs from the directory of this script, like mcmc_sampling.py. The walkers
-# end up in OUTPUT_DIR/initial_walkers.npy, for
-#   mcmc_sampling.py TIC --initial-points OUTPUT_DIR/initial_walkers.npy
-# NUM_WALKERS (default 256) must match the walkers of the sampling run.
+# Runs from the directory of this script, like mcmc_sampling.py. The
+# intermediate results and plots go to OUTPUT_DIR. The walkers are saved as
+# the starting positions of a new samples file SAMPLES_FNAME, marked as a
+# final run; mcmc_sampling.py with that samples file samples from them.
+# NUM_WALKERS (default 256) must match its scenario grid (see
+# initial_walkers.py), and both must run the same git commit.
 
 set -eu
 
 tic=$1
 output_dir=$2
-num_parallel=${3:-16}
-num_walkers=${4:-256}
+samples=$3
+num_parallel=${4:-16}
+num_walkers=${5:-256}
 python=${PYTHON:-python3}
 
 cd "$(dirname "$0")"
-mkdir -p "${output_dir}"
+mkdir -p "${output_dir}" "$(dirname "${samples}")"
 
 sed_results=${output_dir}/sed_grid_search_${tic}.ecsv
 seeded_results=${output_dir}/sed_seeded_fits_${tic}.ecsv
 families=${output_dir}/families.npy
-walkers=${output_dir}/initial_walkers.npy
 
 # run_step OUTPUT LOG COMMAND...: run COMMAND (output to LOG) unless OUTPUT
 # exists; stop the pipeline if it fails.
@@ -87,16 +90,15 @@ run_step "${families}" "${output_dir}/select_families.log" \
     "${families}" \
     --num-parallel "${num_parallel}"
 
-run_step "${walkers}" "${output_dir}/initial_walkers.log" \
-    ${python} -u initial_walkers.py "${tic}" "${families}" "${walkers}" \
+run_step "${samples}" "${output_dir}/initial_walkers.log" \
+    ${python} -u initial_walkers.py "${tic}" "${families}" "${samples}" \
     --num-walkers "${num_walkers}" \
     --num-parallel "${num_parallel}" \
     ${WALKER_SEED:+--seed "${WALKER_SEED}"}
 
 plot_step "${output_dir}/init_models_0.pdf" \
     "${output_dir}/plot_init_models.log" \
-    ${python} -u plot_init_models.py "${tic}" "${families}" "${walkers}" \
-    "${output_dir}/init_models" \
-    --num-parallel "${num_parallel}"
+    ${python} -u plot_init_models.py "${tic}" "${samples}" \
+    "${output_dir}/init_models"
 
-echo "$(date) Done: ${walkers}"
+echo "$(date) Done: ${samples}"
