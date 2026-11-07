@@ -234,6 +234,9 @@ class BinaryParams(batman.TransitParams):
         }
 
         interpolated = {}
+        # How far outside the isochrones each star's mass is (clipped to them
+        # for the model).
+        grid_excess = {"primary": 0.0, "secondary": 0.0}
         for photsys, interpolator in self._cmd_interpolators:
             for component, mass in [
                 ("primary", mprimary),
@@ -250,20 +253,23 @@ class BinaryParams(batman.TransitParams):
                     ),
                 )
                 if component not in interpolated:
-                    interpolated[component] = interpolator(
+                    interpolated[component], excess = interpolator(
                         ("Mass", "logL", "logTe") + self._passbands[photsys],
+                        clip=True,
                         Mini=mass,
                         **interp_kwargs,
                     )
                 else:
-                    interpolated[component] = numpy.append(
-                        interpolated[component],
-                        interpolator(
-                            self._passbands[photsys],
-                            Mini=mass,
-                            **interp_kwargs,
-                        ),
+                    values, excess = interpolator(
+                        self._passbands[photsys],
+                        clip=True,
+                        Mini=mass,
+                        **interp_kwargs,
                     )
+                    interpolated[component] = numpy.append(
+                        interpolated[component], values
+                    )
+                grid_excess[component] = max(grid_excess[component], excess)
 
         self.mtotal = interpolated["primary"][0] + interpolated["secondary"][0]
         self.mratio = interpolated["secondary"][0] / interpolated["primary"][0]
@@ -339,18 +345,32 @@ class BinaryParams(batman.TransitParams):
             component: 10.0 ** comp_interp[2]
             for component, comp_interp in interpolated.items()
         }
-        tess_mag = {
-            component: self._tess_interpolator(
-                ("TESSmag",), Mini=mass, **interp_kwargs
-            )[0]
-            for component, mass in [
-                ("primary", mprimary),
-                ("secondary", mprimary * sample_params.mratio),
-            ]
-        }
+        tess_mag = {}
+        for component, mass in [
+            ("primary", mprimary),
+            ("secondary", mprimary * sample_params.mratio),
+        ]:
+            values, excess = self._tess_interpolator(
+                ("TESSmag",), clip=True, Mini=mass, **interp_kwargs
+            )
+            tess_mag[component] = values[0]
+            grid_excess[component] = max(grid_excess[component], excess)
         self._tess_flux_ratio = 10.0 ** (
             -(tess_mag["secondary"] - tess_mag["primary"]) / 2.5
         )
+        # The model above is continuous outside the isochrones, but not
+        # physical there: flagged so the likelihood is -inf.
+        self.grid_excess = grid_excess
+        if any(excess > 0 for excess in grid_excess.values()):
+            if not self._clip_to_grid:
+                raise ValueError(
+                    f"Masses {mprimary!r} and "
+                    f"{mprimary * sample_params.mratio!r} are "
+                    f"{grid_excess!r} outside the isochrones for "
+                    f"{interp_kwargs!r}.",
+                    "Mini",
+                )
+            self._out_of_range.append("Mini")
 
     def _calc_perpass_eclipse_time_diff(self):
         """Return the time between periapsis passage and primary eclipse."""
@@ -488,12 +508,28 @@ class BinaryParams(batman.TransitParams):
 
         return self._out_of_range
 
-    def __init__(self, *, from_phoebe=None, from_mcmc=None, precessing=False):
-        """Set the model parameters either from PHOEBE binary or MCMC sample."""
+    def __init__(
+        self,
+        *,
+        from_phoebe=None,
+        from_mcmc=None,
+        precessing=False,
+        clip_to_grid=False,
+    ):
+        """
+        Set the model parameters either from PHOEBE binary or MCMC sample.
+
+        If either mass is outside the isochrones, raise ValueError unless
+        ``clip_to_grid`` is True. In that case each isochrone is evaluated at
+        the mass clipped to its range (a continuous but unphysical model),
+        `grid_excess` says how far outside the masses are, and "Mini" is added
+        to `out_of_range`.
+        """
 
         BinaryParams.prepare_class()
 
         self._precessing = precessing
+        self._clip_to_grid = clip_to_grid
         self._orbit_is_fixed = False
 
         super().__init__()
@@ -526,6 +562,8 @@ class BinaryParams(batman.TransitParams):
         self._tess_flux_ratio = None
         self._primary_impact_param = None
         self._out_of_range = []
+        # How far [Msun] each star's mass is outside the isochrones.
+        self.grid_excess = {"primary": 0.0, "secondary": 0.0}
         for attr in self._per_star_attr:
             setattr(self, f"_{attr}_both", {"primary": None, "secondary": None})
 

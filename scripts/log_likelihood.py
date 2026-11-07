@@ -79,7 +79,11 @@ class LogLikelihood(TESSTarget):
                             for column in CachedSED.band_columns
                         ]
                     ),
-                    (cached_sed.bad_sed_threshold, cached_sed.bad_sed_penalty),
+                    (
+                        cached_sed.bad_sed_threshold,
+                        cached_sed.bad_sed_penalty,
+                        cached_sed.bad_sed_sharpness,
+                    ),
                     {
                         name: getattr(cached_sed, name)
                         for name in CachedSED.shared_columns
@@ -141,6 +145,7 @@ class LogLikelihood(TESSTarget):
                     },
                     bad_sed_threshold=self._sed[2][0],
                     bad_sed_penalty=self._sed[2][1],
+                    bad_sed_sharpness=self._sed[2][2],
                     **{
                         name: float(value)
                         for name, value in self._sed[3].items()
@@ -421,6 +426,7 @@ class LogLikelihood(TESSTarget):
             else (
                 CachedSED.default_bad_sed_threshold,
                 CachedSED.default_bad_sed_penalty,
+                CachedSED.default_bad_sed_sharpness,
             )
         )
         self.sed_recomputed = (
@@ -517,7 +523,6 @@ class LogLikelihood(TESSTarget):
 
         model_lc = binary.get_lightcurve(
             lightcurve["time"],
-            supersample_factor=100,
             exp_time=header["exptime"],
         )
 
@@ -598,7 +603,6 @@ class LogLikelihood(TESSTarget):
         eclipse_model = binary.get_lightcurve(
             numpy.concatenate((lightcurve["time"], bls_times)),
             exclude=["beaming", "reflection", "ellipticity"],
-            supersample_factor=100,
             exp_time=header["exptime"],
         )
         if require_coverage and (
@@ -1125,16 +1129,18 @@ class LogLikelihood(TESSTarget):
         model_sed, coefficients = self.get_model_sed(binary)
         residuals = self._sed[0][finite] - model_sed[finite]
         self._logger.debug("SED residuals: %s", repr(residuals))
-        if self._sed[2][1]:
+        threshold, amplitude, sharpness = self._sed[2]
+        if amplitude:
             # Measured against the total per-band error (photometric, distance
             # and reddening), excluding sed_sys.
             band_errors = numpy.sqrt(
                 numpy.diag(self.get_sed_covariance(finite, 0.0, coefficients))
             )
             nsigma = numpy.abs(residuals) / numpy.maximum(band_errors, 0.01)
-            bad_sed = nsigma > self._sed[2][0]
-            residuals[bad_sed] *= 10.0 ** (
-                self._sed[2][1] * (nsigma[bad_sed] - self._sed[2][0]) ** 0.5
+            # Smooth bounded wall (see CachedSED): negligible well below the
+            # threshold, 1 + amplitude well above it, no kinks, no overflow.
+            residuals *= 1.0 + 0.5 * amplitude * (
+                1.0 + numpy.tanh(sharpness * (nsigma - threshold))
             )
         self._logger.debug("After penalty, SED residuals: %s", repr(residuals))
 

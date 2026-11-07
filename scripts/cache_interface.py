@@ -56,7 +56,8 @@ class CachedSED(DataModelBase):  # pylint: disable=too-few-public-methods
     __tablename__ = "sed"
 
     default_bad_sed_threshold = 10.0
-    default_bad_sed_penalty = 1.0
+    default_bad_sed_penalty = 100.0
+    default_bad_sed_sharpness = 3.0
     # The magnitude columns in SED order; each has a matching *_err column.
     band_columns = (
         "gaia_g",
@@ -126,6 +127,9 @@ class CachedSED(DataModelBase):  # pylint: disable=too-few-public-methods
     reddening_map_err = mapped_column(
         Float, doc="Uncertainty of the reddening map at fixed distance"
     )
+    # Bad SED penalty: each band's residual is multiplied by
+    # 1 + (A / 2) * (1 + tanh(k * (nsigma - threshold))), a smooth wall that is
+    # negligible well below the threshold and tends to 1 + A above it.
     bad_sed_threshold = mapped_column(
         Float,
         doc="How many sigma away should model be from measured SED before the "
@@ -133,8 +137,13 @@ class CachedSED(DataModelBase):  # pylint: disable=too-few-public-methods
     )
     bad_sed_penalty = mapped_column(
         Float,
-        doc="The factor by which to enhance the SED error bar when the "
-        "threshold is exceeded.",
+        doc="Amplitude A of the bad SED penalty: far above the threshold the "
+        "residuals are multiplied by 1 + A. Zero disables the penalty.",
+    )
+    bad_sed_sharpness = mapped_column(
+        Float,
+        doc="Sharpness k [1/sigma] of the bad SED penalty turn-on: its effect "
+        "falls below 1% at ln(100 A) / (2 k) sigma below the threshold.",
     )
 
     def __str__(self):

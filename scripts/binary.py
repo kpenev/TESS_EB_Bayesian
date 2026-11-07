@@ -190,14 +190,120 @@ class Binary(EBEERBinary):
             return result
         return residuals
 
-    def eclipse(self, times, **transit_config):
-        """Return fraction of the primary flux observed due to eclipse."""
+    def _sky_separation(self, times):
+        """
+        Return the projected separation of the centers in primary radii.
+
+        Uses batman's own routine for both halves of the orbit (in front of
+        and behind the primary), so the result is the actual separation
+        everywhere.
+        """
+
+        times = numpy.ascontiguousarray(times, dtype=float)
+        orbit = (
+            self.t0,
+            self.per,
+            self.a,
+            self.inc * numpy.pi / 180.0,
+            self.ecc,
+            self.w * numpy.pi / 180.0,
+        )
+        # pylint: disable=protected-access
+        return numpy.minimum(
+            batman._rsky._rsky(times, *orbit, 1, 1),
+            batman._rsky._rsky(times, *orbit, 2, 1),
+        )
+        # pylint: enable=protected-access
+
+    def eclipse(
+        self,
+        times,
+        *,
+        exp_time=0.0,
+        supersample_step=5.0 / 86400.0,
+        extrapolate=True,
+        **transit_config,
+    ):
+        """
+        Return fraction of the primary flux observed due to eclipse.
+
+        Only exposures during which the stars can overlap are passed to batman;
+        the flux is exactly 1 for the rest. An exposure can overlap if the
+        projected separation of the centers at its midpoint (in primary radii)
+        is less than 1 + R2/R1 plus the largest change of separation possible
+        during a full exposure (twice what is needed).
+
+        The error of averaging over an exposure with equally spaced points is
+        nearly proportional to the step (the light curve has kinks at the
+        contact points), so by default it is removed to first order by
+        Richardson extrapolation: with the step at most ``supersample_step``,
+        the flux is 2 * flux(step) - flux(2 * step). On TIC 101845679 the
+        default 5 s step changes the log-likelihood by at most 0.25 relative to
+        plain 0.1 s steps (vs 1.5 for the previous 100 steps per exposure) at
+        a fraction of the cost.
+
+        Args:
+            times(float or array):    The (mid-exposure) times [days].
+
+            exp_time(float):    The exposure time [days].
+
+            supersample_step(float or None):    The longest time between
+                supersampling points within an exposure [days]. None disables
+                supersampling (and extrapolation).
+
+            extrapolate(bool):    Whether to apply the Richardson extrapolation.
+
+            transit_config:    Passed on to the batman initializer.
+        """
 
         if not self._orbit_is_fixed:
             self._fix_evolving_orbit(times)
-        return batman.TransitModel(self, times, **transit_config).light_curve(
-            self
+        times = numpy.asarray(times, dtype=float)
+        flat_times = times.ravel()
+        # Largest relative orbital speed (at periastron), in primary radii per
+        # day, times the exposure time.
+        max_separation_change = (
+            2.0
+            * numpy.pi
+            * self.a
+            / self.per
+            * numpy.sqrt((1.0 + self.ecc) / (1.0 - self.ecc))
+            * exp_time
         )
+        can_overlap = (
+            self._sky_separation(flat_times)
+            < 1.0 + self.rp + max_separation_change
+        )
+        result = numpy.ones(flat_times.shape)
+        if not can_overlap.any():
+            return result.reshape(times.shape)
+
+        def get_flux(supersample_factor):
+            """Return batman's flux for the overlapping exposures."""
+
+            return batman.TransitModel(
+                self,
+                numpy.ascontiguousarray(flat_times[can_overlap]),
+                exp_time=exp_time,
+                supersample_factor=supersample_factor,
+                **transit_config,
+            ).light_curve(self)
+
+        if supersample_step is None or exp_time <= 0:
+            result[can_overlap] = get_flux(1)
+        elif extrapolate:
+            # Exactly twice as many points for the finer of the two fluxes.
+            coarse_factor = max(
+                1, int(numpy.ceil(exp_time / (2.0 * supersample_step)))
+            )
+            result[can_overlap] = 2.0 * get_flux(2 * coarse_factor) - get_flux(
+                coarse_factor
+            )
+        else:
+            result[can_overlap] = get_flux(
+                max(1, int(numpy.ceil(exp_time / supersample_step)))
+            )
+        return result.reshape(times.shape)
 
     def get_lightcurve(
         self, times, secondary_flux_fraction=None, exclude=(), **eclipse_config

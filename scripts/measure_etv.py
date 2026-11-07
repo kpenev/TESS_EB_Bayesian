@@ -27,7 +27,6 @@ from detrending import (
 from hacked_emcee_hdf5_backend import HDFBackend
 from sample_params import SampleParams
 
-
 _worker_measure_etv = None
 _logger = logging.getLogger(__name__)
 
@@ -191,7 +190,6 @@ class MeasureETV(LogLikelihood):
         ooe_mask = lightcurve["eclipse_flags"] == 0
         model = best_binary.get_lightcurve(
             lightcurve["time"],
-            supersample_factor=100,
             exp_time=exp_time,
             exclude=["eclipse"],
         )
@@ -366,7 +364,6 @@ class MeasureETV(LogLikelihood):
 
         eclipse = self._best_binaries[component].eclipse(
             observed_lc["time"] + time_shift,
-            supersample_factor=100,
             exp_time=exptime,
         )
         secondary_flux_fraction = self._best_binaries[

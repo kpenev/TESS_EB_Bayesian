@@ -47,6 +47,12 @@ def set_default_sed_penalty(tic_id, fname_pattern, dry_run=False):
             if not dry_run:
                 cached_sed.bad_sed_penalty = CachedSED.default_bad_sed_penalty
             changed.append(f"penalty={CachedSED.default_bad_sed_penalty}")
+        if cached_sed.bad_sed_sharpness is None:
+            if not dry_run:
+                cached_sed.bad_sed_sharpness = (
+                    CachedSED.default_bad_sed_sharpness
+                )
+            changed.append(f"sharpness={CachedSED.default_bad_sed_sharpness}")
 
         if changed:
             verb = "would set" if dry_run else "set"

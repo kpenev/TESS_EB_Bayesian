@@ -4,6 +4,7 @@ from multiprocessing import Pool
 import logging
 from collections import namedtuple
 from traceback import format_exc
+import time
 
 import numpy
 from scipy import optimize
@@ -19,11 +20,33 @@ from binary import Binary
 _logger = logging.getLogger(__name__)
 
 
+class _StopFit(Exception):
+    """Raised from inside the residual function to end a fit early."""
+
+
+# pylint: disable=too-many-arguments
+# pylint: disable=too-many-locals
 def fit_least_squares(
-    log_likelihood, initial_mcmc_sample, fit_sys_err=True, **fit_kwargs
+    log_likelihood,
+    initial_mcmc_sample,
+    fit_sys_err=True,
+    fixed=None,
+    progress_interval=300.0,
+    *,
+    time_limit=None,
+    stall_evaluations=None,
+    stall_tolerance=1e-6,
+    grid_excess_scale=1e-6,
+    **fit_kwargs,
 ):
     """
     Find least squares MCMC sample starting from given position.
+
+    Outside the isochrones the model is evaluated with the masses clipped to
+    them (see `BinaryParams`), and one residual per star, how far outside its
+    mass is [Msun] divided by ``grid_excess_scale``, pushes the fit back in. This
+    keeps the cost finite and continuous there, instead of infinite, which
+    would stop the fit at the edge in all parameters.
 
     Args:
         initial_mcmc_sample(array):    Initial guess for the MCMC sample
@@ -32,24 +55,60 @@ def fit_least_squares(
         fit_sys_err(bool):    If False, the last two entries (corresponding to
             `lc_sys` and `sed_sys`) are fixed at zero during the fit.
 
+        fixed(array of bool or None):    Entries of the sample to hold at
+            their initial values during the fit.
+
+        progress_interval(float):    Log the number of residual evaluations
+            (including those for the numerical Jacobian) and the lowest cost
+            so far at INFO level at most this often [s].
+
+        time_limit(float or None):    Stop the fit after this many seconds.
+
+        stall_evaluations(int or None):    Stop the fit if the lowest cost has
+            not improved by a fraction of at least ``stall_tolerance`` within
+            this many residual evaluations (including those for the numerical
+            Jacobian).
+
+        stall_tolerance(float):    See ``stall_evaluations``.
+
+        grid_excess_scale(float):    The distance of the masses outside the
+            isochrones [Msun] that adds 1/2 to the cost.
+
     Returns:
         OptimizeResult:
-            The result of the optimization containing the best fit
-            parameters in the `x` attribute. See
-            `scipy.optimize.least_squares`.
+            The result of the optimization; see
+            `scipy.optimize.least_squares`. Its `x` attribute is always the
+            full sample, including the fixed entries, while `jac` covers only
+            the fitted entries. If the fit is stopped by ``time_limit`` or
+            ``stall_evaluations``, or ends outside the isochrones, `x`, `cost`
+            and `fun` are those of the lowest cost evaluated inside them,
+            `jac` is None and `message` gives the reason; `status` is -10 for
+            the first two.
     """
 
-    def residuals(x, num_residuals):
+    num_params = len(SampleParams._fields)
+    assert initial_mcmc_sample.size == num_params
+    template = numpy.array(initial_mcmc_sample, dtype=float)
+    free = (
+        numpy.ones(num_params, dtype=bool)
+        if fixed is None
+        else numpy.logical_not(fixed)
+    )
+    if not fit_sys_err:
+        # Fix lc_sys and sed_sys to zero during least squares fit if instructed
+        template[-2:] = 0.0
+        free[-2:] = False
+
+    def residuals(free_values, num_residuals):
         """Return array of residuals (LC and SED) for given MCMC sample."""
 
         residuals.num_eval += 1
         _logger.debug("LSTSQ Function evaluation %d", residuals.num_eval)
-        if x.size == len(SampleParams._fields) - 2:
-            x = numpy.concatenate((x, [0.0, 0.0]))
-        assert x.size == len(SampleParams._fields)
+        x = template.copy()
+        x[free] = free_values
         sample_params = log_likelihood.get_sample_params(x)
         try:
-            binary = Binary(from_mcmc=sample_params)
+            binary = Binary(from_mcmc=sample_params, clip_to_grid=True)
         except ValueError:
             _logger.warning(
                 "Least squares encountered unphysical parameters:\n%s\n%s",
@@ -75,19 +134,57 @@ def fit_least_squares(
             repr(sed_residuals),
             repr(x),
         )
-        return numpy.concatenate((lc_residuals, sed_residuals, x))
-
-    assert initial_mcmc_sample.size == len(SampleParams._fields)
-    if not fit_sys_err:
-        # Fix lc_sys and sed_sys to zero during least squares fit if instructed
-        initial_mcmc_sample = initial_mcmc_sample[:-2]
+        grid_excess = numpy.array(list(binary.grid_excess.values()))
+        result = numpy.concatenate(
+            (
+                lc_residuals,
+                sed_residuals,
+                x,
+                grid_excess / grid_excess_scale,
+            )
+        )
+        cost = 0.5 * numpy.dot(result, result)
+        # Outside the grid the model is not valid, only a way back in.
+        in_grid = not grid_excess.any()
+        if in_grid and cost < residuals.best_cost * (1.0 - stall_tolerance):
+            residuals.last_improvement = residuals.num_eval
+        if in_grid and cost < residuals.best_cost:
+            residuals.best_cost = cost
+            residuals.best_x = x
+            residuals.best_fun = result
+        now = time.monotonic()
+        if now - residuals.last_report >= progress_interval:
+            _logger.info(
+                "Least squares progress: %d residual evaluations, lowest cost"
+                " %s.",
+                residuals.num_eval,
+                repr(residuals.best_cost),
+            )
+            residuals.last_report = now
+        if time_limit is not None and now - residuals.start > time_limit:
+            raise _StopFit(f"Time limit of {time_limit} s reached.")
+        if (
+            stall_evaluations is not None
+            and residuals.num_eval - residuals.last_improvement
+            > stall_evaluations
+        ):
+            raise _StopFit(
+                f"Cost did not improve by a fraction of {stall_tolerance} in "
+                f"{stall_evaluations} residual evaluations."
+            )
+        return result
 
     residuals.num_eval = 0
-    initial_resdiuals = residuals(initial_mcmc_sample, 0)
+    residuals.best_cost = numpy.inf
+    residuals.best_x = template.copy()
+    residuals.best_fun = None
+    residuals.last_improvement = 0
+    residuals.start = residuals.last_report = time.monotonic()
+    initial_resdiuals = residuals(template[free], 0)
     _logger.debug(
         "Initial residuals evaluated at MCMC sample\n%s:\n%s\nsize: %d, "
         "num non finite: %d (ind: %s)",
-        repr(initial_mcmc_sample),
+        repr(template),
         repr(initial_resdiuals),
         initial_resdiuals.size,
         numpy.logical_not(numpy.isfinite(initial_resdiuals)).sum(),
@@ -99,19 +196,65 @@ def fit_least_squares(
         "Likelihood must be defined at initial residuals for least squares "
         "fit."
     )
+    # Even xtol=1e-8 stopped fits while the gradient was still large, so the
+    # step-size test is effectively disabled ("lm" requires xtol >= machine
+    # epsilon; 10 eps keeps it just above the precision of the parameters).
+    # Fits end on ftol, gtol, max_nfev or the time and stall limits. Jacobian
+    # scaling is the scipy >= 1.16 default for "lm" but not before, so it is
+    # set explicitly for consistent behavior across installations.
     for arg, default in [
         ("method", "lm"),
-        ("xtol", 1e-3),
-        ("max_nfev", 100 * initial_mcmc_sample.size),
+        ("xtol", 10.0 * numpy.finfo(float).eps),
+        ("x_scale", "jac"),
+        ("max_nfev", 100 * free.sum()),
     ]:
         if arg not in fit_kwargs:
             fit_kwargs[arg] = default
-    return optimize.least_squares(
-        residuals,
-        initial_mcmc_sample,
-        args=(initial_resdiuals.size,),
-        **fit_kwargs,
-    )
+    try:
+        result = optimize.least_squares(
+            residuals,
+            template[free],
+            args=(initial_resdiuals.size,),
+            **fit_kwargs,
+        )
+    except _StopFit as stop:
+        _logger.info(
+            "Least squares stopped early after %d residual evaluations: %s",
+            residuals.num_eval,
+            stop,
+        )
+        return optimize.OptimizeResult(
+            x=residuals.best_x,
+            cost=residuals.best_cost,
+            fun=residuals.best_fun,
+            jac=None,
+            optimality=numpy.nan,
+            nfev=residuals.num_eval,
+            status=-10,
+            success=False,
+            message=str(stop),
+        )
+    full_x = template.copy()
+    full_x[free] = result.x
+    result.x = full_x
+    if result.fun[-2:].any():
+        # Ended just outside the isochrones (pulled out by the rest of the
+        # cost against the finite grid excess residuals).
+        _logger.info(
+            "Least squares ended %s Msun outside the isochrones; returning "
+            "the lowest cost evaluated inside.",
+            repr(result.fun[-2:] * grid_excess_scale),
+        )
+        result.x = residuals.best_x
+        result.cost = residuals.best_cost
+        result.fun = residuals.best_fun
+        result.jac = None
+        result.message += " Ended outside the isochrones."
+    return result
+
+
+# pylint: enable=too-many-arguments
+# pylint: enable=too-many-locals
 
 
 def tweak_params(
