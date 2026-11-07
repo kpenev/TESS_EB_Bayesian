@@ -207,6 +207,14 @@ def fit_start(arguments):
         _logger.warning("Start %d heuristics failed: %s", start_index, error)
         summary["message"] = f"heuristics failed: {error}"
         return summary
+    # One start hitting a bug should not end a run of hundreds of fits; the
+    # traceback is logged and the start recorded as failed.
+    except Exception as error:  # pylint: disable=broad-exception-caught
+        _logger.exception("Start %d heuristics crashed", start_index)
+        summary["message"] = (
+            f"heuristics crashed: {type(error).__name__}: {error}"
+        )
+        return summary
     summary["heuristic_seconds"] = time.time() - begin
     summary.update(
         {f"heuristic_{key}": value for key, value in describe(sample).items()}
@@ -226,6 +234,10 @@ def fit_start(arguments):
     except (AssertionError, ValueError) as error:
         _logger.warning("Start %d fit failed: %s", start_index, error)
         summary["message"] = f"fit failed: {error}"
+        return summary
+    except Exception as error:  # pylint: disable=broad-exception-caught
+        _logger.exception("Start %d fit crashed", start_index)
+        summary["message"] = f"fit crashed: {type(error).__name__}: {error}"
         return summary
     summary["fit_seconds"] = time.time() - begin
     summary["fit_status"] = result.status
