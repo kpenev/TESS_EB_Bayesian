@@ -214,8 +214,9 @@ def parse_command_line():
         "--max-mcmc-steps",
         type=int,
         default=None,
-        help="The maximum number of steps the MCMC sampler is allowed to add. "
-        "If specified, restarting to eliminate bad local minima is disabled.",
+        help="The maximum number of steps the MCMC sampler is allowed to add, "
+        "instead of stopping at the next restart point (see "
+        "--restart-steps). Unless the run is final, a restart still follows.",
     )
     parser.add_argument(
         "--mode-hop-fraction",
@@ -236,15 +237,6 @@ def parse_command_line():
         "file's ``mcmc`` chain instead of searching for starting positions. "
         "The physical parameters stored in the blobs are used, so the file "
         "may come from an older parametrization.",
-    )
-    parser.add_argument(
-        "--initial-points",
-        default=None,
-        help="A .npy file with the initial position of each walker (latent "
-        "samples of the current log-likelihood, one per row, e.g. from "
-        "initial_walkers.py). If the samples file for this run has no chain "
-        "yet, the walkers start there instead of searching for starting "
-        "positions. Cannot be combined with --initial-state-from.",
     )
 
     return parser.parse_args()
@@ -653,28 +645,6 @@ def get_previous_last_step(previous_fname, log_likelihood, config, num_walkers):
     )
 
 
-def get_initial_points_state(points_fname, log_likelihood, config, num_walkers):
-    """
-    Return the walkers saved in a .npy file (one latent sample per row).
-
-    Returns:
-        (array, bool):
-            The initial state and whether to start the final run (see
-            `is_final_start()`).
-    """
-
-    initial_state = numpy.load(points_fname)
-    expected_shape = (num_walkers, len(SampleParams._fields))
-    if initial_state.shape != expected_shape:
-        raise ValueError(
-            f"{points_fname!r} has shape {initial_state.shape}, but this run "
-            f"needs {expected_shape} (walkers, parameters)."
-        )
-    return initial_state, is_final_start(
-        initial_state, log_likelihood, config, repr(points_fname)
-    )
-
-
 def is_final_start(initial_state, log_likelihood, config, source):
     """
     Return whether sampling from the given walkers can be the final run.
@@ -792,21 +762,9 @@ def main(config):
             backend, initial_state, final_run = restart_sampling(
                 backend, config, log_likelihood
             )
-        elif config.initial_state_from and config.initial_points:
-            raise ValueError(
-                "Specify at most one of --initial-state-from and "
-                "--initial-points."
-            )
         elif config.initial_state_from:
             initial_state, final_run = get_previous_last_step(
                 config.initial_state_from,
-                log_likelihood,
-                config,
-                backend.shape[0],
-            )
-        elif config.initial_points:
-            initial_state, final_run = get_initial_points_state(
-                config.initial_points,
                 log_likelihood,
                 config,
                 backend.shape[0],
@@ -815,10 +773,9 @@ def main(config):
             initial_state = FindStartingPositions(log_likelihood)(config)
         _logger.info("Full set of initial positions found. Starting sampling.")
     else:
-        if config.initial_state_from or config.initial_points:
+        if config.initial_state_from:
             _logger.info(
-                "Ignoring --initial-state-from and --initial-points: %s "
-                "already has a chain.",
+                "Ignoring --initial-state-from: %s already has a chain.",
                 repr(backend.filename),
             )
         if config.changed_likelihood:

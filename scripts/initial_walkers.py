@@ -21,18 +21,32 @@ coordinates):
 With several families, ``--num-weight-draws`` draws from each family's
 proposal estimate its relative posterior mass (the average of posterior /
 proposal density), which sets how many walkers start in it. The walkers are
-drawn from the proposals, redrawing any with non-finite log-probability. The
-output is meant for ``mcmc_sampling.py --initial-points``.
+drawn from the proposals, redrawing any with non-finite log-probability.
+
+The walkers are saved as the starting positions of a new samples file, in
+the format of the starting position search (`FindStartingPositions`): each
+walker's ``log_prob_results`` row holds its log-probability, followed by the
+log-probability and latent coordinates of its family's best point. The run is
+marked final: restarts, meant to escape poor starting positions, would only
+reset how the walkers are split between the families. ``mcmc_sampling.py``
+then samples from them. The number of walkers must match its scenario grid
+(``--initial-num-ages`` x ``--initial-num-mehs`` x ``--initial-num-ws`` +
+``--num-random-walkers``; 256 by default).
 """
 
 from argparse import ArgumentParser
 from multiprocessing import get_context
+from os import path, remove, replace
 import logging
 
+import git
+import h5py
 import numpy
 from scipy import optimize
 from scipy.special import logsumexp
 
+from general_purpose_python_modules.emcee_util import save_initial_position
+from hacked_emcee_hdf5_backend import HDFBackend
 from log_likelihood import LogLikelihood
 from utils import get_lstsq_residuals
 
@@ -52,7 +66,12 @@ def parse_command_line():
         help="A .npy file with the best latent sample of each family, one "
         "per row.",
     )
-    parser.add_argument("output", help="Where to save the walkers (.npy).")
+    parser.add_argument(
+        "samples",
+        help="The samples file to create for sampling (must not exist). The "
+        "walkers are saved as its starting positions and the run is marked "
+        "final, so mcmc_sampling.py samples from them without restarts.",
+    )
     parser.add_argument(
         "--num-walkers",
         type=int,
@@ -276,14 +295,22 @@ def get_family_walkers(proposals, pool, rng, config):
 
 
 def draw_walkers(proposal, num_walkers, pool, rng, max_tries=20):
-    """Return walkers drawn from the proposal, all with finite log_prob."""
+    """
+    Return walkers drawn from the proposal, all with finite log_prob.
+
+    Returns:
+        (array, array):
+            The walkers (one per row) and their log-probabilities.
+    """
 
     walkers = proposal.draw(num_walkers, rng)
+    log_prob = numpy.array(pool.map(_log_prob, walkers))
     for _ in range(max_tries):
-        bad = ~numpy.isfinite(numpy.array(pool.map(_log_prob, walkers)))
+        bad = ~numpy.isfinite(log_prob)
         if not bad.any():
-            return walkers
+            return walkers, log_prob
         walkers[bad] = proposal.draw(bad.sum(), rng)
+        log_prob[bad] = pool.map(_log_prob, walkers[bad])
     raise RuntimeError(
         f"Could not draw {num_walkers} walkers with finite log-probability."
     )
@@ -294,27 +321,71 @@ def main(config):
 
     global _target  # pylint: disable=global-statement
     _target = LogLikelihood(config.tic_id)
+    if path.exists(config.samples):
+        raise FileExistsError(f"{config.samples!r} already exists.")
     centers = numpy.atleast_2d(numpy.load(config.points))
     rng = numpy.random.default_rng(config.seed)
     with get_context("fork").Pool(config.num_parallel) as pool:
+        center_log_prob = numpy.array(pool.map(_log_prob, centers))
         proposals = [get_proposal(center, pool, config) for center in centers]
         counts = get_family_walkers(proposals, pool, rng, config)
-        walkers = numpy.concatenate(
-            [
-                draw_walkers(proposal, count, pool, rng)
-                for proposal, count in zip(proposals, counts)
-            ]
+        drawn = [
+            draw_walkers(proposal, count, pool, rng)
+            for proposal, count in zip(proposals, counts)
+        ]
+    save_walkers(config, centers, center_log_prob, drawn)
+
+
+def save_walkers(config, centers, center_log_prob, drawn):
+    """
+    Create the samples file with the walkers as its starting positions.
+
+    Args:
+        config:    The command line configuration.
+
+        centers(array):    The best point of each family.
+
+        center_log_prob(array):    The log-probability of each center.
+
+        drawn([(array, array)]):    For each family, its walkers and their
+            log-probabilities (see `draw_walkers()`).
+    """
+
+    num_walkers = sum(len(walkers) for walkers, _ in drawn)
+    # Written under a temporary name and renamed when complete, so an
+    # interrupted run never leaves a partial samples file behind.
+    partial_fname = config.samples + ".partial"
+    if path.exists(partial_fname):
+        remove(partial_fname)
+    HDFBackend(partial_fname).reset(num_walkers, centers.shape[1])
+    with h5py.File(partial_fname, "a") as samples_file:
+        samples_file.attrs["TICID"] = config.tic_id
+        samples_file.attrs["GitHash"] = str(
+            git.repo.Repo(
+                path.dirname(path.dirname(path.abspath(__file__)))
+            ).commit()
         )
-    numpy.save(config.output, walkers)
-    # The family (row of the points file) each walker was drawn around, for
-    # plot_init_models.py.
-    labels_fname = config.output.rsplit(".", 1)[0] + "_family.npy"
-    numpy.save(labels_fname, numpy.repeat(numpy.arange(len(counts)), counts))
+        samples_file["mcmc"].attrs["final_run"] = True
+    index = 0
+    for center, best_log_prob, (walkers, log_prob) in zip(
+        centers, center_log_prob, drawn
+    ):
+        for walker, walker_log_prob in zip(walkers, log_prob):
+            save_initial_position(
+                walker,
+                partial_fname,
+                nwalkers=num_walkers,
+                index=index,
+                log_prob_result=(walker_log_prob, best_log_prob)
+                + tuple(center),
+            )
+            index += 1
+    replace(partial_fname, config.samples)
     _logger.info(
-        "Saved %d walkers to %s and their families to %s.",
-        len(walkers),
-        config.output,
-        labels_fname,
+        "Saved %d walkers (%s per family) to %s.",
+        num_walkers,
+        repr([len(walkers) for walkers, _ in drawn]),
+        config.samples,
     )
 
 
