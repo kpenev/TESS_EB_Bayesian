@@ -1,4 +1,6 @@
-#!/usr/bin/env python3 #pylint: disable=too-many-lines
+#!/usr/bin/env python3
+
+# pylint: disable=too-many-lines
 
 """Create plots of emcee sampling results or lightcurves."""
 
@@ -929,8 +931,7 @@ def get_plot_data(  # pylint: disable=too-many-statements
                 raw_data[: num_iterations // config.thin, :, :]
                 .flatten()
                 .reshape(
-                    (num_iterations // config.thin)
-                    * backend.shape[0],
+                    (num_iterations // config.thin) * backend.shape[0],
                     backend.shape[1],
                 ),
                 columns=SampleParams._fields,
