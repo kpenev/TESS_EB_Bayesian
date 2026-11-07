@@ -16,8 +16,10 @@ The seeds are the lowest cost minima of the cells of the SED-only grid search
    evaluations, wall-clock time and stalling, so a stuck fit cannot hold up the
    rest.
 
-If neither BLS eclipse is masked the orbit is taken as circular, w has no
-effect, and only the first w of the grid is used.
+w and w + 180 make different observed eclipses the primary one (the primary
+star eclipsed), so both halves of the circle are tried. If neither BLS eclipse
+is masked the orbit is taken as circular, where w only selects that geometry,
+so only w = 0 and 180 are used.
 """
 
 from multiprocessing import get_context
@@ -55,11 +57,22 @@ def parse_command_line():
         "--omega-grid",
         type=float,
         nargs="+",
-        default=[-60.0, -30.0, 0.0, 30.0, 60.0],
-        help="Arguments of periastron [deg] to start from (only the first is "
-        "used for circular orbits). Half a circle suffices because matching "
-        "the deeper eclipse flips w by 180 deg when needed; values near +-90 "
-        "deg cannot shift the secondary eclipse from phase 0.5.",
+        default=[
+            -150.0,
+            -120.0,
+            -60.0,
+            -30.0,
+            0.0,
+            30.0,
+            60.0,
+            120.0,
+            150.0,
+            180.0,
+        ],
+        help="Arguments of periastron [deg] to start from (for circular orbits "
+        "only 0 and 180 are used). w and w + 180 make different eclipses the "
+        "primary one, so the full circle is needed; values near +-90 deg "
+        "cannot shift the secondary eclipse from phase 0.5.",
     )
     parser.add_argument(
         "--max-seeds",
@@ -250,7 +263,7 @@ def main(config):
     if config.max_seeds is not None:
         seeds = seeds[: config.max_seeds]
     omegas = (
-        config.omega_grid[:1]
+        [0.0, 180.0]
         if is_circular(FindStartingPositions(_target))
         else config.omega_grid
     )

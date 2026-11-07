@@ -190,7 +190,7 @@ def select_seeds(
 
     if widths is None:
         widths = {
-            "mtotal": 0.1 / 3,
+            "mtotal": 0.05,
             "mratio": 0.1 / 3,
             "meh": 0.3 / 3,
             "log_age": 0.3 / 3,

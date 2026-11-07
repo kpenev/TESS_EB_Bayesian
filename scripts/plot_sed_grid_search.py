@@ -62,8 +62,10 @@ def parse_command_line():
     parser.add_argument(
         "--show-delta-cost",
         type=float,
-        default=50.0,
-        help="Axis ranges cover minima within this much of the best cost.",
+        default=None,
+        help="Axis ranges cover minima within this much of the best cost "
+        "(default: --max-delta-cost, i.e. the good minima). Minima outside "
+        "the axes are still plotted.",
     )
     return parser.parse_args()
 
@@ -75,7 +77,7 @@ def get_quantities(table, kernel_scale=1.0, widths=None):
         # Chosen from TIC 101845679 (with max slice width 9); revisit with
         # other targets.
         widths = {
-            "mtotal": 0.1 / 3,
+            "mtotal": 0.05,
             "mratio": 0.1 / 3,
             "meh": 0.3 / 3,
             "log_age": 0.3 / 3,
@@ -121,6 +123,8 @@ def main(config):
     cost = numpy.asarray(table["cost"], dtype=float)
     delta = cost - cost.min()
     good = delta < config.max_delta_cost
+    if config.show_delta_cost is None:
+        config.show_delta_cost = config.max_delta_cost
     shown = delta < config.show_delta_cost
     quantities = get_quantities(table, config.kernel_scale)
     names = list(quantities)

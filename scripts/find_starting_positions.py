@@ -65,18 +65,39 @@ class FindStartingPositions:
         return "odd", "even", single
 
     def _match_eclipse_times(self, params, randomize_e):
-        """Set the eccentricity to match the eclipse phases."""
+        """
+        Set the eccentricity to match the eclipse phases for the given w.
+
+        The argument of periastron selects which observed eclipse is the
+        primary one (the primary star eclipsed). The secondary eclipse comes
+        more than half a period after the primary one if cos(w) > 0 and less
+        if cos(w) < 0. If ``params.w`` agrees with the observed phase of the
+        other eclipse after ``params.eclipse_time`` (taking cos(w) >= 0 to
+        agree with exactly half a period), the eclipse at ``eclipse_time`` is
+        the primary one. Otherwise the other observed eclipse is, and
+        ``eclipse_time`` is moved to it. So w and w + 180 give the two
+        geometries.
+        """
+
+        secondary_eclipse_phase = self._secondary_eclipse_phase
+        final_w = params.w % 360
+        if final_w > 270:
+            final_w -= 360
+        if (secondary_eclipse_phase < 0.5) != (90 < final_w < 270):
+            params = params._replace(
+                eclipse_time=params.eclipse_time
+                + secondary_eclipse_phase * params.per
+            )
+            secondary_eclipse_phase = 1.0 - secondary_eclipse_phase
+        params = params._replace(w=final_w)
 
         if (
             self._bls_eclipses["shallower"] != "masked"
             and self._bls_eclipses["deeper"] != "masked"
             and not randomize_e
         ):
-            if params.w % 360 > 270:
-                params = params._replace(w=params.w - 360.0)
             return params._replace(ecc=0.0)
 
-        secondary_eclipse_phase = self._secondary_eclipse_phase
         if randomize_e:
             secondary_eclipse_phase += uniform.rvs(
                 loc=-0.05
@@ -90,23 +111,18 @@ class FindStartingPositions:
                     + self._log_likelihood.best_fit_bls["period"][1]
                 ),
             )
+            # Keep the secondary eclipse on the side of half a period set by
+            # w, so the randomization does not change the geometry.
+            if (secondary_eclipse_phase < 0.5) != (90 < final_w < 270):
+                secondary_eclipse_phase = 1.0 - secondary_eclipse_phase
 
         _logger.debug(
-            "Matching eclipse times: Secondary eclipse phase = %s",
+            "Matching eclipse times: w = %s, primary eclipse time %s, "
+            "secondary eclipse phase = %s",
+            repr(final_w),
+            repr(params.eclipse_time),
             repr(secondary_eclipse_phase),
         )
-
-        final_w = params.w % 360
-        if (secondary_eclipse_phase < 0.5 and not 90 < final_w < 270) or (
-            secondary_eclipse_phase > 0.5 and (90 < final_w < 270)
-        ):
-            final_w += 180.0
-        final_w %= 360
-        if final_w > 270:
-            final_w -= 360
-        params = params._replace(w=final_w)
-
-        _logger.debug("Matching eclipse times: final w = %s", repr(final_w))
 
         _logger.debug(
             "Matching eclipse times: e=0 phase diff = %s",
@@ -146,43 +162,6 @@ class FindStartingPositions:
 
         return params._replace(ecc=result.root)
 
-    def _match_deeper_eclipse_phase(self, params):
-        """Set binary LC model deeper eclipse to match the BLS deeper one."""
-
-        _logger.debug("Matching deeper eclipse params: %s", repr(params))
-        binary = Binary(from_mcmc=params._replace(primary_impact_param=0.0))
-        bls_info = self._log_likelihood.best_fit_bls
-        if self._bls_eclipses["shallower"] == "maked":
-            duration = max(bls_info["duration"], bls_info["masked_duration"])
-        if self._bls_eclipses["deeper"] == "maked":
-            duration = max(bls_info["masked_duration"], bls_info["duration"])
-        else:
-            duration = bls_info["duration"]
-        faintest = None
-        for inverted in [False, True]:
-            time = numpy.linspace(
-                binary.t0 - 2 * duration,
-                binary.t0 + 2 * duration,
-                201,
-            )
-            if inverted:
-                if (
-                    binary.get_lightcurve(time).min() < faintest
-                    and self._bls_eclipses["deeper"] != "odd"
-                ) or (
-                    binary.get_lightcurve(time).min() > faintest
-                    and self._bls_eclipses["deeper"] == "odd"
-                ):
-                    return params._replace(
-                        w=(-180.0 if params.w > 90.0 else 180.0) + params.w,
-                        eclipse_time=params.eclipse_time
-                        + binary.eclipse_time_difference,
-                    )
-                return params
-            faintest = binary.get_lightcurve(time).min()
-            binary.swap_components()
-        assert False, "Neither even nor odd eclipse flagged as deeper!"
-
     def _match_deeper_eclipse_depth(self, params):
         """Tune the primary impact parameter to best fit deeper eclipses."""
 
@@ -205,7 +184,6 @@ class FindStartingPositions:
                 binary, 0.0, self._bls_eclipses["deeper"]
             )
 
-        params = self._match_deeper_eclipse_phase(params)
         temp_binary = Binary(from_mcmc=params)
         max_impact = min(temp_binary.a, 1.0 + temp_binary.rp)
         _logger.debug(
@@ -520,6 +498,11 @@ class FindStartingPositions:
             wmax - max(5.0, config.initial_w_smear / 2),
             config.initial_num_ws,
         )
+        if self._secondary_eclipse_phase != 0.5:
+            # The range above makes the deeper eclipse the primary one; w + 180
+            # gives the other geometry (see `_match_eclipse_times()`), so every
+            # other value is moved there.
+            w_values[1::2] += 180.0
 
         _logger.debug(
             "Initial grid from:\nlog(t) index=%s\n[M/H]=%s\nw=%s",
@@ -554,11 +537,14 @@ class FindStartingPositions:
             scale=config.initial_w_smear,
             size=grid[2].size,
         )
-        assert not numpy.logical_or(
-            result["w"] < wmin, result["w"] > wmax
-        ).any(), (
+        if self._secondary_eclipse_phase == 0.5:
+            outside = numpy.logical_or(result["w"] < wmin, result["w"] > wmax)
+        else:
+            # Either range, which is less than 180 degrees wide.
+            outside = (result["w"] - wmin) % 180.0 > wmax - wmin
+        assert not outside.any(), (
             f"Found proposed arguments of periapsis outside {wmin!r} < w "
-            f"< {wmax!r}: {result['w']!r}"
+            f"< {wmax!r} (or that + 180): {result['w']!r}"
         )
 
         _logger.debug(
