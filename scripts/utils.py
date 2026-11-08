@@ -83,6 +83,48 @@ def get_lstsq_residuals(log_likelihood, sample, grid_excess_scale=1e-6):
     )
 
 
+def default_give_up(
+    state, *, time_limit=None, stall_evaluations=None, stall_tolerance=1e-6
+):
+    """
+    Return why a least squares fit should stop early, or None to continue.
+
+    Args:
+        state:    The state of the fit (the residual function of
+            `fit_least_squares()`), with attributes ``num_eval`` (residual
+            evaluations so far, including those for the numerical Jacobian),
+            ``start`` (`time.monotonic()` when the fit started), and
+            ``best_cost``, ``best_x`` and ``best_fun`` (the lowest cost
+            evaluated inside the isochrones, its sample and its residuals).
+
+        time_limit(float or None):    Stop after this many seconds.
+
+        stall_evaluations(int or None):    Stop if the lowest cost has not
+            dropped by a fraction of at least ``stall_tolerance`` within this
+            many residual evaluations.
+
+        stall_tolerance(float):    See ``stall_evaluations``.
+    """
+
+    if time_limit is not None and time.monotonic() - state.start > time_limit:
+        return f"Time limit of {time_limit} s reached."
+    if stall_evaluations is None:
+        return None
+    # The lowest cost and the evaluation number at the last drop by more than
+    # the tolerance, kept with the state of this fit.
+    if not hasattr(state, "stall_reference") or state.best_cost < (
+        state.stall_reference[0] * (1.0 - stall_tolerance)
+    ):
+        state.stall_reference = (state.best_cost, state.num_eval)
+        return None
+    if state.num_eval - state.stall_reference[1] > stall_evaluations:
+        return (
+            f"Cost did not improve by a fraction of {stall_tolerance} in "
+            f"{stall_evaluations} residual evaluations."
+        )
+    return None
+
+
 # pylint: disable=too-many-arguments
 # pylint: disable=too-many-locals
 def fit_least_squares(
@@ -92,10 +134,8 @@ def fit_least_squares(
     fixed=None,
     progress_interval=300.0,
     *,
-    time_limit=None,
-    stall_evaluations=None,
-    stall_tolerance=1e-6,
     grid_excess_scale=1e-6,
+    give_up=(default_give_up,),
     **fit_kwargs,
 ):
     """
@@ -121,25 +161,22 @@ def fit_least_squares(
             (including those for the numerical Jacobian) and the lowest cost
             so far at INFO level at most this often [s].
 
-        time_limit(float or None):    Stop the fit after this many seconds.
-
-        stall_evaluations(int or None):    Stop the fit if the lowest cost has
-            not improved by a fraction of at least ``stall_tolerance`` within
-            this many residual evaluations (including those for the numerical
-            Jacobian).
-
-        stall_tolerance(float):    See ``stall_evaluations``.
-
         grid_excess_scale(float):    The distance of the masses outside the
             isochrones [Msun] that adds 1/2 to the cost.
+
+        give_up(sequence of callables):    Checks of whether to stop the fit
+            early, each called after every residual evaluation with the state
+            of the fit (see `default_give_up()`); each returns None to
+            continue or the reason to stop. The default never stops; use e.g.
+            ``functools.partial(default_give_up, time_limit=3600)`` for limits.
 
     Returns:
         OptimizeResult:
             The result of the optimization; see
             `scipy.optimize.least_squares`. Its `x` attribute is always the
             full sample, including the fixed entries, while `jac` covers only
-            the fitted entries. If the fit is stopped by ``time_limit`` or
-            ``stall_evaluations``, or ends outside the isochrones, `x`, `cost`
+            the fitted entries. If the fit is stopped by ``give_up``, or ends
+            outside the isochrones, `x`, `cost`
             and `fun` are those of the lowest cost evaluated inside them,
             `jac` is None and `message` gives the reason; `status` is -10 for
             the first two.
@@ -171,8 +208,6 @@ def fit_least_squares(
         cost = 0.5 * numpy.dot(result, result)
         # Outside the grid the model is not valid, only a way back in.
         in_grid = not result[-2:].any()
-        if in_grid and cost < residuals.best_cost * (1.0 - stall_tolerance):
-            residuals.last_improvement = residuals.num_eval
         if in_grid and cost < residuals.best_cost:
             residuals.best_cost = cost
             residuals.best_x = x
@@ -186,24 +221,16 @@ def fit_least_squares(
                 repr(residuals.best_cost),
             )
             residuals.last_report = now
-        if time_limit is not None and now - residuals.start > time_limit:
-            raise _StopFit(f"Time limit of {time_limit} s reached.")
-        if (
-            stall_evaluations is not None
-            and residuals.num_eval - residuals.last_improvement
-            > stall_evaluations
-        ):
-            raise _StopFit(
-                f"Cost did not improve by a fraction of {stall_tolerance} in "
-                f"{stall_evaluations} residual evaluations."
-            )
+        for check in give_up:
+            reason = check(residuals)
+            if reason is not None:
+                raise _StopFit(reason)
         return result
 
     residuals.num_eval = 0
     residuals.best_cost = numpy.inf
     residuals.best_x = template.copy()
     residuals.best_fun = None
-    residuals.last_improvement = 0
     residuals.start = residuals.last_report = time.monotonic()
     initial_resdiuals = residuals(template[free], 0)
     _logger.debug(

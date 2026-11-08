@@ -14,7 +14,8 @@ The seeds are the lowest cost minima of the cells of the SED-only grid search
    (`_match_both_depths`) and the limb darkening is fitted (`_fit_limbdark`);
 3. a least squares fit of all parameters follows, limited in function
    evaluations, wall-clock time and stalling, so a stuck fit cannot hold up the
-   rest.
+   rest. A fit running much longer than the finished ones while still far
+   below the best of them is abandoned (see `abandon_hopeless()`).
 
 w and w + 180 make different observed eclipses the primary one (the primary
 star eclipsed), so both halves of the circle are tried. If neither BLS eclipse
@@ -22,7 +23,9 @@ is masked the orbit is taken as circular, where w only selects that geometry,
 so only w = 0 and 180 are used.
 """
 
+from functools import partial
 from multiprocessing import get_context
+from types import SimpleNamespace
 import logging
 import time
 
@@ -35,12 +38,21 @@ from find_starting_positions import FindStartingPositions
 from log_likelihood import LogLikelihood
 from sample_params import SampleParams
 from sed_minima_cells import select_seeds
-from utils import fit_least_squares, get_age_fraction, params_to_sample
+from utils import (
+    default_give_up,
+    fit_least_squares,
+    get_age_fraction,
+    params_to_sample,
+)
 
 _logger = logging.getLogger(__name__)
 
 # The log-likelihood used by the worker processes (set before forking).
 _target = None
+
+# Shared by the worker processes (set before forking): the durations [s] of
+# the finished fits, how many there are, and the lowest cost among them.
+_progress = None
 
 
 def parse_command_line():
@@ -105,6 +117,33 @@ def parse_command_line():
         type=float,
         default=1e-4,
         help="See --stall-evaluations.",
+    )
+    parser.add_argument(
+        "--abandon-time-factor",
+        type=float,
+        default=10.0,
+        help="A fit running longer than this many times the median duration "
+        "of the finished fits is abandoned if it is far from the best (see "
+        "--abandon-below).",
+    )
+    parser.add_argument(
+        "--abandon-below",
+        type=float,
+        default=100.0,
+        help="How far below the best finished fit (in log-probability) a slow "
+        "fit must be to be abandoned.",
+    )
+    parser.add_argument(
+        "--abandon-min-finished",
+        type=int,
+        default=10,
+        help="Fits are only abandoned once at least this many have finished.",
+    )
+    parser.add_argument(
+        "--abandon-min-fraction",
+        type=float,
+        default=0.1,
+        help="... and at least this fraction of all the fits.",
     )
     parser.add_argument(
         "--bad-sed",
@@ -195,6 +234,57 @@ def get_heuristic_start(seed, omega):
     # pylint: enable=protected-access
 
 
+def record_finished(seconds, cost):
+    """Add a finished fit to the shared progress (worker process)."""
+
+    with _progress.lock:
+        _progress.seconds[_progress.num_finished.value] = seconds
+        _progress.num_finished.value += 1
+        _progress.best_cost.value = min(_progress.best_cost.value, cost)
+
+
+def abandon_hopeless(state, *, min_finished, time_factor, max_cost_excess):
+    """
+    Return why to abandon a fit that is slow and far from the best, or None.
+
+    Fits of one target differ widely in duration, and the slowest ones are
+    mostly far from the best solutions (still improving, so the stall check
+    does not stop them). Once ``min_finished`` fits have finished, a fit
+    running longer than ``time_factor`` times their median duration is
+    abandoned if its lowest cost so far is more than ``max_cost_excess``
+    above the lowest of the finished fits (costs differ like -log_prob). The
+    reference is the target's own fits, so it adapts to how expensive its
+    likelihood is.
+
+    Args:
+        state:    The state of the fit (see `utils.default_give_up()`).
+
+        min_finished(int):    How many fits must have finished first.
+
+        time_factor(float):    How many times the median duration a fit may
+            run before it is checked.
+
+        max_cost_excess(float):    How far above the best finished fit (in
+            cost, i.e. -log_prob) a checked fit may be.
+    """
+
+    num_finished = _progress.num_finished.value
+    if num_finished < min_finished:
+        return None
+    elapsed = time.monotonic() - state.start
+    median = numpy.median(_progress.seconds[:num_finished])
+    if elapsed <= time_factor * median:
+        return None
+    excess = state.best_cost - _progress.best_cost.value
+    if excess <= max_cost_excess:
+        return None
+    return (
+        f"Abandoned after {elapsed:.0f} s ({time_factor:g} x the median "
+        f"{median:.0f} s of {num_finished} finished fits): its lowest cost is "
+        f"{excess:.3g} above the best finished fit."
+    )
+
+
 def fit_start(arguments):
     """Find the heuristic start and run the least squares fit from it."""
 
@@ -226,10 +316,21 @@ def fit_start(arguments):
             _target,
             sample,
             max_nfev=config["max_nfev"],
-            time_limit=config["time_limit"],
-            stall_evaluations=config["stall_evaluations"],
-            stall_tolerance=config["stall_tolerance"],
             progress_interval=600.0,
+            give_up=(
+                partial(
+                    default_give_up,
+                    time_limit=config["time_limit"],
+                    stall_evaluations=config["stall_evaluations"],
+                    stall_tolerance=config["stall_tolerance"],
+                ),
+                partial(
+                    abandon_hopeless,
+                    min_finished=config["abandon_min_finished"],
+                    time_factor=config["abandon_time_factor"],
+                    max_cost_excess=config["abandon_below"],
+                ),
+            ),
         )
     except (AssertionError, ValueError) as error:
         _logger.warning("Start %d fit failed: %s", start_index, error)
@@ -240,6 +341,7 @@ def fit_start(arguments):
         summary["message"] = f"fit crashed: {type(error).__name__}: {error}"
         return summary
     summary["fit_seconds"] = time.time() - begin
+    record_finished(summary["fit_seconds"], result.cost)
     summary["fit_status"] = result.status
     summary["message"] = result.message
     summary["fit_nfev"] = result.nfev
@@ -292,8 +394,22 @@ def main(config):
         "time_limit": config.time_limit,
         "stall_evaluations": config.stall_evaluations,
         "stall_tolerance": config.stall_tolerance,
+        "abandon_time_factor": config.abandon_time_factor,
+        "abandon_below": config.abandon_below,
+        "abandon_min_finished": max(
+            config.abandon_min_finished,
+            int(numpy.ceil(config.abandon_min_fraction * len(starts))),
+        ),
     }
-    with get_context("fork").Pool(config.num_parallel) as pool:
+    context = get_context("fork")
+    global _progress  # pylint: disable=global-statement
+    _progress = SimpleNamespace(
+        lock=context.Lock(),
+        seconds=context.Array("d", len(starts), lock=False),
+        num_finished=context.Value("i", 0, lock=False),
+        best_cost=context.Value("d", numpy.inf, lock=False),
+    )
+    with context.Pool(config.num_parallel) as pool:
         summaries = pool.map(
             fit_start,
             [
