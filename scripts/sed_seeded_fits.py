@@ -121,7 +121,7 @@ def parse_command_line():
     parser.add_argument(
         "--abandon-time-factor",
         type=float,
-        default=10.0,
+        default=5.0,
         help="A fit running longer than this many times the median duration "
         "of the finished fits is abandoned if it is far from the best (see "
         "--abandon-below).",
