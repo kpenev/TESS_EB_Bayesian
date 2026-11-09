@@ -16,7 +16,9 @@ The seeds are the lowest cost minima of the cells of the SED-only grid search
    but without the SED the depths alone can pick a mass ratio the photometry
    rules out for these stars) and the limb darkening is fitted
    (`_fit_limbdark`);
-3. a least squares fit of all parameters follows, limited in function
+3. starts that nearly repeat a better one are not fitted (`cull_starts()`): for
+   nearly circular orbits most w values give practically the same start;
+4. a least squares fit of all parameters follows, limited in function
    evaluations, wall-clock time and stalling, so a stuck fit cannot hold up the
    rest. A fit running much longer than the finished ones while still far
    below the best of them is abandoned (see `abandon_hopeless()`).
@@ -148,6 +150,13 @@ def parse_command_line():
         type=float,
         default=0.1,
         help="... and at least this fraction of all the fits.",
+    )
+    parser.add_argument(
+        "--cull-distance",
+        type=float,
+        default=1.0,
+        help="Heuristic starts within this distance of a better one are not "
+        "fitted (see cull_starts()).",
     )
     parser.add_argument(
         "--bad-sed",
@@ -289,10 +298,10 @@ def abandon_hopeless(state, *, min_finished, time_factor, max_cost_excess):
     )
 
 
-def fit_start(arguments):
-    """Find the heuristic start and run the least squares fit from it."""
+def heuristic_start(arguments):
+    """Return the summary of the heuristic start for one seed and w."""
 
-    start_index, seed, omega, config = arguments
+    start_index, seed, omega = arguments
     summary = {"start": start_index, "omega_grid": omega}
     begin = time.time()
     try:
@@ -310,10 +319,118 @@ def fit_start(arguments):
         )
         return summary
     summary["heuristic_seconds"] = time.time() - begin
+    summary["heuristic_x"] = sample
     summary.update(
         {f"heuristic_{key}": value for key, value in describe(sample).items()}
     )
+    return summary
 
+
+def cull_starts(summaries, threshold, scales=None):
+    """
+    Mark heuristic starts that nearly repeat a better one; return the rest.
+
+    Each start is described by its total mass, mass ratio, log10(age), [M/H],
+    eccentricity vector (e cos w, e sin w, so w stops mattering as e -> 0),
+    impact parameter and which observed eclipse is the primary one, each
+    divided by a scale. Going from the highest heuristic log-probability
+    down, a start is kept unless it is within ``threshold`` (Euclidean
+    distance in those units) of a start already kept; culled starts get a
+    message naming the start they repeat. Starts of different eclipse
+    geometries are never merged.
+
+    Args:
+        summaries([dict]):    The summaries from `heuristic_start()`;
+            culled ones are modified in place.
+
+        threshold(float):    See above.
+
+        scales(dict or None):    The scale of each quantity. The stellar ones
+            default to the kernel widths of the SED cells
+            (`sed_minima_cells.select_seeds()`).
+
+    Returns:
+        [dict]:
+            The kept summaries.
+    """
+
+    if scales is None:
+        scales = {
+            "mtotal": 0.05,
+            "mratio": 0.1 / 3,
+            "log_age": 0.1,
+            "meh": 0.1,
+            "e_cos_w": 0.001,
+            "e_sin_w": 0.01,
+            "impact": 0.02,
+        }
+    bls = _target.best_fit_bls
+    # pylint: disable=protected-access
+    deeper_masked = (
+        FindStartingPositions(_target)._bls_eclipses["deeper"] == "masked"
+    )
+    # pylint: enable=protected-access
+    deeper_time = (
+        bls["masked_transit_time"] if deeper_masked else bls["transit_time"]
+    )
+
+    def get_coordinates(summary):
+        params = _target.get_sample_params(summary["heuristic_x"])
+        phase = ((params.eclipse_time - deeper_time) / params.per) % 1.0
+        w = numpy.radians(params.w)
+        return numpy.array(
+            [
+                params.mtotal / scales["mtotal"],
+                params.mratio / scales["mratio"],
+                numpy.log10(params.age_gyr) / scales["log_age"],
+                params.meh / scales["meh"],
+                params.ecc * numpy.cos(w) / scales["e_cos_w"],
+                params.ecc * numpy.sin(w) / scales["e_sin_w"],
+                params.primary_impact_param / scales["impact"],
+                # The other eclipse is primary: never merged.
+                numpy.inf if 0.25 < phase < 0.75 else 0.0,
+            ]
+        )
+
+    built = [summary for summary in summaries if "heuristic_x" in summary]
+    built.sort(key=lambda summary: -summary["heuristic_log_prob"])
+    kept = []
+    kept_coordinates = []
+    for summary in built:
+        coordinates = get_coordinates(summary)
+        for other, other_coordinates in zip(kept, kept_coordinates):
+            if numpy.isinf(coordinates[-1]) != numpy.isinf(
+                other_coordinates[-1]
+            ):
+                continue
+            distance = numpy.linalg.norm(
+                coordinates[:-1] - other_coordinates[:-1]
+            )
+            if distance <= threshold:
+                summary["message"] = (
+                    f"culled: within {distance:.3g} of start "
+                    f"{other['start']}"
+                )
+                break
+        else:
+            kept.append(summary)
+            kept_coordinates.append(coordinates)
+    _logger.info(
+        "Kept %d of %d heuristic starts (%d failed, %d culled).",
+        len(kept),
+        len(summaries),
+        len(summaries) - len(built),
+        len(built) - len(kept),
+    )
+    return kept
+
+
+def fit_start(arguments):
+    """Run the least squares fit from a heuristic start (worker process)."""
+
+    summary, config = arguments
+    start_index = summary["start"]
+    sample = summary["heuristic_x"]
     begin = time.time()
     try:
         result = fit_least_squares(
@@ -393,6 +510,18 @@ def main(config):
         len(starts),
     )
 
+    context = get_context("fork")
+    with context.Pool(config.num_parallel) as pool:
+        summaries = pool.map(
+            heuristic_start,
+            [
+                (index, row, omega)
+                for index, (_, row, omega) in enumerate(starts)
+            ],
+            chunksize=1,
+        )
+    kept = cull_starts(summaries, config.cull_distance)
+
     fit_config = {
         "max_nfev": config.max_nfev,
         "time_limit": config.time_limit,
@@ -402,26 +531,22 @@ def main(config):
         "abandon_below": config.abandon_below,
         "abandon_min_finished": max(
             config.abandon_min_finished,
-            int(numpy.ceil(config.abandon_min_fraction * len(starts))),
+            int(numpy.ceil(config.abandon_min_fraction * len(kept))),
         ),
     }
-    context = get_context("fork")
     global _progress  # pylint: disable=global-statement
     _progress = SimpleNamespace(
         lock=context.Lock(),
-        seconds=context.Array("d", len(starts), lock=False),
+        seconds=context.Array("d", max(len(kept), 1), lock=False),
         num_finished=context.Value("i", 0, lock=False),
         best_cost=context.Value("d", numpy.inf, lock=False),
     )
     with context.Pool(config.num_parallel) as pool:
-        summaries = pool.map(
-            fit_start,
-            [
-                (index, row, omega, fit_config)
-                for index, (_, row, omega) in enumerate(starts)
-            ],
-            chunksize=1,
+        fitted = pool.map(
+            fit_start, [(summary, fit_config) for summary in kept], chunksize=1
         )
+    for summary in fitted:
+        summaries[summary["start"]] = summary
 
     rows = []
     for summary, (cell, seed, _) in zip(summaries, starts):
@@ -441,7 +566,7 @@ def main(config):
         {
             key: [row.get(key, numpy.nan) for row in rows]
             for key in columns
-            if key not in ("fit_x", "message")
+            if key not in ("fit_x", "heuristic_x", "message")
         }
     ).write(output_fname, overwrite=True)
     numpy.save(
