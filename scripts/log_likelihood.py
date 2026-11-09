@@ -307,6 +307,23 @@ class LogLikelihood(TESSTarget):
                 "eclipse_flags",
                 numpy.zeros(lightcurve.size, dtype=int),
             )
+            # TESS fluxes are big-endian float32. numpy.polyfit (used by
+            # get_eclipse_model()) weights its data in place, so float32 data
+            # would round the weighted fluxes to single precision and make the
+            # likelihood a step function of the weights.
+            lightcurve = lightcurve.astype(
+                [
+                    (
+                        name,
+                        (
+                            numpy.float64
+                            if lightcurve.dtype[name].kind == "f"
+                            else lightcurve.dtype[name]
+                        ),
+                    )
+                    for name in lightcurve.dtype.names
+                ]
+            )
             header["near_eclipse_ranges"] = self._get_near_eclipse_ranges(
                 porb, eclipse_fraction, bin_edges, pad_duration
             )
@@ -661,13 +678,21 @@ class LogLikelihood(TESSTarget):
                 lc_sq_errors = lc_sq_errors[dont_discard]
                 lightcurve = lightcurve[dont_discard]
                 continue
+            # The polynomial is fit in time from the middle of the window: in
+            # raw TESS time (thousands of days) a quadratic over a window
+            # under a day wide is so ill-conditioned that the likelihood jitters
+            # by ~1e-3 under tiny parameter changes.
+            window_center = 0.5 * (
+                lightcurve["time"][eclipse_mask].min()
+                + lightcurve["time"][eclipse_mask].max()
+            )
             if fit_mask.sum() < 10 or not fit_mask[eclipse_mask][[0, -1]].all():
                 LogLikelihood._logger.debug(
                     "For eclipse %d fitting OOE with eclipse.", eclipse_ind
                 )
                 ooe_poly = numpy.poly1d(
                     numpy.polyfit(
-                        lightcurve["time"][eclipse_mask],
+                        lightcurve["time"][eclipse_mask] - window_center,
                         lightcurve["flux"][eclipse_mask]
                         / eclipse_model[eclipse_mask],
                         2,
@@ -679,7 +704,7 @@ class LogLikelihood(TESSTarget):
 
                 ooe_poly = numpy.poly1d(
                     numpy.polyfit(
-                        lightcurve["time"][fit_mask],
+                        lightcurve["time"][fit_mask] - window_center,
                         lightcurve["flux"][fit_mask],
                         2,
                         w=1 / lc_sq_errors[fit_mask] ** 0.5,
@@ -687,7 +712,7 @@ class LogLikelihood(TESSTarget):
                 )
             if not self.skip_ooe_poly:
                 eclipse_model[eclipse_mask] *= ooe_poly(
-                    lightcurve["time"][eclipse_mask]
+                    lightcurve["time"][eclipse_mask] - window_center
                 )
 
         return eclipse_model, lc_sq_errors, model_mask
