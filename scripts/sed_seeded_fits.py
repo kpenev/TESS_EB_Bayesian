@@ -11,7 +11,11 @@ The seeds are the lowest cost minima of the cells of the SED-only grid search
    to match the eclipse times for the given w (`_match_eclipse_times` of
    FindStartingPositions);
 2. the mass ratio and impact parameter are chosen to match both eclipse depths
-   (`_match_both_depths`) and the limb darkening is fitted (`_fit_limbdark`);
+   and the SED given the seed's stellar parameters (`_match_both_depths` with
+   ``include_sed``: the SED barely constrains the mass ratio, the depths do,
+   but without the SED the depths alone can pick a mass ratio the photometry
+   rules out for these stars) and the limb darkening is fitted
+   (`_fit_limbdark`);
 3. a least squares fit of all parameters follows, limited in function
    evaluations, wall-clock time and stalling, so a stuck fit cannot hold up the
    rest. A fit running much longer than the finished ones while still far
@@ -228,7 +232,7 @@ def get_heuristic_start(seed, omega):
     )
     params = finder._match_eclipse_times(params, False)
     params = finder._match_both_depths(
-        params, get_age_fraction(params, _target)
+        params, get_age_fraction(params, _target), include_sed=True
     )
     return finder._fit_limbdark(params)
     # pylint: enable=protected-access

@@ -281,11 +281,18 @@ def get_family_walkers(proposals, pool, rng, config):
         )
     fractions = numpy.exp(numpy.array(log_masses) - max(log_masses))
     fractions /= fractions.sum()
-    counts = numpy.maximum(
-        config.min_family_walkers,
-        numpy.round(fractions * config.num_walkers).astype(int),
+    # Lowered if there are too many families for every one to get it.
+    minimum = min(
+        config.min_family_walkers, config.num_walkers // len(proposals)
     )
-    counts[numpy.argmax(counts)] += config.num_walkers - counts.sum()
+    counts = numpy.maximum(
+        minimum, numpy.round(fractions * config.num_walkers).astype(int)
+    )
+    # The minimums can push the total over: take the excess from the largest
+    # families (always above the minimum, since minimum x families fits).
+    while counts.sum() > config.num_walkers:
+        counts[numpy.argmax(counts)] -= 1
+    counts[numpy.argmax(fractions)] += config.num_walkers - counts.sum()
     _logger.info(
         "Mass fractions %s -> walkers per family %s.",
         repr(fractions),

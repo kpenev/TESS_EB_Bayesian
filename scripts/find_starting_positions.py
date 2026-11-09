@@ -211,8 +211,15 @@ class FindStartingPositions:
         ), f"Failed to optimize impact parameter: {result!r}!"
         return params._replace(primary_impact_param=min(result.x, max_impact))
 
-    def _match_both_depths(self, params, logage_fraction):
-        """Tune primary impact and mratio to best fit both eclipses."""
+    def _match_both_depths(self, params, logage_fraction, include_sed=False):
+        """
+        Tune primary impact and mratio to best fit both eclipses.
+
+        If ``include_sed`` is True, the SED log-likelihood is added to the
+        light curve one being optimized, so a mass ratio that matches the
+        eclipse depths but not the photometry (given the other stellar
+        parameters) is avoided.
+        """
 
         def to_minimize(mratio):
             try:
@@ -230,8 +237,15 @@ class FindStartingPositions:
             result = -self._log_likelihood.calc_lc_log_likelihood(
                 binary, 0.0, self._bls_eclipses["shallower"]
             )
+            if include_sed:
+                result -= self._log_likelihood.calc_sed_log_likelihood(
+                    binary, 0.0
+                )
             _logger.debug(
-                "For m2/m1 = %s, shallower -LL: %s", repr(mratio), repr(result)
+                "For m2/m1 = %s, shallower%s -LL: %s",
+                repr(mratio),
+                " + SED" if include_sed else "",
+                repr(result),
             )
             return result
 

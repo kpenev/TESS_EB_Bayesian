@@ -16,10 +16,20 @@ emcee crosses shallower barriers by itself, and a deep barrier keeps the
 families' starting clouds apart.
 
 Pairs are tested in order of increasing distance and skipped once in the same
-family, so only a small fraction of all pairs is evaluated.
+family.
 
-The output is the best end point of each family (best first), one per row,
-for ``initial_walkers.py``.
+The model has exact symmetries, so each solution appears in several copies:
+swapping the stars (mass ratio q -> 1/q), mirroring the orbit (impact
+parameter b -> -b), w -> w +- 360 and shifting the eclipse time by whole
+orbital periods. The prior keeps all of them, so walkers can cross q = 1,
+b = 0 and any w or eclipse time, but the end points are compared in one copy:
+q <= 1 and b >= 0, and each pair through the w and eclipse time copies that
+take the short way round. Every transformed point is checked to keep its
+likelihood; if one does not, the target fails.
+
+The output is the best end point of each family (best first), with w within
+180 of 0 and the eclipse time within half a period of the middle of its
+prior, one per row, for ``initial_walkers.py``.
 """
 
 from argparse import ArgumentParser
@@ -28,8 +38,11 @@ import logging
 
 from astropy.table import Table
 import numpy
+from scipy.stats import norm
 
+from binary import Binary
 from log_likelihood import LogLikelihood
+from sample_params import SampleParams
 
 _logger = logging.getLogger(__name__)
 
@@ -88,6 +101,178 @@ def _log_prob(sample):
     return _target(sample)[0]
 
 
+def get_physical(sample, param):
+    """Return the physical value of one parameter of a latent sample."""
+
+    return _target.prior_transform(
+        param, sample[SampleParams._fields.index(param)]
+    )
+
+
+def set_physical(sample, param, value):
+    """Return a copy of a latent sample with one physical parameter set."""
+
+    index, latent = _target.inverse_prior(param, value)
+    result = numpy.array(sample)
+    result[index] = latent
+    return result
+
+
+def swap_stars(sample):
+    """
+    Return the sample describing the same binary with the stars swapped.
+
+    The per-star parameters (limb darkening, rotation, reflection and
+    beaming) have the same priors for both stars, so their latent values are
+    exchanged directly. Of the rest, only the mass ratio (inverted), w, the
+    eclipse time (that of the other star's eclipse) and the impact parameter
+    change; they are read off the binary after
+    `BinaryParams.swap_components()` (w + 180, the other eclipse, and the
+    semimajor axis in the other star's radii, so the impact parameter is
+    a cos i), except the mass ratio, which is inverted from the sample since
+    the binary's is that of the current, not initial, masses. Everything else
+    keeps its latent value, so parameters at a prior edge (where converting
+    the physical value back would give an infinite latent value) survive.
+    """
+
+    params = _target.get_sample_params(sample)
+    binary = Binary(from_mcmc=params)
+    binary.swap_components()
+    result = numpy.array(sample)
+    for name in (
+        "limb_dark_1",
+        "limb_dark_2",
+        "prot",
+        "reflection_coef",
+        "beaming_coef",
+    ):
+        primary = SampleParams._fields.index(f"primary_{name}")
+        secondary = SampleParams._fields.index(f"secondary_{name}")
+        result[[primary, secondary]] = result[[secondary, primary]]
+    for param, value in (
+        ("mratio", 1.0 / params.mratio),
+        ("w", binary.w),
+        ("eclipse_time", binary.t0),
+        (
+            "primary_impact_param",
+            binary.a * numpy.cos(numpy.radians(binary.inc)),
+        ),
+    ):
+        result = set_physical(result, param, value)
+    return result
+
+
+def canonical(sample):
+    """
+    Return the copy of a sample with mass ratio <= 1 and impact parameter >= 0.
+
+    Swapping the stars (`swap_stars()`) and b -> -b (mirroring the orbit across
+    the sky plane) give the same model. The prior keeps all the copies, so
+    walkers can cross q = 1 and b = 0, but the end points of the fits are
+    compared in one copy.
+    """
+
+    if get_physical(sample, "mratio") > 1.0:
+        sample = swap_stars(sample)
+    impact = get_physical(sample, "primary_impact_param")
+    if impact >= 0:
+        return sample
+    return set_physical(sample, "primary_impact_param", -impact)
+
+
+def shift_periodic(sample, param, period, target):
+    """
+    Return the copy of a sample with ``param`` nearest ``target``.
+
+    The parameter is shifted by a whole number of periods, staying strictly
+    inside its prior range (which spans several periods, so one of the
+    candidates always does).
+    """
+
+    value = get_physical(sample, param)
+    low, high = _target.get_range(param)
+    turns = numpy.round((target - value) / period)
+    nearest = min(
+        (
+            value + period * shift
+            for shift in (turns, turns - 1.0, turns + 1.0)
+            if low < value + period * shift < high
+        ),
+        key=lambda candidate: abs(candidate - target),
+    )
+    if nearest == value:
+        return sample
+    return set_physical(sample, param, nearest)
+
+
+def nearest_copy(sample, reference):
+    """
+    Return the copy of a sample with periodic parameters nearest a reference.
+
+    w and w +- 360 give the same model, as do eclipse times a whole number of
+    orbital periods apart, and their priors span several periods so walkers
+    can cross any value. Comparing two end points through their nearest
+    copies takes the short way round.
+    """
+
+    for param, period in (
+        ("w", 360.0),
+        ("eclipse_time", get_physical(sample, "per")),
+    ):
+        sample = shift_periodic(
+            sample, param, period, get_physical(reference, param)
+        )
+    return sample
+
+
+def check_same_solution(originals, copies, pool, tolerance=1e-6):
+    """
+    Raise AssertionError unless the copies describe the same binaries.
+
+    Compares the log-probability without the latent unit normal prior density
+    (i.e. likelihood plus physical prior): the latent density itself differs
+    between copies, since the prior transform stretches differently at each.
+    """
+
+    if len(originals) == 0:
+        return
+
+    def physical_log_prob(samples):
+        return numpy.array(pool.map(_log_prob, samples)) - norm.logpdf(
+            samples
+        ).sum(axis=1)
+
+    difference = numpy.abs(
+        physical_log_prob(copies) - physical_log_prob(originals)
+    )
+    _logger.info(
+        "%d copies checked; largest log-probability change %s.",
+        len(copies),
+        repr(difference.max()),
+    )
+    assert (
+        difference <= tolerance
+    ).all(), f"Copies changed the log-probability by up to {difference.max()!r}"
+
+
+def fold_periodic(sample):
+    """
+    Return the copy of a sample with periodic parameters mid-prior.
+
+    w is brought within 180 of 0 and the eclipse time within half an orbital
+    period of the middle of its prior range, as far as possible from the
+    edges of their priors.
+    """
+
+    sample = shift_periodic(sample, "w", 360.0, 0.0)
+    return shift_periodic(
+        sample,
+        "eclipse_time",
+        get_physical(sample, "per"),
+        numpy.mean(_target.get_range("eclipse_time")),
+    )
+
+
 def get_candidates(config, pool):
     """Return the good end points and their log-probabilities, best first."""
 
@@ -101,6 +286,14 @@ def get_candidates(config, pool):
     # Evaluated again so the grouping uses the current log-likelihood.
     log_prob = numpy.array(pool.map(_log_prob, points))
     good = log_prob > log_prob.max() - config.keep_delta
+    # Compared in one copy of the symmetric solutions (see canonical()); the
+    # log-probability is evaluated again, since the latent prior density
+    # differs between copies.
+    copies = numpy.array([canonical(point) for point in points[good]])
+    changed = (copies != points[good]).any(axis=1)
+    check_same_solution(points[good][changed], copies[changed], pool)
+    points[good] = copies
+    log_prob[good] = pool.map(_log_prob, copies)
     order = numpy.argsort(-log_prob[good])
     _logger.info(
         "%d of %d end points are within %s of the best log_prob %s.",
@@ -139,16 +332,17 @@ def group(points, log_prob, config, pool):
     """Return the family label of each point (the index of its best point)."""
 
     families = _Families(len(points))
-    distances = numpy.linalg.norm(
-        points[:, None, :] - points[None, :, :], axis=-1
-    )
+    # Each pair is compared through the copy of its second point with w and
+    # eclipse time nearest those of the first, so the line between them takes
+    # the short way round.
+    nearest = {
+        (first, second): nearest_copy(points[second], points[first])
+        for first in range(len(points))
+        for second in range(first + 1, len(points))
+    }
     pairs = sorted(
-        (
-            (first, second)
-            for first in range(len(points))
-            for second in range(first + 1, len(points))
-        ),
-        key=lambda pair: distances[pair],
+        nearest,
+        key=lambda pair: numpy.linalg.norm(nearest[pair] - points[pair[0]]),
     )
     fractions = numpy.array(config.line_points)
     batch_size = max(1, config.num_parallel // len(fractions))
@@ -165,7 +359,8 @@ def group(points, log_prob, config, pool):
             pool.map(
                 _log_prob,
                 [
-                    points[first] + fraction * (points[second] - points[first])
+                    points[first]
+                    + fraction * (nearest[first, second] - points[first])
                     for first, second in batch
                     for fraction in fractions
                 ],
@@ -194,10 +389,15 @@ def main(config):
     with get_context("fork").Pool(config.num_parallel) as pool:
         points, log_prob = get_candidates(config, pool)
         labels = group(points, log_prob, config, pool)
-    best = numpy.unique(labels)
-    numpy.save(config.output, points[best])
-    for index in best:
-        params = _target.get_sample_params(points[index])
+        best = numpy.unique(labels)
+        # The walkers start around these, so w and the eclipse time are kept
+        # far from the edges of their prior ranges.
+        seeds = numpy.array([fold_periodic(points[index]) for index in best])
+        changed = (seeds != points[best]).any(axis=1)
+        check_same_solution(points[best][changed], seeds[changed], pool)
+    numpy.save(config.output, seeds)
+    for index, seed in zip(best, seeds):
+        params = _target.get_sample_params(seed)
         print(
             f"Family of {numpy.sum(labels == index):3d} end points: best "
             f"log_prob {log_prob[index]:.2f}, Mtot {params.mtotal:.3f} q "
