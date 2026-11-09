@@ -20,15 +20,16 @@ family.
 
 The model has exact symmetries, so each solution appears in several copies:
 swapping the stars (mass ratio q -> 1/q), mirroring the orbit (impact
-parameter b -> -b), w -> w +- 360 and shifting the eclipse time by whole
-orbital periods. The prior keeps all of them, so walkers can cross q = 1,
-b = 0 and any w or eclipse time, but the end points are compared in one copy:
-q <= 1 and b >= 0, and each pair through the w and eclipse time copies that
-take the short way round. Every transformed point is checked to keep its
-likelihood; if one does not, the target fails.
+parameter b -> -b) and shifting the eclipse time by whole orbital periods.
+The prior keeps all of them, so walkers can cross q = 1, b = 0 and any
+eclipse time, but the end points are compared in one copy: q <= 1 and b >= 0,
+and each pair through the eclipse time copies that take the short way round.
+Every transformed point is checked to keep its likelihood; if one does not,
+the target fails. (w has no copies: e and w are sampled as a point in a plane,
+see `LogLikelihood.orbit_from_latent()`.)
 
-The output is the best end point of each family (best first), with w within
-180 of 0 and the eclipse time within half a period of the middle of its
+The output is the best end point of each family (best first), with the
+eclipse time within half a period of the middle of its
 prior, one per row, for ``initial_walkers.py``.
 """
 
@@ -124,13 +125,14 @@ def swap_stars(sample):
 
     The per-star parameters (limb darkening, rotation, reflection and
     beaming) have the same priors for both stars, so their latent values are
-    exchanged directly. Of the rest, only the mass ratio (inverted), w, the
-    eclipse time (that of the other star's eclipse) and the impact parameter
-    change; they are read off the binary after
-    `BinaryParams.swap_components()` (w + 180, the other eclipse, and the
-    semimajor axis in the other star's radii, so the impact parameter is
-    a cos i), except the mass ratio, which is inverted from the sample since
-    the binary's is that of the current, not initial, masses. Everything else
+    exchanged directly. w + 180 is the negated latents of e and w
+    (`LogLikelihood.orbit_from_latent()`). Of the rest, only the mass ratio
+    (inverted), the eclipse time (that of the other star's eclipse) and the
+    impact parameter change; they are read off the binary after
+    `BinaryParams.swap_components()` (the other eclipse, and the semimajor
+    axis in the other star's radii, so the impact parameter is a cos i),
+    except the mass ratio, which is inverted from the sample since the
+    binary's is that of the current, not initial, masses. Everything else
     keeps its latent value, so parameters at a prior edge (where converting
     the physical value back would give an infinite latent value) survive.
     """
@@ -149,9 +151,10 @@ def swap_stars(sample):
         primary = SampleParams._fields.index(f"primary_{name}")
         secondary = SampleParams._fields.index(f"secondary_{name}")
         result[[primary, secondary]] = result[[secondary, primary]]
+    for param in ("ecc", "w"):
+        result[SampleParams._fields.index(param)] *= -1.0
     for param, value in (
         ("mratio", 1.0 / params.mratio),
-        ("w", binary.w),
         ("eclipse_time", binary.t0),
         (
             "primary_impact_param",
@@ -207,22 +210,21 @@ def shift_periodic(sample, param, period, target):
 
 def nearest_copy(sample, reference):
     """
-    Return the copy of a sample with periodic parameters nearest a reference.
+    Return the copy of a sample with the eclipse time nearest a reference's.
 
-    w and w +- 360 give the same model, as do eclipse times a whole number of
-    orbital periods apart, and their priors span several periods so walkers
-    can cross any value. Comparing two end points through their nearest
-    copies takes the short way round.
+    Eclipse times a whole number of orbital periods apart give the same
+    model, and the prior spans several periods so walkers can cross any
+    value. Comparing two end points through their nearest copies takes the
+    short way round. (w needs no copies: its latents are a point in a plane,
+    see `LogLikelihood.orbit_from_latent()`.)
     """
 
-    for param, period in (
-        ("w", 360.0),
-        ("eclipse_time", get_physical(sample, "per")),
-    ):
-        sample = shift_periodic(
-            sample, param, period, get_physical(reference, param)
-        )
-    return sample
+    return shift_periodic(
+        sample,
+        "eclipse_time",
+        get_physical(sample, "per"),
+        get_physical(reference, "eclipse_time"),
+    )
 
 
 def check_same_solution(originals, copies, pool, tolerance=1e-6):
@@ -257,14 +259,12 @@ def check_same_solution(originals, copies, pool, tolerance=1e-6):
 
 def fold_periodic(sample):
     """
-    Return the copy of a sample with periodic parameters mid-prior.
+    Return the copy of a sample with the eclipse time mid-prior.
 
-    w is brought within 180 of 0 and the eclipse time within half an orbital
-    period of the middle of its prior range, as far as possible from the
-    edges of their priors.
+    The eclipse time is brought within half an orbital period of the middle
+    of its prior range, as far as possible from its edges.
     """
 
-    sample = shift_periodic(sample, "w", 360.0, 0.0)
     return shift_periodic(
         sample,
         "eclipse_time",

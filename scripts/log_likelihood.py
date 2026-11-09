@@ -480,8 +480,9 @@ class LogLikelihood(TESSTarget):
                 )
                 for sign in (-1, 1)
             ),
+            # Both set jointly from their two latents (`orbit_from_latent()`).
             ecc=(0, self.max_ecc),
-            w=(-360, 360),
+            w=(-180, 180),
             primary_impact_param=(-10, 10),
             eclipse_time=(
                 self._best_fit_bls["transit_time"]
@@ -697,8 +698,13 @@ class LogLikelihood(TESSTarget):
 
         Apply a transformation to go from identical random variables with Normal
         priors to the paramaters needed to evaluate the likelihood.
+
+        The latents of ``ecc`` and ``w`` are returned unchanged:
+        `get_sample_params()` converts them together (`orbit_from_latent()`).
         """
 
+        if param in ("ecc", "w"):
+            return sample_entry
         if param == "meh":
             return truncnorm.ppf(
                 norm.cdf(sample_entry),
@@ -713,9 +719,16 @@ class LogLikelihood(TESSTarget):
         return value
 
     def inverse_prior(self, param, value):
-        """Return index and value within sample to set param to given value."""
+        """
+        Return index and value within sample to set param to given value.
+
+        Like `prior_transform()`, ``ecc`` and ``w`` are passed through: their
+        values must already be latents (`orbit_to_latent()`).
+        """
 
         param_ind = SampleParams._fields.index(param)
+        if param in ("ecc", "w"):
+            return param_ind, value
         if param == "meh":
             return param_ind, norm.ppf(
                 truncnorm.cdf(
@@ -781,17 +794,53 @@ class LogLikelihood(TESSTarget):
             )
         return params._replace(**replacements)
 
+    @classmethod
+    def orbit_from_latent(cls, params):
+        """
+        Replace the latents (z1, z2) in the ``ecc`` and ``w`` fields by e, w.
+
+        (z1, z2) is treated as one point of a 2D standard normal and mapped
+        radially: e = e_max (1 - exp(-rho^2 / 2)) with rho^2 = z1^2 + z2^2,
+        and w = atan2(z2, z1). rho^2 / 2 is exponentially distributed, so e is
+        uniform on (0, e_max) and w uniform on (-180, 180], independent of e.
+        Near the origin (sqrt(e) cos w, sqrt(e) sin w) is proportional to
+        (z1, z2), so circular orbits are an ordinary point rather than an edge
+        of the prior, and w + 180 is (z1, z2) -> (-z1, -z2).
+        """
+
+        radius2 = params.ecc**2 + params.w**2
+        return params._replace(
+            ecc=-cls.max_ecc * numpy.expm1(-radius2 / 2.0),
+            w=numpy.degrees(numpy.arctan2(params.w, params.ecc)),
+        )
+
+    @classmethod
+    def orbit_to_latent(cls, params):
+        """Inverse of `orbit_from_latent()` (infinite for e >= e_max)."""
+
+        assert params.ecc >= 0, f"Negative eccentricity: {params.ecc!r}"
+        if params.ecc >= cls.max_ecc:
+            radius = numpy.inf
+        else:
+            radius = numpy.sqrt(-2.0 * numpy.log1p(-params.ecc / cls.max_ecc))
+        angle = numpy.radians(params.w)
+        return params._replace(
+            ecc=radius * numpy.cos(angle), w=radius * numpy.sin(angle)
+        )
+
     def get_sample_params(self, mcmc_sample):
         """Return prior-transformed parameters given sample."""
 
-        return self.limb_darkening_from_q(
-            SampleParams(
-                *[
-                    self.prior_transform(param, sample_entry)
-                    for param, sample_entry in zip(
-                        SampleParams._fields, mcmc_sample
-                    )
-                ]
+        return self.orbit_from_latent(
+            self.limb_darkening_from_q(
+                SampleParams(
+                    *[
+                        self.prior_transform(param, sample_entry)
+                        for param, sample_entry in zip(
+                            SampleParams._fields, mcmc_sample
+                        )
+                    ]
+                )
             )
         )
 

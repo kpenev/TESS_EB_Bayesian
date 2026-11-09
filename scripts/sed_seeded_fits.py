@@ -18,10 +18,11 @@ The seeds are the lowest cost minima of the cells of the SED-only grid search
    (`_fit_limbdark`);
 3. starts that nearly repeat a better one are not fitted (`cull_starts()`): for
    nearly circular orbits most w values give practically the same start;
-4. a least squares fit of all parameters follows, limited in function
-   evaluations, wall-clock time and stalling, so a stuck fit cannot hold up the
-   rest. A fit running much longer than the finished ones while still far
-   below the best of them is abandoned (see `abandon_hopeless()`).
+4. a least squares fit of all parameters follows. Once enough good fits have
+   finished, a fit gaining too little over their median duration is stopped,
+   and one far below the best that is improving too slowly to catch up is
+   abandoned (`stop_slow_fit()`); function evaluation and wall-clock limits
+   guard against endless runs.
 
 w and w + 180 make different observed eclipses the primary one (the primary
 star eclipsed), so both halves of the circle are tried. If neither BLS eclipse
@@ -29,6 +30,7 @@ is masked the orbit is taken as circular, where w only selects that geometry,
 so only w = 0 and 180 are used.
 """
 
+from bisect import bisect_right
 from functools import partial
 from multiprocessing import get_context
 from types import SimpleNamespace
@@ -112,44 +114,42 @@ def parse_command_line():
         help="Wall-clock limit of the least squares fit [s].",
     )
     parser.add_argument(
-        "--stall-evaluations",
+        "--min-good-fits",
         type=int,
-        default=200,
-        help="Stop the fit if the cost has not improved by a fraction of "
-        "--stall-tolerance in this many residual evaluations.",
+        default=10,
+        help="Fits are only stopped for slow progress (see stop_slow_fit()) "
+        "once at least this many good fits (within --good-delta of the best "
+        "finished fit) have finished.",
     )
     parser.add_argument(
-        "--stall-tolerance",
+        "--good-delta",
         type=float,
-        default=1e-4,
-        help="See --stall-evaluations.",
+        default=20.0,
+        help="Finished fits within this of the best finished fit (in "
+        "log-probability) are good; their median duration is the reference "
+        "duration of stop_slow_fit().",
+    )
+    parser.add_argument(
+        "--min-gain",
+        type=float,
+        default=1.0,
+        help="Stop a fit whose log-probability rose by less than this over the "
+        "last reference duration.",
     )
     parser.add_argument(
         "--abandon-time-factor",
         type=float,
-        default=5.0,
-        help="A fit running longer than this many times the median duration "
-        "of the finished fits is abandoned if it is far from the best (see "
-        "--abandon-below).",
+        default=10.0,
+        help="A fit far below the best finished one (see --abandon-below) is "
+        "abandoned if, at its recent rate of improvement, it would need more "
+        "than this many reference durations to catch up.",
     )
     parser.add_argument(
         "--abandon-below",
         type=float,
         default=100.0,
-        help="How far below the best finished fit (in log-probability) a slow "
-        "fit must be to be abandoned.",
-    )
-    parser.add_argument(
-        "--abandon-min-finished",
-        type=int,
-        default=10,
-        help="Fits are only abandoned once at least this many have finished.",
-    )
-    parser.add_argument(
-        "--abandon-min-fraction",
-        type=float,
-        default=0.1,
-        help="... and at least this fraction of all the fits.",
+        help="A fit within this of the best finished fit (in log-probability) "
+        "counts as caught up and is never abandoned.",
     )
     parser.add_argument(
         "--cull-distance",
@@ -252,49 +252,88 @@ def record_finished(seconds, cost):
 
     with _progress.lock:
         _progress.seconds[_progress.num_finished.value] = seconds
+        _progress.costs[_progress.num_finished.value] = cost
         _progress.num_finished.value += 1
         _progress.best_cost.value = min(_progress.best_cost.value, cost)
 
 
-def abandon_hopeless(state, *, min_finished, time_factor, max_cost_excess):
+def stop_slow_fit(state, *, config):
     """
-    Return why to abandon a fit that is slow and far from the best, or None.
+    Return why to stop a fit that is making too little progress, or None.
 
-    Fits of one target differ widely in duration, and the slowest ones are
-    mostly far from the best solutions (still improving, so the stall check
-    does not stop them). Once ``min_finished`` fits have finished, a fit
-    running longer than ``time_factor`` times their median duration is
-    abandoned if its lowest cost so far is more than ``max_cost_excess``
-    above the lowest of the finished fits (costs differ like -log_prob). The
-    reference is the target's own fits, so it adapts to how expensive its
-    likelihood is.
+    Fits of one target differ widely in duration. The slowest are mostly far
+    from the best solutions, or close to one but crawling, and can take most
+    of the computing time. The reference duration is the median duration of
+    the good finished fits (within ``config["good_delta"]`` of the best
+    finished fit): how long a fit takes to reach a good solution for this
+    target. It adapts to how expensive the likelihood is, slow bad fits do
+    not inflate it, and waiting for ``config["min_good_fits"]`` good fits
+    keeps the first, fastest finishers from making it too short.
+
+    Once that many good fits have finished, a fit that has run longer than
+    the reference is checked against the gain: the drop of its lowest cost
+    (costs differ like -log_prob) over the last reference duration.
+
+    - It is stopped if the gain is below ``config["min_gain"]``: a point
+      that close to its optimum is good enough as a starting point.
+    - It is abandoned if its lowest cost is more than
+      ``config["abandon_below"]`` above the best finished fit and, gaining
+      at that rate, it would need more than ``config["abandon_time_factor"]``
+      reference durations to come within that of the best.
+
+    Either way the fit's best point is kept as its end point.
 
     Args:
-        state:    The state of the fit (see `utils.default_give_up()`).
+        state:    The state of the fit (see `utils.default_give_up()`); its
+            ``cost_history`` (seconds, lowest cost) is kept here.
 
-        min_finished(int):    How many fits must have finished first.
-
-        time_factor(float):    How many times the median duration a fit may
-            run before it is checked.
-
-        max_cost_excess(float):    How far above the best finished fit (in
-            cost, i.e. -log_prob) a checked fit may be.
+        config(dict):    The settings named above.
     """
 
-    num_finished = _progress.num_finished.value
-    if num_finished < min_finished:
-        return None
     elapsed = time.monotonic() - state.start
-    median = numpy.median(_progress.seconds[:num_finished])
-    if elapsed <= time_factor * median:
+    if not hasattr(state, "cost_history"):
+        state.cost_history = ([], [])
+    state.cost_history[0].append(elapsed)
+    state.cost_history[1].append(state.best_cost)
+
+    num_finished = _progress.num_finished.value
+    best_cost = _progress.best_cost.value
+    good = (
+        numpy.array(_progress.costs[:num_finished])
+        <= best_cost + config["good_delta"]
+    )
+    if good.sum() < config["min_good_fits"]:
         return None
-    excess = state.best_cost - _progress.best_cost.value
-    if excess <= max_cost_excess:
+    reference = numpy.median(
+        numpy.array(_progress.seconds[:num_finished])[good]
+    )
+    if elapsed <= reference:
+        return None
+    gain = (
+        state.cost_history[1][
+            bisect_right(state.cost_history[0], elapsed - reference) - 1
+        ]
+        - state.best_cost
+    )
+    reason = (
+        f"after {elapsed:.0f} s: its lowest cost dropped by {gain:.3g} in the "
+        f"last {reference:.0f} s (the median duration of the {good.sum()} "
+        "good finished fits)"
+    )
+    if gain < config["min_gain"]:
+        return f"Stopped {reason}."
+    excess = state.best_cost - best_cost
+    if excess <= config["abandon_below"]:
+        return None
+    # Gaining ``gain`` per reference duration.
+    needed_durations = (excess - config["abandon_below"]) / gain
+    if needed_durations <= config["abandon_time_factor"]:
         return None
     return (
-        f"Abandoned after {elapsed:.0f} s ({time_factor:g} x the median "
-        f"{median:.0f} s of {num_finished} finished fits): its lowest cost is "
-        f"{excess:.3g} above the best finished fit."
+        f"Abandoned {reason}; it is {excess:.3g} above the best finished fit "
+        f"and would need {needed_durations:.3g} times that to come within "
+        f"{config['abandon_below']:g} of it (limit "
+        f"{config['abandon_time_factor']:g})."
     )
 
 
@@ -439,18 +478,8 @@ def fit_start(arguments):
             max_nfev=config["max_nfev"],
             progress_interval=600.0,
             give_up=(
-                partial(
-                    default_give_up,
-                    time_limit=config["time_limit"],
-                    stall_evaluations=config["stall_evaluations"],
-                    stall_tolerance=config["stall_tolerance"],
-                ),
-                partial(
-                    abandon_hopeless,
-                    min_finished=config["abandon_min_finished"],
-                    time_factor=config["abandon_time_factor"],
-                    max_cost_excess=config["abandon_below"],
-                ),
+                partial(default_give_up, time_limit=config["time_limit"]),
+                partial(stop_slow_fit, config=config),
             ),
         )
     except (AssertionError, ValueError) as error:
@@ -525,19 +554,17 @@ def main(config):
     fit_config = {
         "max_nfev": config.max_nfev,
         "time_limit": config.time_limit,
-        "stall_evaluations": config.stall_evaluations,
-        "stall_tolerance": config.stall_tolerance,
+        "min_good_fits": config.min_good_fits,
+        "good_delta": config.good_delta,
+        "min_gain": config.min_gain,
         "abandon_time_factor": config.abandon_time_factor,
         "abandon_below": config.abandon_below,
-        "abandon_min_finished": max(
-            config.abandon_min_finished,
-            int(numpy.ceil(config.abandon_min_fraction * len(kept))),
-        ),
     }
     global _progress  # pylint: disable=global-statement
     _progress = SimpleNamespace(
         lock=context.Lock(),
         seconds=context.Array("d", max(len(kept), 1), lock=False),
+        costs=context.Array("d", max(len(kept), 1), lock=False),
         num_finished=context.Value("i", 0, lock=False),
         best_cost=context.Value("d", numpy.inf, lock=False),
     )

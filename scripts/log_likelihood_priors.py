@@ -1,7 +1,7 @@
 """Define log-likeihoods that use only priors for testing MCMC sampling."""
 
 import numpy
-from scipy.stats import truncnorm
+from scipy.stats import norm, truncnorm
 
 from log_likelihood import LogLikelihood
 from sample_params import SampleParams
@@ -25,10 +25,15 @@ class LogLikelihoodUnitCubePriors(LogLikelihood):
         """
         Return the value of the given parameter given a sample entry.
 
-        Apply a transformation to go from identical random variables with Normal
-        priors to the paramaters needed to evaluate the likelihood.
+        Apply a transformation to go from identical random variables with
+        uniform priors to the paramaters needed to evaluate the likelihood.
+
+        ``ecc`` and ``w`` become the standard normal latents that
+        `orbit_from_latent()` then converts together.
         """
 
+        if param in ("ecc", "w"):
+            return norm.ppf(sample_entry)
         if param == "meh":
             return truncnorm.ppf(sample_entry, *self._range.meh, scale=0.5)
 
@@ -42,6 +47,8 @@ class LogLikelihoodUnitCubePriors(LogLikelihood):
         """Return index and value within sample to set param to given value."""
 
         param_ind = SampleParams._fields.index(param)
+        if param in ("ecc", "w"):
+            return param_ind, norm.cdf(value)
         if param == "meh":
             return param_ind, truncnorm.cdf(value, *self._range.meh, scale=0.5)
         if param in self._log_uniform:

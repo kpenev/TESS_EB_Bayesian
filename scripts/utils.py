@@ -551,7 +551,9 @@ def params_to_sample(params, log_likelihood, reset_sys_err=False):
     def get_mcmc_sample(params):
         """Return the MCMC sample corresponding to the given parameters."""
 
-        params = log_likelihood.limb_darkening_to_q(params)
+        params = log_likelihood.orbit_to_latent(
+            log_likelihood.limb_darkening_to_q(params)
+        )
         return numpy.array(
             [
                 log_likelihood.inverse_prior(param, value)[1]
@@ -560,6 +562,12 @@ def params_to_sample(params, log_likelihood, reset_sys_err=False):
         )
 
     _logger.debug("Converting params to MCMC sample: %s", repr(params))
+    if params.ecc >= log_likelihood.max_ecc:
+        # Infinite latents, so placed in the top 20% of the range, as the
+        # other parameters are below.
+        params = params._replace(
+            ecc=log_likelihood.max_ecc * uniform.rvs(loc=0.8, scale=0.2)
+        )
     mcmc_sample = get_mcmc_sample(params)
     non_finite = numpy.logical_not(numpy.isfinite(mcmc_sample))
     tiny = numpy.logical_and(non_finite, mcmc_sample < 0)

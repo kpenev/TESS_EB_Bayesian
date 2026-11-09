@@ -80,8 +80,6 @@ run_step "${seeded_results}" "${output_dir}/sed_seeded_fits.log" \
     --sed-results "${sed_results}" \
     --max-nfev 2000 \
     --time-limit 21600 \
-    --stall-evaluations 2000 \
-    --stall-tolerance 1e-6 \
     --num-parallel "${num_parallel}" \
     --output "${seeded_results}"
 

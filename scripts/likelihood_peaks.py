@@ -31,11 +31,6 @@ from utils import fit_least_squares, params_to_sample
 
 _logger = logging.getLogger(__name__)
 
-# The dynesty prior transform maps the unit cube coordinate of w to
-# w = W_MIN + W_PERIOD * u, so w covers exactly one period, matching the
-# (-180, 180) convention of FindStartingPositions.
-W_MIN, W_PERIOD = -180.0, 360.0
-
 StartingPoint = namedtuple(
     "StartingPoint", ["source", "sample", "scenario_index", "scenario"]
 )
@@ -207,21 +202,16 @@ def find_peak_candidates(starts, log_likelihood, config):
     return [candidate for candidate in candidates if candidate is not None]
 
 
-def latent_to_unit_cube(sample, log_likelihood):
+def latent_to_unit_cube(sample):
     """
     Convert an emcee latent sample to dynesty unit cube coordinates.
 
-    Both formalisms use the same parameter ranges, so u = Phi(x), except
-    for w: emcee covers ``log_likelihood.get_range("w")``, while dynesty
-    covers a single period, w = W_MIN + W_PERIOD * u.
+    Both formalisms use the same parameter ranges, and the unit cube
+    coordinates of e and w map to the same latents
+    (`LogLikelihoodUnitCubePriors`), so u = Phi(x) throughout.
     """
 
-    unit_cube = norm.cdf(sample)
-    w_index = SampleParams._fields.index("w")
-    w_low, w_high = log_likelihood.get_range("w")
-    w = w_low + (w_high - w_low) * unit_cube[w_index]
-    unit_cube[w_index] = ((w - W_MIN) % W_PERIOD) / W_PERIOD
-    return unit_cube
+    return norm.cdf(sample)
 
 
 def parse_command_line():
@@ -293,7 +283,7 @@ def main(config):
             "%s: log_prob=%s\n\tunit cube: %s",
             candidate.source,
             repr(candidate.log_prob),
-            repr(latent_to_unit_cube(candidate.lstsq_sample, log_likelihood)),
+            repr(latent_to_unit_cube(candidate.lstsq_sample)),
         )
 
 
