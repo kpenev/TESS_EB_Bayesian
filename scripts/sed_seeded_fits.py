@@ -152,6 +152,15 @@ def parse_command_line():
         "counts as caught up and is never abandoned.",
     )
     parser.add_argument(
+        "--max-interpolation-error",
+        type=float,
+        default=0.01,
+        help="Fail if the interpolated log-probability of any fit end point "
+        "differs from the exact one by more than this (see "
+        "check_interpolation()); the results are then saved with "
+        "_failed_interpolation added to their name.",
+    )
+    parser.add_argument(
         "--cull-distance",
         type=float,
         default=1.0,
@@ -511,6 +520,53 @@ def fit_start(arguments):
     return summary
 
 
+def interpolation_error(sample):
+    """Return the exact minus interpolated log-probability (worker process)."""
+
+    exact = _target(sample, exact=True)[0]
+    interpolated = _target(sample)[0]
+    # Equal also covers both -inf (unphysical either way).
+    return 0.0 if exact == interpolated else exact - interpolated
+
+
+def check_interpolation(summaries, pool):
+    """
+    Compare the exact and interpolated log-probability at every fit end point.
+
+    The light-curve model is interpolated from a grid of orbital phases (see
+    `LogLikelihood.exact_supersample_step`); this measures the error that
+    causes where it matters. Each summary with an end point gets an
+    ``interpolation_error`` entry (exact minus interpolated).
+
+    Returns:
+        (float, int or None):
+            The largest absolute error and the start it is at (None if no fit
+            finished).
+    """
+
+    fitted = [summary for summary in summaries if "fit_x" in summary]
+    if not fitted:
+        return 0.0, None
+    errors = pool.map(
+        interpolation_error,
+        [summary["fit_x"] for summary in fitted],
+        chunksize=1,
+    )
+    for summary, error in zip(fitted, errors):
+        summary["interpolation_error"] = error
+    errors = numpy.abs(errors)
+    worst = int(numpy.argmax(errors))
+    _logger.info(
+        "Exact minus interpolated log-probability at %d end points: largest "
+        "|difference| %.3g (start %d), median %.3g.",
+        len(fitted),
+        errors[worst],
+        fitted[worst]["start"],
+        numpy.median(errors),
+    )
+    return errors[worst], fitted[worst]["start"]
+
+
 def main(config):
     """Fit from all seeds and w values and report the results."""
 
@@ -574,6 +630,8 @@ def main(config):
         )
     for summary in fitted:
         summaries[summary["start"]] = summary
+    with context.Pool(config.num_parallel) as pool:
+        worst_error, worst_start = check_interpolation(summaries, pool)
 
     rows = []
     for summary, (cell, seed, _) in zip(summaries, starts):
@@ -588,6 +646,15 @@ def main(config):
         row.update(summary)
         rows.append(row)
     output_fname = config.output.format(tic_id=config.tic_id)
+    interpolation_failed = worst_error > config.max_interpolation_error
+    if interpolation_failed:
+        # Kept for inspection, but not under the name the next steps (and
+        # prepare_sampling.sh's check for a finished step) look for.
+        output_fname = (
+            output_fname.rsplit(".", 1)[0]
+            + "_failed_interpolation."
+            + output_fname.rsplit(".", 1)[1]
+        )
     columns = sorted({key for row in rows for key in row})
     Table(
         {
@@ -627,6 +694,13 @@ def main(config):
             f"{row.get('fit_teff_primary', numpy.nan):.0f}/"
             f"{row.get('fit_teff_secondary', numpy.nan):.0f} | "
             f"{row.get('message', '')}"
+        )
+    if interpolation_failed:
+        raise RuntimeError(
+            f"The interpolated log-probability differs from the exact one by "
+            f"{worst_error:.3g} (more than --max-interpolation-error "
+            f"{config.max_interpolation_error:g}) at the end point of start "
+            f"{worst_start}; results saved to {output_fname} for inspection."
         )
 
 

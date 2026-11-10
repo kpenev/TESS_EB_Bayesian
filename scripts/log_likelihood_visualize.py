@@ -10,6 +10,7 @@ from hacked_emcee_hdf5_backend import HDFBackend
 from sample_params import SampleParams
 from binary import Binary
 
+
 class LogLikelihoodVisualize(LogLikelihood):
     """Add plotting to show some inner workings of class:`LogLikelihood`."""
 
@@ -55,12 +56,14 @@ class LogLikelihoodVisualize(LogLikelihood):
                 )
                 pyplot.show()
 
-    def get_eclipse_model(self, binary, header, lightcurve, lc_sys_err):
+    def get_eclipse_model(
+        self, binary, header, lightcurve, lc_sys_err, *, exact=False
+    ):
         """Add plotting to the `get_eclipse_model` method."""
 
         try:
             result = super().get_eclipse_model(
-                binary, header, lightcurve, lc_sys_err
+                binary, header, lightcurve, lc_sys_err, exact=exact
             )
         except ValueError:
             eclipse_model = self._evaluate_eclipse_model(
@@ -149,6 +152,7 @@ def main(config):
     binary = Binary(from_mcmc=best_sample)
     for header, lightcurve in log_likelihood._lcs:
         log_likelihood.get_eclipse_model(binary, header, lightcurve, 0.0)
+
 
 if __name__ == "__main__":
     main(parse_command_line())

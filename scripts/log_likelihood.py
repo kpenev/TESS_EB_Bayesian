@@ -38,6 +38,16 @@ class LogLikelihood(TESSTarget):
     ]
 
     max_ecc = 0.96
+    # The lightcurve model is interpolated from a grid of orbital phases
+    # (`Binary.default_phase_grid`) unless the log-likelihood is evaluated with
+    # ``exact=True``: then the model is computed at every exposure, averaged
+    # over it with Richardson-extrapolated supersampling at this step [days].
+    # 0.5 s agreed with 0.1 s to ~1e-3 in log-likelihood (the default 5 s was
+    # off by up to 0.14), so the exact value checks the interpolation.
+    exact_supersample_step = 0.5 / 86400.0
+    # In get_eclipse_model(), a point's weight in the out-of-eclipse background
+    # fit drops smoothly from 1 to 0 as its eclipse depth grows from 0 to this.
+    ooe_depth_scale = 1e-5
     max_outlier_iterations = 5
     outlier_thresh2 = 25.0
     outlier_bins = 30
@@ -533,15 +543,29 @@ class LogLikelihood(TESSTarget):
 
         return self.masked_bls_is_significant(self._best_fit_bls)
 
+    @classmethod
+    def get_model_config(cls, exact):
+        """Return how `Binary.get_lightcurve()` should compute the model."""
+
+        if exact:
+            return {"supersample_step": cls.exact_supersample_step}
+        return {"phase_grid": Binary.default_phase_grid}
+
     @staticmethod
-    def get_full_model(binary, header, lightcurve, lc_sys_err):
-        """Generate model lightcurve and fit its scaling to the data."""
+    def get_full_model(binary, header, lightcurve, lc_sys_err, *, exact=False):
+        """
+        Generate model lightcurve and fit its scaling to the data.
+
+        The model is interpolated from a grid of orbital phases, or, if
+        ``exact``, computed at every exposure (see `exact_supersample_step`).
+        """
 
         lc_sq_errors = lightcurve["flux_err"] ** 2 + lc_sys_err**2
 
         model_lc = binary.get_lightcurve(
             lightcurve["time"],
             exp_time=header["exptime"],
+            **LogLikelihood.get_model_config(exact),
         )
 
         model_lc *= (model_lc * lightcurve["flux"] / lc_sq_errors).sum() / (
@@ -608,9 +632,13 @@ class LogLikelihood(TESSTarget):
         return flags
 
     def _evaluate_eclipse_model(
-        self, binary, header, lightcurve, require_coverage=True
+        self, binary, header, lightcurve, require_coverage=True, *, exact=False
     ):
-        """Evaluate the model near eclipses and list eclipse indices present."""
+        """
+        Evaluate the model near eclipses and list eclipse indices present.
+
+        See `get_full_model()` for ``exact``.
+        """
 
         eclipse_indices = numpy.unique(lightcurve["eclipse_flags"])
 
@@ -622,6 +650,7 @@ class LogLikelihood(TESSTarget):
             numpy.concatenate((lightcurve["time"], bls_times)),
             exclude=["beaming", "reflection", "ellipticity"],
             exp_time=header["exptime"],
+            **self.get_model_config(exact),
         )
         if require_coverage and (
             eclipse_model[-1] == 1 or eclipse_model[-2] == 1
@@ -632,7 +661,9 @@ class LogLikelihood(TESSTarget):
             )
         return (eclipse_model[:-2], eclipse_indices)  # Remove BLS check points
 
-    def get_eclipse_model(self, binary, header, lightcurve, lc_sys_err):
+    def get_eclipse_model(
+        self, binary, header, lightcurve, lc_sys_err, *, exact=False
+    ):
         """
         Same as `get_full_model()` but ignoring OOE variability.
 
@@ -655,7 +686,7 @@ class LogLikelihood(TESSTarget):
         lc_sq_errors = lightcurve["flux_err"] ** 2 + lc_sys_err**2
 
         eclipse_model, eclipse_order = self._evaluate_eclipse_model(
-            binary, header, lightcurve, False
+            binary, header, lightcurve, False, exact=exact
         )
 
         for eclipse_ind in eclipse_order:
@@ -663,9 +694,6 @@ class LogLikelihood(TESSTarget):
                 continue
 
             eclipse_mask = lightcurve["eclipse_flags"] == eclipse_ind
-            fit_mask = numpy.logical_and(
-                eclipse_mask, numpy.abs(eclipse_model - 1) < 1e-10
-            )
             if eclipse_mask.sum() < 20:
                 LogLikelihood._logger.debug(
                     "Discarding eclipse %d", eclipse_ind
@@ -678,44 +706,84 @@ class LogLikelihood(TESSTarget):
                 lc_sq_errors = lc_sq_errors[dont_discard]
                 lightcurve = lightcurve[dont_discard]
                 continue
-            # The polynomial is fit in time from the middle of the window: in
-            # raw TESS time (thousands of days) a quadratic over a window
-            # under a day wide is so ill-conditioned that the likelihood jitters
-            # by ~1e-3 under tiny parameter changes.
-            window_center = 0.5 * (
-                lightcurve["time"][eclipse_mask].min()
-                + lightcurve["time"][eclipse_mask].max()
-            )
-            if fit_mask.sum() < 10 or not fit_mask[eclipse_mask][[0, -1]].all():
-                LogLikelihood._logger.debug(
-                    "For eclipse %d fitting OOE with eclipse.", eclipse_ind
-                )
-                ooe_poly = numpy.poly1d(
-                    numpy.polyfit(
-                        lightcurve["time"][eclipse_mask] - window_center,
-                        lightcurve["flux"][eclipse_mask]
-                        / eclipse_model[eclipse_mask],
-                        2,
-                        w=1 / lc_sq_errors[eclipse_mask] ** 0.5,
-                    )
-                )
-            else:
-                LogLikelihood._logger.debug("Keeping eclipse %d", eclipse_ind)
-
-                ooe_poly = numpy.poly1d(
-                    numpy.polyfit(
-                        lightcurve["time"][fit_mask] - window_center,
-                        lightcurve["flux"][fit_mask],
-                        2,
-                        w=1 / lc_sq_errors[fit_mask] ** 0.5,
-                    )
-                )
             if not self.skip_ooe_poly:
-                eclipse_model[eclipse_mask] *= ooe_poly(
-                    lightcurve["time"][eclipse_mask] - window_center
+                eclipse_model[eclipse_mask] *= self.get_ooe_background(
+                    lightcurve["time"][eclipse_mask],
+                    lightcurve["flux"][eclipse_mask],
+                    eclipse_model[eclipse_mask],
+                    lc_sq_errors[eclipse_mask],
                 )
 
         return eclipse_model, lc_sq_errors, model_mask
+
+    @staticmethod
+    def _smooth_step(value):
+        """Return 0 below 0, 1 above 1, 3x^2 - 2x^3 between (continuous slope)."""
+
+        value = numpy.clip(value, 0.0, 1.0)
+        return value * value * (3.0 - 2.0 * value)
+
+    def get_ooe_background(self, times, flux, eclipse_model, sq_errors):
+        """
+        Return the out-of-eclipse background of one eclipse window.
+
+        Two quadratics in time from the middle of the window are fit (in raw
+        TESS time, thousands of days, a quadratic over a window under a day wide
+        is so ill-conditioned that the likelihood jitters):
+
+        - to the flux of the out-of-eclipse points, each weighted by 1 minus
+          `_smooth_step()` of its eclipse depth over `ooe_depth_scale` (1 out
+          of eclipse, 0 from that depth on);
+        - to the flux divided by the eclipse model over the whole window. This
+          gives partial eclipses (e.g. where a sector starts or ends
+          mid-eclipse) extra freedom instead of throwing them out.
+
+        They are blended by the smaller of the out-of-eclipse weights of the
+        window's first and last points, times a ramp from 0 to 1 as the total
+        out-of-eclipse weight grows from 5 to 10: the first fit for a complete
+        window, the second for a truncated one or one with too few
+        out-of-eclipse points. Every step is continuous, so the likelihood
+        does not jump as points enter or leave the eclipse.
+
+        Args:
+            times(array):    The times of the window's points.
+
+            flux(array):    Their observed flux.
+
+            eclipse_model(array):    Their eclipse-only model flux.
+
+            sq_errors(array):    Their squared flux errors.
+
+        Returns:
+            array:
+                The background at ``times``, to multiply the model by.
+        """
+
+        offsets = times - 0.5 * (times.min() + times.max())
+        background = numpy.polyval(
+            numpy.polyfit(
+                offsets, flux / eclipse_model, 2, w=1.0 / sq_errors**0.5
+            ),
+            offsets,
+        )
+        weights = 1.0 - self._smooth_step(
+            (1.0 - eclipse_model) / self.ooe_depth_scale
+        )
+        blend = min(weights[0], weights[-1]) * self._smooth_step(
+            (weights.sum() - 5.0) / 5.0
+        )
+        if blend > 0:
+            use = weights > 0
+            background = (1.0 - blend) * background + blend * numpy.polyval(
+                numpy.polyfit(
+                    offsets[use],
+                    flux[use],
+                    2,
+                    w=(weights[use] / sq_errors[use]) ** 0.5,
+                ),
+                offsets,
+            )
+        return background
 
     def prior_transform(self, param, sample_entry):
         """
@@ -983,8 +1051,15 @@ class LogLikelihood(TESSTarget):
         )
         return max(sys_err, 1e-10)
 
-    def calc_lc_log_likelihood(  # pylint: disable=too-many-branches
-        self, binary, lc_sys_err, bls_eclipse_only=(), return_residuals=False
+    # pylint: disable-next=too-many-branches,too-many-arguments
+    def calc_lc_log_likelihood(
+        self,
+        binary,
+        lc_sys_err,
+        bls_eclipse_only=(),
+        return_residuals=False,
+        *,
+        exact=False,
     ):
         """
         Return log-likelihood of observing the TESS LCs for given binary.
@@ -1014,6 +1089,10 @@ class LogLikelihood(TESSTarget):
                 the model and LC (e.g. for use in least squares fit). WARNING:
                 the correction term for ``lc_sys_err`` is not included in the
                 residuals.
+
+            exact(bool):    Compute the model at every exposure instead of
+                interpolating it from a grid of orbital phases (see
+                `exact_supersample_step`).
         """
 
         # Reject stars that overlap at periastron (a is in units of the
@@ -1039,7 +1118,7 @@ class LogLikelihood(TESSTarget):
                 continue
             try:
                 model_lc, lc_sq_errors, mask = self.get_model(
-                    binary, header, lightcurve, lc_sys_err
+                    binary, header, lightcurve, lc_sys_err, exact=exact
                 )
             except ValueError as error:
                 self._logger.warning(
@@ -1309,8 +1388,12 @@ class LogLikelihood(TESSTarget):
                         "noerr\n"
                     )
 
-    def __call__(self, mcmc_sample):
-        """Return the log-likelihood of the given MCMC sample."""
+    def __call__(self, mcmc_sample, exact=False):
+        """
+        Return the log-likelihood of the given MCMC sample.
+
+        See `calc_lc_log_likelihood()` for ``exact``.
+        """
 
         sample_params = self.get_sample_params(mcmc_sample)
         self._logger.debug("Sample params: %s", sample_params)
@@ -1334,7 +1417,9 @@ class LogLikelihood(TESSTarget):
 
         result = (
             self.calc_prior_loglikelihood(mcmc_sample)
-            + self.calc_lc_log_likelihood(binary, sample_params.lc_sys)
+            + self.calc_lc_log_likelihood(
+                binary, sample_params.lc_sys, exact=exact
+            )
             + self.calc_sed_log_likelihood(binary, sample_params.sed_sys)
         )
 
