@@ -346,14 +346,22 @@ def stop_slow_fit(state, *, config):
     )
 
 
-def heuristic_start(arguments):
-    """Return the summary of the heuristic start for one seed and w."""
+def heuristic_start(arguments, edge_latent=10.0):
+    """
+    Return the summary of the heuristic start for one seed and w.
+
+    Parameters the heuristics leave at the edge of their prior get latent
+    values of +-``edge_latent`` (see `utils.params_to_sample()`), so the
+    same seed and w always give the same start.
+    """
 
     start_index, seed, omega = arguments
     summary = {"start": start_index, "omega_grid": omega}
     begin = time.time()
     try:
-        sample = params_to_sample(get_heuristic_start(seed, omega), _target)
+        sample = params_to_sample(
+            get_heuristic_start(seed, omega), _target, edge_latent=edge_latent
+        )
     except (AssertionError, ValueError, RuntimeError) as error:
         _logger.warning("Start %d heuristics failed: %s", start_index, error)
         summary["message"] = f"heuristics failed: {error}"

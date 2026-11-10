@@ -24,6 +24,10 @@ class _StopFit(Exception):
     """Raised from inside the residual function to end a fit early."""
 
 
+class _EndSegment(Exception):
+    """Raised from inside the residual function to restart lm (see below)."""
+
+
 def get_lstsq_residuals(log_likelihood, sample, grid_excess_scale=1e-6):
     """
     Return the least squares residuals for a latent sample.
@@ -127,6 +131,7 @@ def default_give_up(
 
 # pylint: disable=too-many-arguments
 # pylint: disable=too-many-locals
+# pylint: disable=too-many-statements
 def fit_least_squares(
     log_likelihood,
     initial_mcmc_sample,
@@ -136,6 +141,8 @@ def fit_least_squares(
     *,
     grid_excess_scale=1e-6,
     give_up=(default_give_up,),
+    restart_evaluations=200,
+    min_restart_gain=0.1,
     **fit_kwargs,
 ):
     """
@@ -146,6 +153,20 @@ def fit_least_squares(
     mass is [Msun] divided by ``grid_excess_scale``, pushes the fit back in. This
     keeps the cost finite and continuous there, instead of infinite, which
     would stop the fit at the edge in all parameters.
+
+    The fit runs in segments: lm (MINPACK) is restarted from the best point
+    so far every ``restart_evaluations`` residual evaluations, and the fit
+    ends once a whole segment (whether it used up its evaluations or ended
+    on lm's own convergence test) lowers the cost by less than
+    ``min_restart_gain``. MINPACK only enlarges its trust region when a step
+    achieves at least 3/4 of the predicted reduction, and only shrinks it
+    below 1/4, so on a mildly nonlinear cost (the ratio steadily ~0.65) the
+    trust region, once shrunk, stays tiny and the fit crawls (TIC 27845677:
+    ~50 per 1000 evaluations; restarting every 200 converged in ~2800). A
+    tiny trust region also makes the ftol test pass far from an optimum,
+    hence the extra segment after lm's own convergence. Each restart costs
+    one evaluation plus a few rejected steps while the fresh trust region
+    shrinks to a workable size.
 
     Args:
         initial_mcmc_sample(array):    Initial guess for the MCMC sample
@@ -169,6 +190,13 @@ def fit_least_squares(
             of the fit (see `default_give_up()`); each returns None to
             continue or the reason to stop. The default never stops; use e.g.
             ``functools.partial(default_give_up, time_limit=3600)`` for limits.
+            The evaluations and time of all segments count.
+
+        restart_evaluations(int):    The residual evaluations (including
+            those for the numerical Jacobian) per segment; see above.
+
+        min_restart_gain(float):    The fit ends once a segment lowers the
+            cost by less than this; see above.
 
     Returns:
         OptimizeResult:
@@ -179,7 +207,9 @@ def fit_least_squares(
             outside the isochrones, `x`, `cost`
             and `fun` are those of the lowest cost evaluated inside them,
             `jac` is None and `message` gives the reason; `status` is -10 for
-            the first two.
+            the first two. If the last segment used up its evaluations, the
+            result is likewise built from the best point, with `status` 5.
+            `nfev` counts all residual evaluations of all segments.
     """
 
     num_params = len(SampleParams._fields)
@@ -225,9 +255,13 @@ def fit_least_squares(
             reason = check(residuals)
             if reason is not None:
                 raise _StopFit(reason)
+        residuals.segment_eval += 1
+        if residuals.segment_eval >= restart_evaluations:
+            raise _EndSegment()
         return result
 
     residuals.num_eval = 0
+    residuals.segment_eval = 0
     residuals.best_cost = numpy.inf
     residuals.best_x = template.copy()
     residuals.best_fun = None
@@ -262,30 +296,63 @@ def fit_least_squares(
     ]:
         if arg not in fit_kwargs:
             fit_kwargs[arg] = default
-    try:
-        result = optimize.least_squares(
-            residuals,
-            template[free],
-            args=(initial_resdiuals.size,),
-            **fit_kwargs,
-        )
-    except _StopFit as stop:
-        _logger.info(
-            "Least squares stopped early after %d residual evaluations: %s",
-            residuals.num_eval,
-            stop,
-        )
-        return optimize.OptimizeResult(
-            x=residuals.best_x,
+    segments = 0
+    while True:
+        segment_start_cost = residuals.best_cost
+        residuals.segment_eval = 0
+        segments += 1
+        try:
+            result = optimize.least_squares(
+                residuals,
+                (residuals.best_x if segments > 1 else template)[free],
+                args=(initial_resdiuals.size,),
+                **fit_kwargs,
+            )
+        except _EndSegment:
+            result = None
+        except _StopFit as stop:
+            _logger.info(
+                "Least squares stopped early after %d residual evaluations: "
+                "%s",
+                residuals.num_eval,
+                stop,
+            )
+            return optimize.OptimizeResult(
+                x=residuals.best_x,
+                cost=residuals.best_cost,
+                fun=residuals.best_fun,
+                jac=None,
+                optimality=numpy.nan,
+                nfev=residuals.num_eval,
+                status=-10,
+                success=False,
+                message=str(stop),
+            )
+        # Written as "not >=" so a nan (no point inside the isochrones yet)
+        # also ends the fit.
+        if not segment_start_cost - residuals.best_cost >= min_restart_gain:
+            break
+    _logger.debug(
+        "Least squares converged after %d segments, %d residual evaluations.",
+        segments,
+        residuals.num_eval,
+    )
+    if result is None:
+        result = optimize.OptimizeResult(
+            x=residuals.best_x[free],
             cost=residuals.best_cost,
             fun=residuals.best_fun,
             jac=None,
             optimality=numpy.nan,
-            nfev=residuals.num_eval,
-            status=-10,
-            success=False,
-            message=str(stop),
+            status=5,
+            success=True,
+            message=(
+                f"The last segment of up to {restart_evaluations} residual "
+                f"evaluations lowered the cost by less than "
+                f"{min_restart_gain:g}."
+            ),
         )
+    result.nfev = residuals.num_eval
     full_x = template.copy()
     full_x[free] = result.x
     result.x = full_x
@@ -307,6 +374,7 @@ def fit_least_squares(
 
 # pylint: enable=too-many-arguments
 # pylint: enable=too-many-locals
+# pylint: enable=too-many-statements
 
 
 def tweak_params(
@@ -545,8 +613,19 @@ def set_logage_fraction(params, logage_fraction, log_likelihood):
     )
 
 
-def params_to_sample(params, log_likelihood, reset_sys_err=False):
-    """Initialize non-optimized parameters and return MCMC sample."""
+def params_to_sample(
+    params, log_likelihood, reset_sys_err=False, edge_latent=None
+):
+    """
+    Initialize non-optimized parameters and return MCMC sample.
+
+    Parameters at or beyond the edge of their prior have infinite latent
+    values. By default they are replaced by random values (the lowest 5% or
+    highest 20% of the prior), which spreads walkers started from the same
+    parameters. With ``edge_latent`` they are set to -``edge_latent`` or
+    +``edge_latent`` instead (an eccentricity at its upper limit to the latent
+    radius ``edge_latent``), so the result is deterministic.
+    """
 
     def get_mcmc_sample(params):
         """Return the MCMC sample corresponding to the given parameters."""
@@ -564,9 +643,14 @@ def params_to_sample(params, log_likelihood, reset_sys_err=False):
     _logger.debug("Converting params to MCMC sample: %s", repr(params))
     if params.ecc >= log_likelihood.max_ecc:
         # Infinite latents, so placed in the top 20% of the range, as the
-        # other parameters are below.
+        # other parameters are below, or at latent radius edge_latent.
         params = params._replace(
-            ecc=log_likelihood.max_ecc * uniform.rvs(loc=0.8, scale=0.2)
+            ecc=log_likelihood.max_ecc
+            * (
+                uniform.rvs(loc=0.8, scale=0.2)
+                if edge_latent is None
+                else -numpy.expm1(-0.5 * edge_latent**2)
+            )
         )
     mcmc_sample = get_mcmc_sample(params)
     non_finite = numpy.logical_not(numpy.isfinite(mcmc_sample))
@@ -578,10 +662,14 @@ def params_to_sample(params, log_likelihood, reset_sys_err=False):
     huge = numpy.logical_and(non_finite, mcmc_sample > 0)
     _logger.debug("Replacing tiny: %s\nhuge: %s", tiny, huge)
 
-    mcmc_sample[tiny] = norm.ppf(uniform.rvs(size=tiny.sum(), scale=0.05))
-    mcmc_sample[huge] = norm.ppf(
-        uniform.rvs(size=huge.sum(), loc=0.8, scale=0.2)
-    )
+    if edge_latent is None:
+        mcmc_sample[tiny] = norm.ppf(uniform.rvs(size=tiny.sum(), scale=0.05))
+        mcmc_sample[huge] = norm.ppf(
+            uniform.rvs(size=huge.sum(), loc=0.8, scale=0.2)
+        )
+    else:
+        mcmc_sample[tiny] = -edge_latent
+        mcmc_sample[huge] = edge_latent
     _logger.debug("Replaced MCMC sample: %s", repr(mcmc_sample))
     if (
         non_finite[SampleParams._fields.index("mtotal")]
