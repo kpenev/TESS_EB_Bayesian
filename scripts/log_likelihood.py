@@ -1,6 +1,7 @@
 """Define the log-likelihood function to use for MCMC."""  # pylint: disable=too-many-lines
 
 import logging
+from contextlib import contextmanager
 from functools import partial
 
 import numpy
@@ -428,6 +429,23 @@ class LogLikelihood(TESSTarget):
 
         return getattr(self._range, param)
 
+    @contextmanager
+    def changed_range(self, param, new_range):
+        """
+        Temporarily use another prior range for one parameter.
+
+        Latent samples created inside the context map to physical values
+        according to the new range; the original range is restored on exit,
+        even if an exception is raised.
+        """
+
+        original = self._range
+        self._range = original._replace(**{param: new_range})
+        try:
+            yield
+        finally:
+            self._range = original
+
     def __init__(  # pylint: disable=too-many-arguments
         self,
         tic_id,
@@ -718,7 +736,7 @@ class LogLikelihood(TESSTarget):
 
     @staticmethod
     def _smooth_step(value):
-        """Return 0 below 0, 1 above 1, 3x^2 - 2x^3 between (continuous slope)."""
+        """Return 0 below 0, 1 above 1, 3x^2 - 2x^3 between (smooth slope)."""
 
         value = numpy.clip(value, 0.0, 1.0)
         return value * value * (3.0 - 2.0 * value)

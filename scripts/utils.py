@@ -132,7 +132,7 @@ def default_give_up(
 # pylint: disable=too-many-arguments
 # pylint: disable=too-many-locals
 # pylint: disable=too-many-statements
-def fit_least_squares(
+def _fit_least_squares(
     log_likelihood,
     initial_mcmc_sample,
     fit_sys_err=True,
@@ -369,6 +369,74 @@ def fit_least_squares(
         result.fun = residuals.best_fun
         result.jac = None
         result.message += " Ended outside the isochrones."
+    return result
+
+
+def fit_least_squares(
+    log_likelihood,
+    initial_mcmc_sample,
+    fit_sys_err=True,
+    fixed=None,
+    progress_interval=300.0,
+    *,
+    min_sed_sys=1e-3,
+    **kwargs,
+):
+    """
+    Find least squares MCMC sample starting from given position.
+
+    Same as `_fit_least_squares()` (see there for the arguments and the
+    result), except that during the fit `sed_sys` has a log-uniform prior
+    range starting at ``min_sed_sys`` [mag] instead of the far lower limit
+    used for sampling. Below about 1e-3 mag `sed_sys` changes the SED
+    variances unnoticeably (the smallest photometric error is 0.01 mag), so
+    the likelihood is flat there, and a fit starting on that plateau (as the
+    heuristic starts do) has no slope to follow: it leaves `sed_sys` there
+    even when the SED needs a systematic error (TIC 27845677: ~60 in
+    log_prob missed). The start's `sed_sys` is converted to the restricted
+    latent (values below ``min_sed_sys`` start at the restricted median) and
+    the result's back to the full one; the prior term of `sed_sys` during
+    the fit is that of the restricted range, and the result's `fun` and
+    `jac` are in the restricted coordinates. With ``min_sed_sys=None``, or
+    if `sed_sys` is not fitted, the full range is used.
+    """
+
+    index = SampleParams._fields.index("sed_sys")
+    if (
+        min_sed_sys is None
+        or not fit_sys_err
+        or (fixed is not None and fixed[index])
+    ):
+        return _fit_least_squares(
+            log_likelihood,
+            initial_mcmc_sample,
+            fit_sys_err,
+            fixed,
+            progress_interval,
+            **kwargs,
+        )
+    low, high = log_likelihood.get_range("sed_sys")
+    start = numpy.array(initial_mcmc_sample, dtype=float)
+    sed_sys = log_likelihood.prior_transform("sed_sys", start[index])
+    with log_likelihood.changed_range(
+        "sed_sys", (max(low, numpy.log10(min_sed_sys)), high)
+    ):
+        start[index] = (
+            log_likelihood.inverse_prior("sed_sys", sed_sys)[1]
+            if sed_sys > min_sed_sys
+            else 0.0
+        )
+        result = _fit_least_squares(
+            log_likelihood,
+            start,
+            fit_sys_err,
+            fixed,
+            progress_interval,
+            **kwargs,
+        )
+        sed_sys = log_likelihood.prior_transform("sed_sys", result.x[index])
+    result.x = numpy.array(result.x)
+    result.x[index] = log_likelihood.inverse_prior("sed_sys", sed_sys)[1]
     return result
 
 
