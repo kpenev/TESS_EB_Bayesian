@@ -102,6 +102,12 @@ def _log_prob(sample):
     return _target(sample)[0]
 
 
+def _exact_log_prob(sample):
+    """Same as `_log_prob()`, but with the light curve computed exactly."""
+
+    return _target(sample, exact=True)[0]
+
+
 def get_physical(sample, param):
     """Return the physical value of one parameter of a latent sample."""
 
@@ -234,13 +240,16 @@ def check_same_solution(originals, copies, pool, tolerance=1e-6):
     Compares the log-probability without the latent unit normal prior density
     (i.e. likelihood plus physical prior): the latent density itself differs
     between copies, since the prior transform stretches differently at each.
+    The light curve model is computed exactly (not interpolated): each star's
+    phase grid is anchored to its own eclipse time, so after a star swap the
+    interpolation error differs slightly (~1e-5) between the copies.
     """
 
     if len(originals) == 0:
         return
 
     def physical_log_prob(samples):
-        return numpy.array(pool.map(_log_prob, samples)) - norm.logpdf(
+        return numpy.array(pool.map(_exact_log_prob, samples)) - norm.logpdf(
             samples
         ).sum(axis=1)
 
