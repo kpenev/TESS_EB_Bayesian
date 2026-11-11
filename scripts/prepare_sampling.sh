@@ -29,6 +29,13 @@
 
 set -eu
 
+# The steps parallelize over processes; threaded BLAS/LAPACK (one thread per
+# core in every process by default) would oversubscribe the CPUs. Values
+# already set in the environment are kept.
+export OPENBLAS_NUM_THREADS=${OPENBLAS_NUM_THREADS:-1}
+export MKL_NUM_THREADS=${MKL_NUM_THREADS:-1}
+export OMP_NUM_THREADS=${OMP_NUM_THREADS:-1}
+
 tic=$1
 output_dir=$2
 samples=$3
