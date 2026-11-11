@@ -13,6 +13,12 @@
 SOURCE_DIR=~/projects/git/TESS_EB_Bayesian/scripts
 export PYTHONPATH=$PYTHONPATH:${SOURCE_DIR}:~/projects/git
 
+# The jobs parallelize over processes; threaded BLAS/LAPACK (one thread per
+# core in every process by default) would oversubscribe the CPUs.
+export OPENBLAS_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export OMP_NUM_THREADS=1
+
 sample() {
     tic=$1 
 

@@ -11,6 +11,12 @@
 #SBATCH --mail-user=kxp174430@utdallas.edu
 #SBATCH --mail-type=all
 
+# The jobs parallelize over processes; threaded BLAS/LAPACK (one thread per
+# core in every process by default) would oversubscribe the CPUs.
+export OPENBLAS_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export OMP_NUM_THREADS=1
+
 render() {
 
     table=$1
