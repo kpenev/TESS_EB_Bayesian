@@ -80,6 +80,23 @@ def calc_eclipse_phase_diff(ecc, w, inc=None):
 # Meant to function as decorator
 # pylint: disable=too-few-public-methods
 # pylint: disable=invalid-name
+def _plain(value):
+    """
+    Return the value with numpy scalars and arrays as Python numbers and lists.
+
+    For printing: dicts and lists of numpy values otherwise print every
+    entry as e.g. ``np.float64(1.5)``.
+    """
+
+    if isinstance(value, dict):
+        return {key: _plain(entry) for key, entry in value.items()}
+    if isinstance(value, (list, tuple, numpy.ndarray)):
+        return [_plain(entry) for entry in value]
+    if isinstance(value, numpy.generic):
+        return value.item()
+    return value
+
+
 class classproperty:
     """Decorator for read-only class properties."""
 
@@ -765,17 +782,61 @@ class BinaryParams(batman.TransitParams):
         # False positive
         # pylint: disable=no-member
         return (
-            f"Binary: Mtot={self.mtotal}, q={self.mratio}, R1={self.rstar}, "
-            f"R2/R1={self.rp}, Teff2/Teff1={self.teff_ratio} Porb={self.per}, "
-            f"a={self.a}, e={self.ecc}, i={self.inc}, w={self.w}, "
-            f"t0={self._t0_both}, t_perpass={self.t0_perpass}, "
-            f"u={self._u_both}, LDmodel={self._limb_dark_both}, "
-            f"Prot={self._prot_both}, LinLDcoef={self._linear_limbdark_both}, "
-            f"GDcoef={self._gravdark_both}, reflect "
-            f"coef={self._reflection_coef_both}, "
-            f"beaming coef={self._beaming_coef_both}, "
-            f"Absolute magnitudes={self.component_absmag}. Out of range: "
-            f"{self.out_of_range}"
+            f"Binary: Mtot={_plain(self.mtotal)}, q={_plain(self.mratio)}, "
+            f"R1={_plain(self.rstar)}, R2/R1={_plain(self.rp)}, "
+            f"Teff2/Teff1={_plain(self.teff_ratio)} Porb={_plain(self.per)}, "
+            f"a={_plain(self.a)}, e={_plain(self.ecc)}, i={_plain(self.inc)}, "
+            f"w={_plain(self.w)}, t0={_plain(self._t0_both)}, "
+            f"t_perpass={_plain(self.t0_perpass)}, "
+            f"u={_plain(self._u_both)}, LDmodel={self._limb_dark_both}, "
+            f"Prot={_plain(self._prot_both)}, "
+            f"LinLDcoef={_plain(self._linear_limbdark_both)}, "
+            f"GDcoef={_plain(self._gravdark_both)}, reflect "
+            f"coef={_plain(self._reflection_coef_both)}, "
+            f"beaming coef={_plain(self._beaming_coef_both)}, "
+            f"Absolute magnitudes={_plain(self.component_absmag)}. Out of "
+            f"range: {self.out_of_range}"
+        )
+        # pylint: enable=no-member
+
+    def summary(self):
+        """
+        Return a short human readable list of the binary's parameters.
+
+        Like `__str__()` without the time of periapsis passage, the limb
+        darkening model and linear coefficients, the gravity darkening, the
+        magnitudes and the out of range list; values to 6 significant figures
+        (the period and eclipse times to 10), per-star values as
+        primary / secondary.
+        """
+
+        def number(value, digits=6):
+            """Return one value (or a list of values) formatted."""
+
+            return ", ".join(
+                f"{entry:.{digits}g}" for entry in numpy.atleast_1d(value)
+            )
+
+        def both(values, digits=6):
+            """Return a per-star value as primary / secondary."""
+
+            return " / ".join(
+                number(values[star], digits)
+                for star in ("primary", "secondary")
+            )
+
+        # False positive
+        # pylint: disable=no-member
+        return (
+            f"Mtot={number(self.mtotal)}, q={number(self.mratio)}, "
+            f"R1={number(self.rstar)}, R2/R1={number(self.rp)}, "
+            f"Teff2/Teff1={number(self.teff_ratio)}, "
+            f"Porb={number(self.per, 10)}, a={number(self.a)}, "
+            f"e={number(self.ecc)}, i={number(self.inc)}, w={number(self.w)}, "
+            f"t0={both(self._t0_both, 10)}, u={both(self._u_both)}, "
+            f"Prot={both(self._prot_both)}, "
+            f"reflection coef={both(self._reflection_coef_both)}, "
+            f"beaming coef={both(self._beaming_coef_both)}"
         )
         # pylint: enable=no-member
 

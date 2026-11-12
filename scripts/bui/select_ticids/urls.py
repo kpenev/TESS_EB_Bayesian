@@ -8,19 +8,23 @@ from .views import (
     replotlc,
     update_bad_sed_threshold,
     apply_likelihood_changes,
+    apply_and_reprepare,
 )
 from .path_util import get_render_dir
 
+# Status values of the TIC tables (0 is unreviewed); see sampling_pipeline.md.
 _states = list(
     enumerate(
         [
             "bad",
-            "continue",
+            "prepare",
             "fix",
+            "sample",
             "changed_likelihood",
             "finished",
+            "prepare_failed",
         ],
-        start=1
+        start=1,
     )
 )
 
@@ -47,6 +51,19 @@ def get_review_urls(mode, table_name, states):
             #    "1 / 3 / span 1 / span 1"
             # ),
         )
+    elif mode == "prepare":
+        # The families (each family's best fit against the data, stacked best
+        # first) on the left, the SED grid search corner plot on the right.
+        plot_dirs = (
+            (
+                get_render_dir(table_name, "prepare_families"),
+                "1 / 1 / span 1 / span 1",
+            ),
+            (
+                get_render_dir(table_name, "prepare_sed"),
+                "1 / 2 / span 1 / span 1",
+            ),
+        )
     return [
         path(
             f"{table_name}/{mode}/{urltail}",
@@ -57,6 +74,7 @@ def get_review_urls(mode, table_name, states):
                 rendered_only=True,
                 states=states,
                 grid={"columns": "1fr 1fr", "rows": "1fr"},
+                default_state="prepare" if mode == "prepare" else "pending",
             ),
             kwargs={"update_rendered": urltail.startswith("update_rendered/")},
             name=urlname,
@@ -87,7 +105,13 @@ urlpatterns = sum(
             "sample_prsa",
             _states,
         )
-        for plot_type in ["starting", "best", "convergence", "sampling"]
+        for plot_type in [
+            "starting",
+            "best",
+            "convergence",
+            "sampling",
+            "prepare",
+        ]
     ),
     get_review_urls(
         "lightcurve",
@@ -117,6 +141,12 @@ urlpatterns = sum(
             "<slug:mode>",
             apply_likelihood_changes,
             name="apply_likelihood_changes",
+        ),
+        path(
+            "apply_and_reprepare/<int:ticid>/<slug:review_table>/"
+            "<slug:mode>",
+            apply_and_reprepare,
+            name="apply_and_reprepare",
         ),
     ],
 )

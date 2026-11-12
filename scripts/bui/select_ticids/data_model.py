@@ -68,6 +68,39 @@ if not inspect(db_engine).has_table(JobGroup.__tablename__):
     JobGroup.__table__.create(db_engine)
 
 
+class PrepareRequest(SelectTICIDBase):  # pylint: disable=too-few-public-methods
+    """
+    A request to redo the sampling preparation of a TIC after a review.
+
+    Recorded by the BUI's "apply and re-prepare"; the machine running the
+    preparation reads the requests, redoes the preparation from
+    ``restart_step`` and clears them (see sampling_pipeline.md).
+    """
+
+    __tablename__ = "prepare_requests"
+
+    tic_id: Mapped[int] = mapped_column(
+        nullable=False, doc="The TIC to prepare again."
+    )
+    select_tic_table: Mapped[str] = mapped_column(
+        nullable=False, doc="The table of TICs the reviewed TIC belongs to."
+    )
+    restart_step: Mapped[str] = mapped_column(
+        nullable=False,
+        doc=(
+            "The first step of prepare_sampling.sh to redo: sed_grid_search "
+            "(SED threshold changed) or sed_seeded_fits (data excluded)."
+        ),
+    )
+    changes: Mapped[str] = mapped_column(
+        nullable=False, doc="What the review changed (human readable)."
+    )
+
+
+if not inspect(db_engine).has_table(PrepareRequest.__tablename__):
+    PrepareRequest.__table__.create(db_engine)
+
+
 def get_ticids(plot_dir):
     """Return the TIC IDs with corresponding plots in the given directory."""
 
@@ -79,10 +112,21 @@ def get_ticids(plot_dir):
 
 
 def set_rendered(RenderedTable, plot_dirs):  # pylint: disable=invalid-name
-    """Update the rendered to match the plots available."""
+    """
+    Update the rendered plots of the given directories' plot types.
+
+    Only the rows of those plot types are replaced; other pages' plot types
+    are left as they are.
+    """
 
     with Session.begin() as db_session:  # pylint: disable=no-member
-        db_session.execute(delete(RenderedTable))
+        db_session.execute(
+            delete(RenderedTable).where(
+                RenderedTable.plot.in_(
+                    [parse_render_dir(plot_dir)[1] for plot_dir in plot_dirs]
+                )
+            )
+        )
 
         for plot_dir in plot_dirs:
             rendered_tics = list(get_ticids(plot_dir))
@@ -166,8 +210,7 @@ def get_ticid_select_tables(
         SelectTable.__table__.create(db_engine)
     else:
         existing_cols = {
-            c["name"]
-            for c in inspect(db_engine).get_columns(tablename)
+            c["name"] for c in inspect(db_engine).get_columns(tablename)
         }
         if "skip_review" not in existing_cols:
             with db_engine.begin() as conn:
@@ -197,15 +240,11 @@ def clear_skip_review(tic_id):
 
     with Session.begin() as db_session:  # pylint: disable=no-member
         review_tables = set(
-            db_session.scalars(
-                select(JobGroup.select_tic_table)
-            ).all()
+            db_session.scalars(select(JobGroup.select_tic_table)).all()
         )
     for tablename in review_tables:
         # pylint: disable=invalid-name
-        SelectTable, _ = get_ticid_select_tables(
-            tablename, must_exist=True
-        )
+        SelectTable, _ = get_ticid_select_tables(tablename, must_exist=True)
         # pylint: enable=invalid-name
         with Session.begin() as db_session:  # pylint: disable=no-member
             db_session.execute(

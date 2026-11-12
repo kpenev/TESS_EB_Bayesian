@@ -22,13 +22,14 @@ from download_lcs import get_available_sectors
 from exclude_data import exclude_data
 from cache_interface import CacheSession, CachedBLS, CachedSED
 
-from .data_model import get_ticid_select_tables
+from .data_model import get_ticid_select_tables, PrepareRequest
 from .path_util import get_render_dir
 from . import plots
 
-
+# Pages whose data controls stage changes until applied with a button
+# (`apply_likelihood_changes()`), instead of applying them at once.
 _SAMPLING_PLOT_MODES = frozenset(
-    {"starting", "best", "convergence", "sampling"}
+    {"starting", "best", "convergence", "sampling", "prepare"}
 )
 
 
@@ -42,14 +43,16 @@ class TICIdSelectorView(View):
     show_skipped = False
     states = [(1, "selected"), (2, "discarded")]
     grid = {"columns": "1fr", "rows": "1fr"}
+    # The list (state slug) shown when the URL names none.
+    default_state = "pending"
 
     @cached_property
     def _state_slug_to_ind(self):
         """Map decision/state slugs to their integer index."""
 
-        return {
-            slugify(label): ind for ind, label in self.states
-        } | {"pending": 0}
+        return {slugify(label): ind for ind, label in self.states} | {
+            "pending": 0
+        }
 
     @cached_property
     def _state_ind_to_slug(self):
@@ -155,6 +158,13 @@ class TICIdSelectorView(View):
                     for plot_type in ["best", "convergence", "starting"]
                 )
             )
+        elif mode == "prepare":
+            match_plot = or_(
+                *(
+                    RenderedTable.plot == plot_type
+                    for plot_type in ["prepare_families", "prepare_sed"]
+                )
+            )
         else:
             match_plot = RenderedTable.plot == mode
         return select_stmt.outerjoin(
@@ -184,12 +194,14 @@ class TICIdSelectorView(View):
         if self.rendered_only:
             select_stmt = select_stmt.where(
                 # pylint: disable=singleton-comparison
-                RenderedTable.id != None
+                RenderedTable.id
+                != None
             )
         if not self.show_skipped:
             select_stmt = select_stmt.where(
                 # pylint: disable=singleton-comparison
-                SelectTICIDs.skip_review == False
+                SelectTICIDs.skip_review
+                == False
             )
         return select_stmt
 
@@ -335,7 +347,7 @@ class TICIdSelectorView(View):
 
         print(f"Select TIC ID view with kwargs: {kwargs}")
         if "sort_state" not in kwargs:
-            kwargs["sort_state"] = "pending"
+            kwargs["sort_state"] = self.default_state
 
         print(f"State slugs: {self._state_ind_to_slug!r}")
         # That's the whole point
@@ -354,25 +366,20 @@ class TICIdSelectorView(View):
         # pylint: disable=no-member
         with Session.begin() as db_session:
             if "displayed_ticid" not in kwargs:
-                sort_state_index = self._state_slug_to_ind[
-                    kwargs["sort_state"]
-                ]
+                sort_state_index = self._state_slug_to_ind[kwargs["sort_state"]]
             else:
                 sort_state_index = db_session.scalar(
                     select(SelectTICIDs.status).filter_by(
                         id=kwargs["displayed_ticid"]
                     )
                 )
-                kwargs["sort_state"] = self._state_ind_to_slug[
-                    sort_state_index
-                ]
+                kwargs["sort_state"] = self._state_ind_to_slug[sort_state_index]
 
             if "decision" in kwargs:
                 assert "displayed_ticid" in kwargs
                 self._apply_decision(db_session, SelectTICIDs, kwargs)
             if "displayed_ticid" not in kwargs or (
-                "decision" in kwargs
-                and kwargs["decision"] != "enable-review"
+                "decision" in kwargs and kwargs["decision"] != "enable-review"
             ):
                 select_ticid = self._filter_reviewable(
                     select(SelectTICIDs.id), SelectTICIDs, Rendered
@@ -477,6 +484,22 @@ def replotlc(_, ticid, review_table):
     )
 
 
+def _get_bad_sed(ticid):
+    """Return the current bad SED threshold and penalty of the given TIC ID."""
+
+    with CacheSession.begin() as cache:  # pylint: disable=no-member
+        cached_sed = cache.get(CachedSED, ticid)
+        return {
+            key: (
+                getattr(cached_sed, key)
+                if cached_sed is not None
+                and getattr(cached_sed, key) is not None
+                else getattr(CachedSED, f"default_{key}")
+            )
+            for key in ("bad_sed_threshold", "bad_sed_penalty")
+        }
+
+
 def _record_bad_sed(ticid, values):
     """Set new bad SED threshold/penalty for the given TIC id."""
 
@@ -523,34 +546,119 @@ def update_bad_sed_threshold(request, ticid, review_table, mode):
     )
 
 
-def apply_likelihood_changes(request, ticid, review_table, mode):
-    """Apply all staged likelihood changes for the given TIC ID."""
+def _apply_pending_changes(request, ticid):
+    """
+    Apply the staged data selection and SED changes of the given TIC ID.
+
+    The SED form submits both fields, filled with the current values, so a
+    staged SED value counts as a change only if it differs from the current
+    one.
+
+    Returns:
+        (str, bool, bool):    A description of what changed, whether the
+            data selection changed, and whether the bad SED threshold or
+            penalty changed.
+    """
 
     pending_changes = request.session.get("pending_changes", {})
     tic_pending = pending_changes.pop(str(ticid), {})
     request.session["pending_changes"] = pending_changes
     request.session.modified = True
 
+    changes = []
     for selection in tic_pending.get("toggles", []):
         excluded = exclude_data[ticid]
         if selection in excluded:
             excluded.remove(selection)
+            changes.append(f"include {selection}")
         else:
             excluded.add(selection)
+            changes.append(f"exclude {selection}")
+    data_changed = bool(changes)
 
-    sed_values = {}
-    if "bad_sed_threshold" in tic_pending:
-        sed_values["bad_sed_threshold"] = float(
-            tic_pending["bad_sed_threshold"]
-        )
-    if "bad_sed_penalty" in tic_pending:
-        sed_values["bad_sed_penalty"] = float(tic_pending["bad_sed_penalty"])
+    current_sed = _get_bad_sed(ticid)
+    sed_values = {
+        key: float(tic_pending[key])
+        for key in current_sed
+        if key in tic_pending and float(tic_pending[key]) != current_sed[key]
+    }
     if sed_values:
         _record_bad_sed(ticid, sed_values)
+        changes.extend(f"{key}={value:g}" for key, value in sed_values.items())
 
+    return ", ".join(changes), data_changed, bool(sed_values)
+
+
+def apply_likelihood_changes(request, ticid, review_table, mode):
+    """
+    Apply the staged changes; sample the TIC with the new likelihood.
+
+    The status becomes changed_likelihood: the TIC is sampled from its
+    current walkers (`mcmc_sampling.py --changed-likelihood`).
+    """
+
+    _apply_pending_changes(request, ticid)
+    # The URL needs a sort_state, but with a TIC given the view continues in
+    # the list of that TIC's status (see `TICIdSelectorView.get()`).
     return redirect(
         f"{review_table}_{mode}_decision",
-        sort_state="continue",
+        sort_state="pending",
         decision="changed_likelihood",
+        displayed_ticid=ticid,
+    )
+
+
+def apply_and_reprepare(request, ticid, review_table, mode):
+    """
+    Apply the staged changes and request the TIC's preparation again.
+
+    The status becomes prepare and the TIC's review images are removed, so
+    it leaves the review list until it is prepared again. A
+    `PrepareRequest` records from which step to redo the preparation: the
+    SED search if the bad SED threshold or penalty changed, else the light
+    curve fits. If the data selection changed, the cached BLS is dropped,
+    so that the new preparation uses a BLS of the data it fits (the prior
+    ranges of the period and eclipse time come from it).
+    """
+
+    changes, data_changed, sed_changed = _apply_pending_changes(request, ticid)
+    plot_types = ("prepare_families", "prepare_sed")
+    for plot_type in plot_types:
+        plot_fname = path.join(
+            get_render_dir(review_table, plot_type), f"tess{ticid}.png"
+        )
+        if path.exists(plot_fname):
+            remove(plot_fname)
+
+    if data_changed:
+        with CacheSession.begin() as cache:  # pylint: disable=no-member
+            cache.execute(delete(CachedBLS).filter_by(tic_id=ticid))
+
+    # pylint: disable=invalid-name
+    _, RenderedTable = get_ticid_select_tables(review_table, must_exist=True)
+    # pylint: enable=invalid-name
+    with Session.begin() as db_session:  # pylint: disable=no-member
+        db_session.execute(
+            delete(RenderedTable).where(
+                RenderedTable.id == ticid,
+                RenderedTable.plot.in_(plot_types),
+            )
+        )
+        db_session.add(
+            PrepareRequest(
+                tic_id=ticid,
+                select_tic_table=review_table,
+                restart_step=(
+                    "sed_grid_search" if sed_changed else "sed_seeded_fits"
+                ),
+                changes=changes or "none",
+            )
+        )
+
+    # See `apply_likelihood_changes()` for sort_state.
+    return redirect(
+        f"{review_table}_{mode}_decision",
+        sort_state="pending",
+        decision="prepare",
         displayed_ticid=ticid,
     )

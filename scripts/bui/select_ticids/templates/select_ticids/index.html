@@ -43,8 +43,14 @@
                 {% if has_pending_changes %}
                 <form method="post" action="{% url 'apply_likelihood_changes' ticid=displayed_ticid review_table=review_table mode=mode %}">
                     {% csrf_token %}
-                    <button type="submit" class="replot">Apply Changes</button>
+                    <button type="submit" class="replot">{% if mode == "prepare" %}Apply and continue{% else %}Apply Changes{% endif %}</button>
                 </form>
+                {% if mode == "prepare" %}
+                <form method="post" action="{% url 'apply_and_reprepare' ticid=displayed_ticid review_table=review_table mode=mode %}">
+                    {% csrf_token %}
+                    <button type="submit" class="replot">Apply and re-prepare</button>
+                </form>
+                {% endif %}
                 {% elif needs_replot %}
                 <a href="{% url 'replotlc' ticid=displayed_ticid review_table=review_table %}"
                     class="replot">

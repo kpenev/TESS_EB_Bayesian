@@ -10,7 +10,10 @@
 # (sed_seeded_fits.py only writes its output at the end, so it restarts from
 # scratch if interrupted). Plots of the SED search and, per family, of its
 # best fit with its initial walkers (plot_init_models.py) are made along the
-# way; a failed plot does not stop the pipeline.
+# way, as PNG; a failed plot does not stop the pipeline. The review images
+# are sed_grid_corner_TIC.png and init_models.png (all families stacked). If
+# a step fails, OUTPUT_DIR/prepare_failed.txt records it (TIC, step, end of
+# its log).
 #
 # Usage:
 #   prepare_sampling.sh TIC OUTPUT_DIR SAMPLES_FNAME [NUM_PARALLEL [NUM_WALKERS]]
@@ -50,6 +53,28 @@ sed_results=${output_dir}/sed_grid_search_${tic}.ecsv
 seeded_results=${output_dir}/sed_seeded_fits_${tic}.ecsv
 families=${output_dir}/families.npy
 
+# If the pipeline stops with an error, the record of the failure (for the
+# review: the system becomes prepare_failed) is written here; a new run
+# starts by removing the record of an earlier one.
+failure_record=${output_dir}/prepare_failed.txt
+rm -f "${failure_record}"
+# The log of the step running (set by run_step), named in the record.
+current_log=
+
+write_failure_record() {
+    {
+        echo "TIC: ${tic}"
+        echo "Step: $(basename "${current_log:-setup}" .log)"
+        echo "Date: $(date --iso-8601=seconds)"
+        echo "Commit: $(git rev-parse --short HEAD 2>/dev/null)"
+        if [ -n "${current_log}" ]; then
+            echo "Last 50 lines of ${current_log}:"
+            tail -n 50 "${current_log}"
+        fi
+    } > "${failure_record}"
+}
+trap '[ $? -eq 0 ] || write_failure_record' EXIT
+
 # run_step OUTPUT LOG COMMAND...: run COMMAND (output to LOG) unless OUTPUT
 # exists; stop the pipeline if it fails.
 run_step() {
@@ -60,6 +85,7 @@ run_step() {
         return 0
     fi
     echo "$(date) Running: $*"
+    current_log=${log}
     if ! "$@" > "${log}" 2>&1; then
         echo "$(date) Failed, see ${log}."
         return 1
@@ -101,7 +127,7 @@ run_step "${samples}" "${output_dir}/initial_walkers.log" \
     --num-parallel "${num_parallel}" \
     ${WALKER_SEED:+--seed "${WALKER_SEED}"}
 
-plot_step "${output_dir}/init_models_0.pdf" \
+plot_step "${output_dir}/init_models.png" \
     "${output_dir}/plot_init_models.log" \
     ${python} -u plot_init_models.py "${tic}" "${samples}" \
     "${output_dir}/init_models"
