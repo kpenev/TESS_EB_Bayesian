@@ -2,7 +2,7 @@
 
 """Interface for dowloading LCs by TIC."""
 
-from os import path
+from os import path, makedirs
 from glob import glob
 import re
 from traceback import print_exc
@@ -10,7 +10,9 @@ from time import sleep
 
 from matplotlib import pyplot
 from astroquery.mast import Observations
-from requests import HTTPError
+from astroquery.exceptions import RemoteServiceError
+from astroquery.exceptions import TimeoutError as AstroqueryTimeoutError
+from requests.exceptions import RequestException
 
 # from astroquery.exceptions import InvalidQueryError
 from astropy.io import fits
@@ -43,10 +45,115 @@ from data_fnames import data_fnames
 #    return lightcurve
 
 
-def _get_downloaded_fits(tic, sector, provenance):
-    """Return a list of the pre-downloaded LCs for the given TIC/sectors."""
+def _retry(
+    function,
+    *args,
+    max_tries=10,
+    first_wait=30.0,
+    max_wait=600.0,
+    retry_on=(
+        RequestException,
+        RemoteServiceError,
+        AstroqueryTimeoutError,
+        ConnectionError,
+        TimeoutError,
+    ),
+    **kwargs,
+):
+    """
+    Return ``function(*args, **kwargs)``, retrying after network errors.
 
-    sector_str = "*" if sector == "all" else f"{sector:04d}"
+    The wait before each retry starts at ``first_wait`` seconds and doubles
+    after every failure, up to ``max_wait``. The error of the last of
+    ``max_tries`` tries is not caught.
+    """
+
+    wait = first_wait
+    for attempt in range(1, max_tries):
+        try:
+            return function(*args, **kwargs)
+        except retry_on:
+            print_exc()
+            print(
+                f"Try {attempt:d}/{max_tries:d} of {function.__name__} "
+                f"failed, retrying in {wait:.0f} s"
+            )
+            sleep(wait)
+            wait = min(2.0 * wait, max_wait)
+    return function(*args, **kwargs)
+
+
+class _IncompleteDownload(ConnectionError):
+    """MAST reported a failed download (a network error for `_retry`)."""
+
+
+def _download_product(product):
+    """
+    Download a single data product and return its local path.
+
+    Completeness is left to astroquery: a transfer that breaks raises an
+    error, and a cached file whose size differs from the size the server
+    reports is downloaded again, so a COMPLETE status means a complete file.
+
+    Args:
+        product(astropy.table.Table):    The product to download: a MAST
+            product list with exactly one row.
+
+    Returns:
+        str:    The local path of the downloaded file.
+
+    Raises:
+        _IncompleteDownload:    if MAST reports a status other than
+            COMPLETE.
+    """
+
+    assert len(product) == 1
+    manifest = Observations.download_products(product)
+    print(f"Download manifest: {manifest!r}")
+    if manifest["Status"][0] != "COMPLETE":
+        raise _IncompleteDownload(
+            f"Downloading {str(product['productFilename'][0])!r} failed: "
+            f"{manifest['Status'][0]}, {manifest['Message'][0]}"
+        )
+    return manifest["Local Path"][0]
+
+
+def _complete_marker_fname(tic, provenance):
+    """Return the file marking that all LCs of a TIC were downloaded."""
+
+    return path.join("mastDownload", "complete", f"{provenance}_{tic:016d}.txt")
+
+
+def _get_downloaded_fits(tic, sector, provenance):
+    """
+    Return a list of the pre-downloaded LCs for the given TIC/sectors.
+
+    For ``sector="all"`` the local files are used only if a complete
+    download was recorded (`_complete_marker_fname`) and all files it lists
+    still exist; the list may then be empty (no LCs of that provenance).
+
+    Returns:
+        [(str, int)] or None:    The FITS filename and sector of each LC, or
+            None if they have to be (re-)downloaded.
+    """
+
+    if sector == "all":
+        marker = _complete_marker_fname(tic, provenance)
+        if not path.exists(marker):
+            return None
+        with open(marker, encoding="ascii") as marker_file:
+            fits_list = [
+                (fits_fname, int(fits_sector))
+                for fits_sector, fits_fname in (
+                    line.split(maxsplit=1)
+                    for line in marker_file.read().splitlines()
+                )
+            ]
+        if all(path.exists(fits_fname) for fits_fname, _ in fits_list):
+            return fits_list
+        return None
+
+    sector_str = f"{sector:04d}"
     sector_tic_fname_part = f"s{sector_str}-{tic:016d}"
 
     if provenance == "QLP":
@@ -131,68 +238,66 @@ def _get_download_objects(tic, sector, provenance, list_sectors_only=False):
 def get_available_sectors(tic, provenance):
     """List what sectors are available for the given TIC ID."""
 
-    fits_list = _get_downloaded_fits(tic, 'all', provenance)
-    if fits_list:
+    fits_list = _get_downloaded_fits(tic, "all", provenance)
+    if fits_list is not None:
         return [entry[1] for entry in fits_list]
 
-    while True:
-        try:
-            return _get_download_objects(tic, 'all', provenance, True)
-        except HTTPError:
-            print_exc()
-            print("Retrying")
-            sleep(60)
+    return _retry(_get_download_objects, tic, "all", provenance, True)
 
 
 def _get_fits_list(tic, sector, provenance):
-    """Return the list of FITS files and sectors matching the given criteria."""
+    """
+    Return the list of FITS files and sectors matching the given criteria.
+
+    Whatever is not available locally is downloaded, retrying every MAST
+    request after network errors (`_retry`). Only the 2-min SPOC light
+    curves are used (not the 20 s ``a_fast`` ones), the same files
+    `_get_downloaded_fits` finds. Once all sectors are downloaded, the list
+    is recorded in `_complete_marker_fname`.
+    """
 
     fits_list = _get_downloaded_fits(tic, sector, provenance)
-    if fits_list:
+    if fits_list is not None:
         return fits_list
 
-    while True:
-        try:
-            fits_list = []
-            for get_object in _get_download_objects(tic, sector, provenance):
-                # False positive
-                # pylint: disable=no-member
-                products = Observations.get_product_list(get_object)
-                # pylint: enable=no-member
+    fits_list = []
+    for get_object in _retry(_get_download_objects, tic, sector, provenance):
+        # False positive
+        # pylint: disable=no-member
+        products = _retry(Observations.get_product_list, get_object)
+        # pylint: enable=no-member
 
-                print("\tFound %d products:" + repr(products))
+        print("\tFound %d products:" + repr(products))
 
-                product_selection = numpy.logical_and(
-                    products["productType"] == "SCIENCE",
-                    products["description"]
-                    == ("Light curves" if provenance == "SPOC" else "FITS"),
-                )
-                if product_selection.sum() == 0:
-                    continue
-                if provenance == "SPOC" and sector != "all":
-                    if product_selection.sum() != 1:
-                        print(
-                            "Ambiguous products:\n"
-                            + repr(products[product_selection])
-                        )
-                    assert product_selection.sum() == 1
-                download = Observations.download_products(
-                    products[product_selection]
-                ).to_pandas()
-                print(f"Download: type={type(download)}: {download!r}")
-                assert len(download["Local Path"]) == 1
-                print(f"Local path: {download['Local Path']}")
-                fits_list.append(
-                    (
-                        download["Local Path"].iloc[0],
-                        get_object["sequence_number"],
-                    )
-                )
-            return fits_list
-        except HTTPError:
-            print_exc()
-            print("Retrying")
-            sleep(60)
+        product_selection = numpy.logical_and(
+            products["productType"] == "SCIENCE",
+            products["description"]
+            == ("Light curves" if provenance == "SPOC" else "FITS"),
+        )
+        if provenance == "SPOC":
+            product_selection = numpy.logical_and(
+                product_selection,
+                [
+                    fname.endswith("-s_lc.fits")
+                    for fname in products["productFilename"]
+                ],
+            )
+        if product_selection.sum() == 0:
+            continue
+        if product_selection.sum() != 1:
+            print("Ambiguous products:\n" + repr(products[product_selection]))
+        assert product_selection.sum() == 1
+        local_path = _retry(_download_product, products[product_selection])
+        print(f"Local path: {local_path}")
+        fits_list.append((local_path, int(get_object["sequence_number"])))
+
+    if sector == "all":
+        marker = _complete_marker_fname(tic, provenance)
+        makedirs(path.dirname(marker), exist_ok=True)
+        with open(marker, "w", encoding="ascii") as marker_file:
+            for fits_fname, fits_sector in fits_list:
+                marker_file.write(f"{fits_sector:d} {fits_fname}\n")
+    return fits_list
 
 
 def get_astroquery(tic, sector, provenance="SPOC", plot=False):
@@ -328,7 +433,7 @@ def match_lightcurves(qlp_lc, spoc_lc, spoc_flux, exposure_shift=0):
     return qlp_lc, binned_spoc_flux, unbinned_spoc_flux
 
 
-#def main():
+# def main():
 #    """Avoid polluting global namespace."""
 #
 #    plot_spoc_qlp_comparison(33419790, 6, (0.99, 1.015))
@@ -387,5 +492,5 @@ def match_lightcurves(qlp_lc, spoc_lc, spoc_flux, exposure_shift=0):
 ##        except InvalidQueryError:
 ##            plot_spoc_qlp_comparison(tic, 15, (0.97, 1.03))
 #
-#if __name__ == "__main__":
+# if __name__ == "__main__":
 #    main()
