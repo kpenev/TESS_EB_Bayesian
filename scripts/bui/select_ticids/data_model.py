@@ -102,13 +102,22 @@ if not inspect(db_engine).has_table(PrepareRequest.__tablename__):
 
 
 def get_ticids(plot_dir):
-    """Return the TIC IDs with corresponding plots in the given directory."""
+    """
+    Return the TIC IDs with corresponding plots in the given directory.
 
-    plot_name_rex = re.compile(r"tess(?P<tic>[0-9]*)\.(?P<ext>[a-zA-Z]+)$")
+    A TIC's plot is ``tess<TIC>.<ext>``, or several numbered ones
+    ``tess<TIC>_<k>.<ext>`` (e.g. one per family); each TIC is returned once.
+    """
+
+    plot_name_rex = re.compile(
+        r"tess(?P<tic>[0-9]+)(_[0-9]+)?\.(?P<ext>[a-zA-Z]+)$"
+    )
+    tics = set()
     for plot_fname in glob(path.join(plot_dir, "*")):
         parsed = plot_name_rex.match(path.basename(plot_fname))
         if parsed and parsed["ext"] in ("png", "jpg", "jpeg", "pdf"):
-            yield int(parsed["tic"])
+            tics.add(int(parsed["tic"]))
+    return tics
 
 
 def set_rendered(RenderedTable, plot_dirs):  # pylint: disable=invalid-name

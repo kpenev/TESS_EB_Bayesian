@@ -12,12 +12,15 @@ walkers as the faint models, over the light curve (full, folded, residuals,
 zoomed eclipses) and the SED.
 
 The plots are PNG (PDFs with tens of thousands of light curve points are slow
-to open). Last, all family plots are stacked best first, each under a header
-line, into one image for the BUI's prepare review page.
+to open), each with a header listing the family's best point, for the BUI's
+prepare review page. They are not stacked into one image: with many families
+that image gets taller than browsers draw (TIC 27006880, 22 families: 214,639
+pixels). Last, a list of the families is written.
 """
 
 from argparse import ArgumentParser, Namespace
 import logging
+from os import path
 
 import matplotlib
 
@@ -54,10 +57,18 @@ def parse_command_line():
     )
     parser.add_argument(
         "output_prefix",
-        help="Family k (best first) is plotted to OUTPUT_PREFIX_k.png (its "
-        "temporary samples file is OUTPUT_PREFIX_k_samples.h5); all family "
-        "plots stacked, each with a header line, go to OUTPUT_PREFIX.png, "
+        help="Family k (best first) is plotted to OUTPUT_PREFIX_k_plot.png "
+        "(its temporary samples file is OUTPUT_PREFIX_k_samples.h5), and with "
+        "a header listing its best point to OUTPUT_PREFIX_k.png; the list of "
+        "families (image, walkers, best log_prob) goes to OUTPUT_PREFIX.txt, "
         "written last.",
+    )
+    parser.add_argument(
+        "--reuse-plots",
+        action="store_true",
+        help="Do not plot again the families whose OUTPUT_PREFIX_k_plot.png "
+        "exists; only redo their headers (seconds instead of minutes per "
+        "family).",
     )
     parser.add_argument(
         "--max-walker-models",
@@ -195,57 +206,33 @@ def _wrap_text(text, font, width):
     return "\n".join(lines)
 
 
-def _layout_headers(headers, font, width, margin):
+def add_header(fname, header, output, *, header_size=30, margin=10):
     """
-    Return the headers wrapped to the image width, and their heights.
-
-    Each height includes ``margin`` above and below the text [pixels].
-    """
-
-    measure = ImageDraw.Draw(Image.new("RGB", (1, 1)))
-    wrapped = [
-        _wrap_text(header, font, width - 2 * margin) for header in headers
-    ]
-    return wrapped, [
-        measure.multiline_textbbox((0, 0), header, font=font)[3] + 2 * margin
-        for header in wrapped
-    ]
-
-
-def stack_family_plots(family_plots, output, *, header_size=30, margin=10):
-    """
-    Stack family plots vertically into one image, each under its header.
+    Write the image in the given file with a header above it.
 
     Args:
-        family_plots([(str, str)]):    The filename of each family's plot and
-            its header text, in the order to stack them (best first). Each
-            header is wrapped to the width of the image.
-        output(str):    The filename of the stacked image (PNG).
-        header_size(int):    The font size of the headers [pixels].
-        margin(int):    The space around each header [pixels].
+        fname(str):    The image (PNG) to add the header to.
+        header(str):    The header text, wrapped to the width of the image.
+        output(str):    The file to write the image with the header to.
+        header_size(int):    The font size of the header [pixels].
+        margin(int):    The space around the header [pixels].
     """
 
-    images = [Image.open(fname).convert("RGB") for fname, _ in family_plots]
-    width = max(image.width for image in images)
+    image = Image.open(fname).convert("RGB")
     font = ImageFont.load_default(size=header_size)
-    headers, header_heights = _layout_headers(
-        [header for _, header in family_plots], font, width, margin
+    header = _wrap_text(header, font, image.width - 2 * margin)
+    header_height = (
+        ImageDraw.Draw(image).multiline_textbbox((0, 0), header, font=font)[3]
+        + 2 * margin
     )
-    stacked = Image.new(
-        "RGB",
-        (width, sum(image.height for image in images) + sum(header_heights)),
-        "white",
+    result = Image.new(
+        "RGB", (image.width, image.height + header_height), "white"
     )
-    draw = ImageDraw.Draw(stacked)
-    top = 0
-    for image, header, header_height in zip(images, headers, header_heights):
-        draw.multiline_text(
-            (margin, top + margin), header, fill="black", font=font
-        )
-        top += header_height
-        stacked.paste(image, (0, top))
-        top += image.height
-    stacked.save(output)
+    ImageDraw.Draw(result).multiline_text(
+        (margin, margin), header, fill="black", font=font
+    )
+    result.paste(image, (0, header_height))
+    result.save(output)
 
 
 def main(config):
@@ -254,7 +241,7 @@ def main(config):
     log_likelihood = LogLikelihood(config.tic_id)
     rng = numpy.random.default_rng(config.seed)
     families = load_families(config.samples)
-    family_plots = []
+    family_list = []
     for family, (best, best_log_prob, walkers, log_prob) in enumerate(families):
         shown = numpy.arange(len(walkers))
         if len(walkers) > config.max_walker_models:
@@ -262,27 +249,31 @@ def main(config):
                 len(walkers), config.max_walker_models, replace=False
             )
         prefix = f"{config.output_prefix}_{family:d}"
-        write_samples_file(
-            prefix + "_samples.h5",
-            config.tic_id,
-            numpy.concatenate([best[None, :], walkers[shown]]),
-            numpy.concatenate([[best_log_prob], log_prob[shown]]),
-            log_likelihood,
-        )
-        plot_models(
-            config.tic_id,
-            prefix + "_samples.h5",
-            len(shown) + 1,
+        if not (config.reuse_plots and path.exists(prefix + "_plot.png")):
+            write_samples_file(
+                prefix + "_samples.h5",
+                config.tic_id,
+                numpy.concatenate([best[None, :], walkers[shown]]),
+                numpy.concatenate([[best_log_prob], log_prob[shown]]),
+                log_likelihood,
+            )
+            plot_models(
+                config.tic_id,
+                prefix + "_samples.h5",
+                len(shown) + 1,
+                prefix + "_plot.png",
+            )
+        add_header(
+            prefix + "_plot.png",
+            f"Family {family:d}: {len(walkers):d} walkers, best log_prob "
+            f"{best_log_prob:.2f} ({families[0][1] - best_log_prob:.2f} "
+            "below family 0)\n"
+            + family_parameters(log_likelihood.get_sample_params(best)),
             prefix + ".png",
         )
-        family_plots.append(
-            (
-                prefix + ".png",
-                f"Family {family:d}: {len(walkers):d} walkers, best log_prob "
-                f"{best_log_prob:.2f} ({families[0][1] - best_log_prob:.2f} "
-                "below family 0)\n"
-                + family_parameters(log_likelihood.get_sample_params(best)),
-            )
+        family_list.append(
+            f"{path.basename(prefix)}.png {len(walkers):d} "
+            f"{float(best_log_prob)!r}"
         )
         _logger.info(
             "Family %d: best point log_prob %s, %d of its %d walkers shown "
@@ -295,8 +286,11 @@ def main(config):
             repr(log_prob.max()),
             prefix,
         )
-    stack_family_plots(family_plots, config.output_prefix + ".png")
-    _logger.info("All families stacked in %s.png", config.output_prefix)
+    # Written last: its existence means all family plots are done.
+    with open(config.output_prefix + ".txt", "w", encoding="ascii") as listf:
+        listf.write("# image walkers best_log_prob\n")
+        listf.write("\n".join(family_list) + "\n")
+    _logger.info("Families listed in %s.txt", config.output_prefix)
 
 
 if __name__ == "__main__":

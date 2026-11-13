@@ -1,6 +1,7 @@
 """The available views for the app allowing the selection of TIC IDs."""
 
 import sys
+from glob import glob
 from os import path, remove
 from base64 import b64encode
 from functools import cached_property
@@ -31,6 +32,25 @@ from . import plots
 _SAMPLING_PLOT_MODES = frozenset(
     {"starting", "best", "convergence", "sampling", "prepare"}
 )
+
+
+def _plot_files(plot_dir, ticid):
+    """
+    Return the given TIC's plots in a render directory, in display order.
+
+    That is ``tess<TIC>.png``, then the numbered ``tess<TIC>_<k>.png`` (e.g.
+    one per family) by increasing ``k``.
+    """
+
+    numbered = {}
+    for fname in glob(path.join(plot_dir, f"tess{ticid}_*.png")):
+        suffix = path.basename(fname)[len(f"tess{ticid}_") : -len(".png")]
+        if suffix.isdigit():
+            numbered[int(suffix)] = fname
+    single = path.join(plot_dir, f"tess{ticid}.png")
+    return ([single] if path.exists(single) else []) + [
+        numbered[k] for k in sorted(numbered)
+    ]
 
 
 class TICIdSelectorView(View):
@@ -328,17 +348,15 @@ class TICIdSelectorView(View):
         context.update(
             self._get_sector_context(displayed_ticid, pending_toggles)
         )
+        # One entry per plot directory, with all of the TIC's images there
+        # (shown one below the other in the directory's grid area).
         for dirname, area in self.plot_dirs:
-            plot_fname = path.join(dirname, f"tess{displayed_ticid}.png")
-            if path.exists(plot_fname):
+            encoded = []
+            for plot_fname in _plot_files(dirname, displayed_ticid):
                 with open(plot_fname, "rb") as plotf:
-                    context["images"].append(
-                        (
-                            dirname,
-                            b64encode(plotf.read()).decode("utf-8"),
-                            area,
-                        )
-                    )
+                    encoded.append(b64encode(plotf.read()).decode("utf-8"))
+            if encoded:
+                context["images"].append((dirname, encoded, area))
 
         return context
 
@@ -624,10 +642,9 @@ def apply_and_reprepare(request, ticid, review_table, mode):
     changes, data_changed, sed_changed = _apply_pending_changes(request, ticid)
     plot_types = ("prepare_families", "prepare_sed")
     for plot_type in plot_types:
-        plot_fname = path.join(
-            get_render_dir(review_table, plot_type), f"tess{ticid}.png"
-        )
-        if path.exists(plot_fname):
+        for plot_fname in _plot_files(
+            get_render_dir(review_table, plot_type), ticid
+        ):
             remove(plot_fname)
 
     if data_changed:

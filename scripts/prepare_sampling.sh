@@ -11,7 +11,8 @@
 # scratch if interrupted). Plots of the SED search and, per family, of its
 # best fit with its initial walkers (plot_init_models.py) are made along the
 # way, as PNG; a failed plot does not stop the pipeline. The review images
-# are sed_grid_corner_TIC.png and init_models.png (all families stacked). If
+# are sed_grid_corner_TIC.png and init_models_k.png (one per family, best
+# first, listed in init_models.txt). If
 # a step fails, OUTPUT_DIR/prepare_failed.txt records it (TIC, step, end of
 # its log).
 #
@@ -127,7 +128,7 @@ run_step "${samples}" "${output_dir}/initial_walkers.log" \
     --num-parallel "${num_parallel}" \
     ${WALKER_SEED:+--seed "${WALKER_SEED}"}
 
-plot_step "${output_dir}/init_models.png" \
+plot_step "${output_dir}/init_models.txt" \
     "${output_dir}/plot_init_models.log" \
     ${python} -u plot_init_models.py "${tic}" "${samples}" \
     "${output_dir}/init_models"
