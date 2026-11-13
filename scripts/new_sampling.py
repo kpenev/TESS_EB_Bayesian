@@ -53,10 +53,11 @@ def parse_command_line():
         "--restrict-status",
         type=int,
         nargs="+",
-        default=None,
-        help="If specified only TIC IDs with status within the given list are "
-        "included in the sampling. If not specified, all positive statuses are "
-        "used.",
+        default=[4, 5],
+        help="Only TIC IDs with status within the given list are included in "
+        "the sampling (default: sample and changed_likelihood, i.e. prepared "
+        "systems approved in the review). mcmc_sampling.py accepts only its "
+        "--continue-status and --changed-likelihood-statuses.",
     )
     parser.add_argument(
         "-d", "--job-description", default="", help="Description of the job."
@@ -65,18 +66,18 @@ def parse_command_line():
     parser.add_argument(
         "--continue-status",
         type=int,
-        default=2,
+        default=4,
         help="The single status value that mcmc_sampling.py should treat as "
-        "'continue'. Passed directly to mcmc_sampling.py.",
+        "'continue' (default: sample). Passed directly to mcmc_sampling.py.",
     )
     parser.add_argument(
         "--changed-likelihood-statuses",
         type=int,
-        default=[],
+        default=[5],
         nargs="+",
         help="The status(es) assigned to the tics for which the likelihood has "
-        "changed since the last sampling run. Passed directly to "
-        "mcmc_sampling.py.",
+        "changed since the last sampling run (default: changed_likelihood). "
+        "Passed directly to mcmc_sampling.py.",
     )
     return parser.parse_args()
 
@@ -181,19 +182,15 @@ def get_pending_tics(
 ):
     """Return ordered list of all TIC IDs for which sampling is pending."""
 
-    ticid_select = select(
-        SelectTICTable.id  # pylint: disable=no-member
-    ).filter_by(job_id=None)
-    if config.restrict_status:
-        ticid_select = ticid_select.where(
+    ticid_select = (
+        select(SelectTICTable.id)  # pylint: disable=no-member
+        .filter_by(job_id=None)
+        .where(
             SelectTICTable.status.in_(  # pylint: disable=no-member
                 config.restrict_status
             )
         )
-    else:
-        ticid_select = ticid_select.where(
-            SelectTICTable.status > 0  # pylint: disable=no-member
-        )
+    )
 
     pending = db_session.scalars(ticid_select).all()
     if config.priority_tic_file:

@@ -118,19 +118,19 @@ def parse_command_line():
     parser.add_argument(
         "--continue-status",
         type=int,
-        default=2,
+        default=4,
         help="The status assigned to the tics for which sampling should "
-        "continue.",
+        "continue (default: sample).",
     )
     parser.add_argument(
         "--changed-likelihood-statuses",
         type=int,
-        default=[],
+        default=[5],
         nargs="+",
         help="The status(es) assigned to the tics for which likelihood has "
-        "changed since the last sampling run. This will cause the sampling to "
-        "restart from the last step of the existing chain, rather than "
-        "continuing.",
+        "changed since the last sampling run (default: changed_likelihood). "
+        "This will cause the sampling to restart from the last step of the "
+        "existing chain, rather than continuing.",
     )
 
     parser.add_argument(

@@ -41,33 +41,26 @@ def parse_command_line():
         "--job-id",
         type=int,
         default=None,
-        help="Allows filling up only a single job in a group."
+        help="Allows filling up only a single job in a group.",
     )
     add_slurm_config(parser)
     parser.add_argument(
         "--continue-status",
         type=int,
-        default=2,
-        help="The single status value that mcmc_sampling.py should treat as "
-        "'continue'. Passed directly to mcmc_sampling.py.",
-    )
-    parser.add_argument(
-        "--continue-statuses",
-        type=int,
-        default=None,
-        nargs="+",
-        help="The status(es) assigned to the tics for which sampling should "
-        "continue. If not specified, all positive status values will be "
-        "continued.",
+        default=4,
+        help="The status of the tics for which sampling should continue "
+        "(default: sample). Passed directly to mcmc_sampling.py, which "
+        "accepts only tics with this status or one of "
+        "--changed-likelihood-statuses.",
     )
     parser.add_argument(
         "--changed-likelihood-statuses",
         type=int,
-        default=[],
+        default=[5],
         nargs="+",
         help="The status(es) assigned to the tics for which the likelihood has "
-        "changed since the last sampling run. Passed directly to "
-        "mcmc_sampling.py.",
+        "changed since the last sampling run (default: changed_likelihood). "
+        "Passed directly to mcmc_sampling.py.",
     )
     parser.add_argument(
         "--submit-jobs",
@@ -121,24 +114,13 @@ def get_pending_tics(
     select_pending = select(SelectTICTable).filter_by(
         job_group=None, job_id=None
     )
-    if (
-        config.continue_statuses is None
-        and config.changed_likelihood_statuses is None
-    ):
-        pending = db_session.scalars(
-            select_pending.where(
-                SelectTICTable.status > 0  # pylint: disable=no-member
+    pending = db_session.scalars(
+        select_pending.where(
+            SelectTICTable.status.in_(  # pylint: disable=no-member
+                [config.continue_status] + config.changed_likelihood_statuses
             )
-        ).all()
-    else:
-        pending = db_session.scalars(
-            select_pending.where(
-                SelectTICTable.status.in_(  # pylint: disable=no-member
-                    (config.continue_statuses or [])
-                    + config.changed_likelihood_statuses
-                )
-            )
-        ).all()
+        )
+    ).all()
 
     if config.priority_tic_file:
         priority_tics = get_priority_tics(config.priority_tic_file)
@@ -193,12 +175,8 @@ def update_job(  # pylint: disable=too-many-arguments
     for entry in job_entries:
         substitution = {"job_id": job_id, "ticid": getattr(entry, "id", None)}
         if entry is not None and (
-            entry.status in config.changed_likelihood_statuses
-            or (config.continue_statuses is None and entry.status > 0)
-            or (
-                config.continue_statuses is not None
-                and entry.status in config.continue_statuses
-            )
+            entry.status == config.continue_status
+            or entry.status in config.changed_likelihood_statuses
         ):
             substitution["extra_cmdline"] = status_extra
         else:
