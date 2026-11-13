@@ -56,14 +56,26 @@ class LogLikelihoodVisualize(LogLikelihood):
                 )
                 pyplot.show()
 
-    def get_eclipse_model(
-        self, binary, header, lightcurve, lc_sys_err, *, exact=False
+    def get_eclipse_model(  # pylint: disable=too-many-arguments
+        self,
+        binary,
+        header,
+        lightcurve,
+        lc_sys_err,
+        *,
+        exact=False,
+        curvature_residuals=None,
     ):
         """Add plotting to the `get_eclipse_model` method."""
 
         try:
             result = super().get_eclipse_model(
-                binary, header, lightcurve, lc_sys_err, exact=exact
+                binary,
+                header,
+                lightcurve,
+                lc_sys_err,
+                exact=exact,
+                curvature_residuals=curvature_residuals,
             )
         except ValueError:
             eclipse_model = self._evaluate_eclipse_model(

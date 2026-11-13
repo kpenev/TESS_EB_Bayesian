@@ -49,6 +49,20 @@ class LogLikelihood(TESSTarget):
     # In get_eclipse_model(), a point's weight in the out-of-eclipse background
     # fit drops smoothly from 1 to 0 as its eclipse depth grows from 0 to this.
     ooe_depth_scale = 1e-5
+    # Estimating the scale of the penalty on the curvature of the eclipse
+    # window backgrounds from out-of-eclipse stretches of the light curves
+    # (`_set_background_curvature_scales()`): runs of points split at gaps
+    # longer than this fraction of the window length (the eclipse windows
+    # themselves, at least a window long, always split them); stretches
+    # covering at least this fraction of the window length, with at least
+    # this many points; at least this many stretches per light curve (else
+    # pooled over the target's light curves; else no penalty).
+    background_curvature_config = {
+        "gap_fraction": 0.25,
+        "min_coverage": 0.95,
+        "min_points": 6,
+        "min_stretches": 10,
+    }
     max_outlier_iterations = 5
     outlier_thresh2 = 25.0
     outlier_bins = 30
@@ -401,6 +415,8 @@ class LogLikelihood(TESSTarget):
                 overwrite_cache = True
 
         self._add_eclipse_flags(pad_duration)
+        if self.get_model == self.get_eclipse_model:
+            self._set_background_curvature_scales()
 
         return overwrite_cache
 
@@ -570,12 +586,23 @@ class LogLikelihood(TESSTarget):
         return {"phase_grid": Binary.default_phase_grid}
 
     @staticmethod
-    def get_full_model(binary, header, lightcurve, lc_sys_err, *, exact=False):
+    def get_full_model(  # pylint: disable=unused-argument,too-many-arguments
+        binary,
+        header,
+        lightcurve,
+        lc_sys_err,
+        *,
+        exact=False,
+        curvature_residuals=None,
+    ):
         """
         Generate model lightcurve and fit its scaling to the data.
 
         The model is interpolated from a grid of orbital phases, or, if
         ``exact``, computed at every exposure (see `exact_supersample_step`).
+        ``curvature_residuals`` is ignored (there are no eclipse window
+        backgrounds; see `get_eclipse_model()`), so both models share one
+        interface.
         """
 
         lc_sq_errors = lightcurve["flux_err"] ** 2 + lc_sys_err**2
@@ -679,8 +706,15 @@ class LogLikelihood(TESSTarget):
             )
         return (eclipse_model[:-2], eclipse_indices)  # Remove BLS check points
 
-    def get_eclipse_model(
-        self, binary, header, lightcurve, lc_sys_err, *, exact=False
+    def get_eclipse_model(  # pylint: disable=too-many-arguments
+        self,
+        binary,
+        header,
+        lightcurve,
+        lc_sys_err,
+        *,
+        exact=False,
+        curvature_residuals=None,
     ):
         """
         Same as `get_full_model()` but ignoring OOE variability.
@@ -689,7 +723,18 @@ class LogLikelihood(TESSTarget):
         related variability in the lightcurve (astrophysical or instrumental).
 
         A second order polynomial is fit to the out-of-eclipse points near each
-        eclipse to estimate the background flux.
+        eclipse to estimate the background flux (`get_ooe_background()`), its
+        curvature penalized with the light curve's scale for that eclipse
+        (``header["background_curvature_scale"]``, if set).
+
+        Args:
+            curvature_residuals(list or None):    If a list, each window's
+                curvature penalty residual (quadratic coefficient of its
+                background over the scale) is appended to it, for the
+                likelihood to include (`calc_lc_log_likelihood()`). Windows
+                without a scale add none.
+
+            Others: see `get_full_model()`.
         """
 
         model_mask = lightcurve["eclipse_flags"] != 0
@@ -725,14 +770,53 @@ class LogLikelihood(TESSTarget):
                 lightcurve = lightcurve[dont_discard]
                 continue
             if not self.skip_ooe_poly:
-                eclipse_model[eclipse_mask] *= self.get_ooe_background(
-                    lightcurve["time"][eclipse_mask],
-                    lightcurve["flux"][eclipse_mask],
-                    eclipse_model[eclipse_mask],
-                    lc_sq_errors[eclipse_mask],
+                eclipse_model[eclipse_mask] *= self._window_background(
+                    header,
+                    eclipse_ind,
+                    (
+                        lightcurve["time"][eclipse_mask],
+                        lightcurve["flux"][eclipse_mask],
+                        eclipse_model[eclipse_mask],
+                        lc_sq_errors[eclipse_mask],
+                    ),
+                    curvature_residuals,
                 )
 
         return eclipse_model, lc_sq_errors, model_mask
+
+    def _window_background(
+        self, header, eclipse_ind, window, curvature_residuals
+    ):
+        """
+        Return the background of one eclipse window (`get_ooe_background()`).
+
+        Args:
+            header(dict):    The light curve's header, with its
+                ``background_curvature_scale`` if set.
+
+            eclipse_ind(int):    The window's eclipse flag: positive for the
+                primary windows, negative for the secondary ones (the order of
+                ``near_eclipse_ranges``).
+
+            window(tuple):    The window's times, flux, eclipse-only model and
+                squared errors.
+
+            curvature_residuals(list or None):    See `get_eclipse_model()`.
+
+        Returns:
+            array:
+                The background at the window's times.
+        """
+
+        curvature_scale = header.get(
+            "background_curvature_scale", (None, None)
+        )[0 if eclipse_ind > 0 else 1]
+        background, curvature = self.get_ooe_background(
+            *window, curvature_scale
+        )
+        if curvature_residuals is not None and curvature_scale is not None:
+            curvature_residuals.append(curvature / curvature_scale)
+        return background
 
     @staticmethod
     def _smooth_step(value):
@@ -741,7 +825,31 @@ class LogLikelihood(TESSTarget):
         value = numpy.clip(value, 0.0, 1.0)
         return value * value * (3.0 - 2.0 * value)
 
-    def get_ooe_background(self, times, flux, eclipse_model, sq_errors):
+    @staticmethod
+    def _fit_quadratic(offsets, values, weights, curvature_scale):
+        """
+        Return the coefficients of a weighted quadratic fit, highest first.
+
+        Minimizes sum((weights * (values - quadratic))^2) + (a /
+        curvature_scale)^2, where a is the quadratic coefficient: a ridge
+        penalty on the curvature only, solved as least squares with one extra
+        row (the same as (X^T W X + L)^-1 X^T W y with L non-zero only for a).
+        With ``curvature_scale`` None, a plain weighted fit.
+        """
+
+        design = numpy.stack(
+            (offsets * offsets, offsets, numpy.ones_like(offsets)), axis=1
+        )
+        design = design * weights[:, None]
+        target = values * weights
+        if curvature_scale is not None:
+            design = numpy.vstack((design, [1.0 / curvature_scale, 0.0, 0.0]))
+            target = numpy.append(target, 0.0)
+        return numpy.linalg.lstsq(design, target, rcond=None)[0]
+
+    def get_ooe_background(
+        self, times, flux, eclipse_model, sq_errors, curvature_scale=None
+    ):
         """
         Return the out-of-eclipse background of one eclipse window.
 
@@ -763,6 +871,15 @@ class LogLikelihood(TESSTarget):
         out-of-eclipse points. Every step is continuous, so the likelihood
         does not jump as points enter or leave the eclipse.
 
+        Both fits penalize the quadratic coefficient a by (a /
+        ``curvature_scale``)^2 (`_fit_quadratic()`), and the caller adds the
+        same term, for the blended background's a, to the likelihood, so a
+        model cannot reshape its eclipses through a strongly curved background
+        (e.g. an eclipse filling its window leaves only the joint fit, which
+        could otherwise absorb any mismatch; `model_issues.md` item 14). The
+        slope is not penalized: brightness drifts are what the background
+        removes, and a complete eclipse has no slope to absorb.
+
         Args:
             times(array):    The times of the window's points.
 
@@ -772,17 +889,19 @@ class LogLikelihood(TESSTarget):
 
             sq_errors(array):    Their squared flux errors.
 
+            curvature_scale(float or None):    The scale of the penalty on
+                the background's quadratic coefficient [per day^2] (see
+                `_set_background_curvature_scales()`); None for no penalty.
+
         Returns:
-            array:
-                The background at ``times``, to multiply the model by.
+            (array, float):
+                The background at ``times``, to multiply the model by, and its
+                quadratic coefficient [per day^2].
         """
 
         offsets = times - 0.5 * (times.min() + times.max())
-        background = numpy.polyval(
-            numpy.polyfit(
-                offsets, flux / eclipse_model, 2, w=1.0 / sq_errors**0.5
-            ),
-            offsets,
+        coefficients = self._fit_quadratic(
+            offsets, flux / eclipse_model, sq_errors**-0.5, curvature_scale
         )
         weights = 1.0 - self._smooth_step(
             (1.0 - eclipse_model) / self.ooe_depth_scale
@@ -792,16 +911,154 @@ class LogLikelihood(TESSTarget):
         )
         if blend > 0:
             use = weights > 0
-            background = (1.0 - blend) * background + blend * numpy.polyval(
-                numpy.polyfit(
+            coefficients = (1.0 - blend) * coefficients + blend * (
+                self._fit_quadratic(
                     offsets[use],
                     flux[use],
-                    2,
-                    w=(weights[use] / sq_errors[use]) ** 0.5,
-                ),
-                offsets,
+                    (weights[use] / sq_errors[use]) ** 0.5,
+                    curvature_scale,
+                )
             )
-        return background
+        return numpy.polyval(coefficients, offsets), coefficients[0]
+
+    def _stretch_bounds(self, times, length):
+        """
+        Yield the index ranges of the stretches `_stretch_curvatures()` fits.
+
+        Args:
+            times(array):    The sorted times of the out-of-eclipse points.
+
+            length(float):    The stretch length [days].
+
+        Yields:
+            (int, int):
+                The first and one past the last index of each stretch
+                spanning at least ``min_coverage`` of the length with at least
+                ``min_points`` points (`background_curvature_config`).
+        """
+
+        config = self.background_curvature_config
+        run_bounds = numpy.concatenate(
+            (
+                [0],
+                numpy.flatnonzero(
+                    numpy.diff(times) > config["gap_fraction"] * length
+                )
+                + 1,
+                [times.size],
+            )
+        )
+        for first, last in zip(run_bounds[:-1], run_bounds[1:]):
+            edges = times[first] + length * numpy.arange(
+                int((times[last - 1] - times[first]) / length) + 1
+            )
+            bounds = numpy.searchsorted(times[first:last], edges) + first
+            for start, end in zip(bounds[:-1], bounds[1:]):
+                if (
+                    end - start >= config["min_points"]
+                    and times[end - 1] - times[start]
+                    >= config["min_coverage"] * length
+                ):
+                    yield start, end
+
+    def _stretch_curvatures(self, lightcurve, length):
+        """
+        Return the quadratic coefficients of out-of-eclipse stretches.
+
+        The good points outside all eclipse windows are split into runs at
+        gaps longer than ``gap_fraction`` of the given length
+        (`background_curvature_config`; shorter gaps, e.g. a few points not
+        good, stay inside a stretch, as they do inside an eclipse window),
+        and each run is cut, from its start, into non-overlapping stretches
+        of the given length. Each stretch
+        spanning at least ``min_coverage`` of the length with at least
+        ``min_points`` points is fit, like an eclipse window's background,
+        with a quadratic in time from its middle, weighted by the flux errors
+        (not ``lc_sys``, which is sampled).
+
+        Args:
+            lightcurve(structured array):    A light curve with eclipse flags.
+
+            length(float):    The stretch length [days].
+
+        Returns:
+            array:
+                The quadratic coefficient of each stretch [per day^2].
+        """
+
+        out_of_eclipse = numpy.logical_and(
+            lightcurve["good"], lightcurve["eclipse_flags"] == 0
+        )
+        times, flux, errors = (
+            numpy.ma.getdata(lightcurve[column][out_of_eclipse]).astype(float)
+            for column in ("time", "flux", "flux_err")
+        )
+        if times.size < self.background_curvature_config["min_points"]:
+            return numpy.array([])
+        curvatures = []
+        for start, end in self._stretch_bounds(times, length):
+            offsets = times[start:end] - 0.5 * (times[start] + times[end - 1])
+            curvatures.append(
+                numpy.polyfit(
+                    offsets, flux[start:end], 2, w=1.0 / errors[start:end]
+                )[0]
+            )
+        return numpy.array(curvatures)
+
+    def _set_background_curvature_scales(self):
+        """
+        Set the curvature penalty scale of each light curve's eclipse windows.
+
+        For the primary and the secondary eclipse window (in the order of
+        ``near_eclipse_ranges``) separately, since they can differ in length:
+        sigma = 1.4826 times the median absolute quadratic coefficient of the
+        light curve's out-of-eclipse stretches of that window's length
+        (`_stretch_curvatures()`), the robust scale of a distribution centred
+        on 0 (neither instrumental drifts nor out-of-eclipse variability
+        sampled over all phases prefers a sign). With fewer than
+        ``min_stretches`` stretches, those of all the target's light curves
+        are pooled; with fewer than that in total, the scale is None (no
+        penalty). Stored in each header as ``background_curvature_scale``,
+        (primary, secondary) [per day^2].
+        """
+
+        min_stretches = self.background_curvature_config["min_stretches"]
+        curvatures = [
+            [
+                self._stretch_curvatures(lightcurve, duration * header["porb"])
+                for _, duration in header["near_eclipse_ranges"]
+            ]
+            for header, lightcurve in self._lcs
+        ]
+        pooled = [
+            numpy.concatenate([per_lc[window] for per_lc in curvatures])
+            for window in range(2)
+        ]
+        for (header, _), per_lc in zip(self._lcs, curvatures):
+            scales = []
+            for window, values in enumerate(per_lc):
+                if values.size < min_stretches:
+                    values = pooled[window]
+                scales.append(
+                    1.4826 * float(numpy.median(numpy.abs(values)))
+                    if values.size >= min_stretches
+                    else None
+                )
+            header["background_curvature_scale"] = tuple(scales)
+            self._logger.info(
+                "Sector %s: background curvature scale (primary, secondary) "
+                "%s from %d, %d out-of-eclipse stretches.",
+                header["sector"],
+                repr(header["background_curvature_scale"]),
+                per_lc[0].size,
+                per_lc[1].size,
+            )
+            if None in scales:
+                self._logger.warning(
+                    "Sector %s: too few out-of-eclipse stretches for a "
+                    "background curvature scale; no curvature penalty.",
+                    header["sector"],
+                )
 
     def prior_transform(self, param, sample_entry):
         """
@@ -1134,9 +1391,16 @@ class LogLikelihood(TESSTarget):
                 ]
             if lightcurve.size < 10:
                 continue
+            # Background curvature penalty residuals (eclipse-only model).
+            curvature_residuals = []
             try:
                 model_lc, lc_sq_errors, mask = self.get_model(
-                    binary, header, lightcurve, lc_sys_err, exact=exact
+                    binary,
+                    header,
+                    lightcurve,
+                    lc_sys_err,
+                    exact=exact,
+                    curvature_residuals=curvature_residuals,
                 )
             except ValueError as error:
                 self._logger.warning(
@@ -1168,11 +1432,12 @@ class LogLikelihood(TESSTarget):
                             ),
                         )
                     )
+                result = numpy.concatenate((result, curvature_residuals))
             else:
                 result -= (
                     (observed_lc - model_lc) ** 2 / lc_sq_errors
                     + numpy.log(lc_sq_errors)
-                ).sum()
+                ).sum() + numpy.square(curvature_residuals).sum()
             self._logger.debug("Log likelihood now: %s", repr(result / 2))
 
         if not numpy.isfinite(result).all():
