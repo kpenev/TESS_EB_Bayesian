@@ -366,7 +366,7 @@ class TESSTarget:
         #    pass
 
         if in_eclipse[0] or in_eclipse[-1]:
-            out_of_eclipse = numpy.argwhere(numpy.logical_not(in_eclipse))
+            out_of_eclipse = numpy.flatnonzero(numpy.logical_not(in_eclipse))
             start = int(out_of_eclipse[0]) if in_eclipse[0] else 0
             end = int(out_of_eclipse[-1]) if in_eclipse[-1] else in_eclipse.size
             return TESSTarget._fit_bls(
