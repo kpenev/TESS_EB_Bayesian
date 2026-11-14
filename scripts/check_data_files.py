@@ -141,7 +141,13 @@ def check_phoebe():
 
 
 def load_cache(fname):
-    """Open the cache read-only and list its tables."""
+    """
+    Open the cache read-only, list its tables, and require data exclusions.
+
+    BLS and SED rows are computed per target when missing, so they may be
+    empty. The data exclusions are set by hand in the BUI and nothing
+    recreates them: without them, excluded data are silently fit.
+    """
 
     with sqlite3.connect(f"file:{fname}?mode=ro", uri=True) as cache:
         counts = {
@@ -149,6 +155,10 @@ def load_cache(fname):
             for table in ("bls", "sed", "exclude_data")
         }
     print(f"         cache rows: {counts}")
+    if counts["exclude_data"] == 0:
+        raise ValueError(
+            "no data exclusions; copy the cache from the BUI machine"
+        )
 
 
 def check_lightcurves():
