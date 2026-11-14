@@ -110,10 +110,30 @@ class TESSTarget:
 
     _logger = logging.getLogger(__name__)
 
-    _bad_mask = 0
-
-    for bad_ind in [1, 2, 3, 4, 5, 6, 8, 10, 13, 15]:
-        _bad_mask |= 1 << (bad_ind - 1)
+    # Quality flag bits of SPOC light curves (bit k has value 2**(k-1)), as
+    # defined in the TESS Science Data Products Description Document and
+    # named in lightkurve's TessQualityFlags:
+    #    1 attitude tweak                  9 discontinuity
+    #    2 safe mode                      10 impulsive outlier
+    #    3 coarse point                   11 cosmic ray in collateral data
+    #    4 Earth point                    12 stray light
+    #    5 Argabrightening event          13 scattered light exclude
+    #    6 reaction wheel desaturation    14 planet search exclude
+    #    7 cosmic ray in optimal aperture 15 bad calibration exclude
+    #    8 manual exclude                 16 insufficient targets for error
+    #                                        correction
+    #
+    # QLP copies the SPOC (later TICA) bits and adds its own poor-quality
+    # flag: bit 13 (value 4096) in the primary mission (QLP Data Product
+    # Description, MAST), bit 31 (2**30) since (tess.mit.edu/qlp-update,
+    # which says bits 16-30 are not used by POC). Recent QLP files also set
+    # bit 30, which neither source defines.
+    #
+    # Any flag set marks a cadence bad (`_format_lc`). In our files up to
+    # sector 98 (2026-11-14) SPOC set only bits 1-6, 8, 10 and 13-16, so this
+    # discards the same cadences as excluding those bits. It is safer than
+    # listing bits: some flagged cadences may be usable (e.g. most of bit
+    # 14's, sectors 1-26), but no flagged cadence enters a fit unchecked.
 
     _tls_power_kwargs = {
         "R_star_min": 0.1,
@@ -190,10 +210,9 @@ class TESSTarget:
             numpy.isfinite(observed_lc[flux_columns[0]]),
             numpy.isfinite(observed_lc[flux_columns[1]]),
         )
-        usable = numpy.logical_and(
-            usable,
-            numpy.logical_not(observed_lc["QUALITY"] & self._bad_mask),
-        )
+        # Any quality flag set marks a cadence bad, for both pipelines (see
+        # the flag bits documented at the top of the class).
+        usable = numpy.logical_and(usable, observed_lc["QUALITY"] == 0)
         if not usable.any():
             self._logger.warning(
                 "TIC %d, sector %d, %s lightcurve has 0/%d usable points.",
@@ -696,8 +715,18 @@ class TESSTarget:
 
         return self._tic_id
 
-    def __init__(self, tic_id):
-        """Download and organize the lightcurves for the given TIC ID."""
+    def __init__(self, tic_id, last_sector=98):
+        """
+        Download and organize the lightcurves for the given TIC ID.
+
+        Args:
+            tic_id:    The TIC ID of the target.
+
+            last_sector:    Sectors after this one are not used, so that the
+                data analyzed stay fixed as TESS keeps observing. The default
+                stops before the QLP timing error (orbits 210-220, from the
+                second half of sector 99; MAST QLP page).
+        """
 
         self._tic_id = tic_id
         lcs = {
@@ -712,7 +741,9 @@ class TESSTarget:
             if provenance in exclude_data.get(tic_id, []):
                 continue
             for sector, (header, observed_lc) in lc_collection.items():
-                if sector in exclude_data.get(tic_id, []):
+                if sector > last_sector or sector in exclude_data.get(
+                    tic_id, []
+                ):
                     continue
                 formatted_lc, formatted_header = self._format_lc(
                     sector, header, provenance, observed_lc
