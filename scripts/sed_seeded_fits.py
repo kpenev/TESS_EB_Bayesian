@@ -178,6 +178,16 @@ def parse_command_line():
         "sharpness.",
     )
     parser.add_argument(
+        "--fixed-sed-sys",
+        type=float,
+        default=None,
+        help="Hold sed_sys at this value [mag] in the least squares fits "
+        "instead of fitting it, so the SED pulls on the fit at full strength "
+        "(a fitted sed_sys at its upper limit flattens the SED term and can "
+        "keep a fit from the compromise between SED and light curve). Use "
+        "e.g. 1e-3, the smallest value the fits otherwise allow.",
+    )
+    parser.add_argument(
         "--num-parallel",
         type=int,
         default=8,
@@ -488,11 +498,21 @@ def fit_start(arguments):
     summary, config = arguments
     start_index = summary["start"]
     sample = summary["heuristic_x"]
+    fixed = None
+    if config["fixed_sed_sys"] is not None:
+        sed_sys_index = SampleParams._fields.index("sed_sys")
+        sample = numpy.array(sample, dtype=float)
+        sample[sed_sys_index] = _target.inverse_prior(
+            "sed_sys", config["fixed_sed_sys"]
+        )[1]
+        fixed = numpy.zeros(sample.size, dtype=bool)
+        fixed[sed_sys_index] = True
     begin = time.time()
     try:
         result = fit_least_squares(
             _target,
             sample,
+            fixed=fixed,
             max_nfev=config["max_nfev"],
             progress_interval=600.0,
             give_up=(
@@ -627,6 +647,7 @@ def main(config):
     kept = cull_starts(summaries, config.cull_distance)
 
     fit_config = {
+        "fixed_sed_sys": config.fixed_sed_sys,
         "max_nfev": config.max_nfev,
         "time_limit": config.time_limit,
         "min_good_fits": config.min_good_fits,

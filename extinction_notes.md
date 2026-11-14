@@ -1,4 +1,4 @@
-# Extinction coefficients: notes for model_issues.md item 5
+# Extinction coefficients: notes for model_issues_resolved.md item 5
 
 All coefficients are extinction per unit Bayestar19 reddening E, defined by
 E(g-r)_PS1 = 0.901 E (Green et al. 2019, Sec. 2.1). Tables per E(B-V)_SFD
