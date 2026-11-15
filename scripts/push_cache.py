@@ -71,7 +71,7 @@ def parse_command_line():
     )
     parser.add_argument(
         "--remote-python",
-        default="python3",
+        default="conda run --no-capture-output -n py314 python3",
         help="The Python command on the host (default: %(default)s).",
     )
     parser.add_argument(
