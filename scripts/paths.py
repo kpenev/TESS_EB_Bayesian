@@ -27,7 +27,12 @@ jktebob = {
     "outlcfname": path.join(results_dir, "tess{tic_id}_jktebob_{mode}.out"),
     "fitlcfname": path.join(results_dir, "tess{tic_id}_jktebob_{mode}.fit"),
 }
-samples = path.join(results_dir, "tess{tic_id:d}_samples.h5")
+# The chains being sampled, and the prepared starting walkers they are copied
+# from when a sampling job is created (new_sampling.py, continue_sampling.py).
+samples = path.join(results_dir, "samples", "tess{tic_id:d}_samples.h5")
+samples_seeded = path.join(
+    results_dir, "samples_seeded", "tess{tic_id:d}_samples.h5"
+)
 release = path.join(results_dir, "release", "tess{tic_id:d}.fits")
 convergence_pickle = path.join(
     results_dir, "archived", "tess{tic_id:d}_archived.pkl"

@@ -2,7 +2,7 @@
 
 """Use templates to make fully funcional slurm files."""
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 
 from command_line_util import (
     identify_hpc,
@@ -10,7 +10,11 @@ from command_line_util import (
     add_slurm_config,
     tic_per_node,
 )
-from new_sampling import get_file_makers, get_priority_tics
+from new_sampling import (
+    copy_seeded_samples,
+    get_file_makers,
+    get_priority_tics,
+)
 
 # False positive
 # pylint: disable=import-error
@@ -131,7 +135,7 @@ def get_pending_tics(
     return pending
 
 
-def update_job(  # pylint: disable=too-many-arguments
+def update_job(  # pylint: disable=too-many-arguments,too-many-locals
     *,
     group_id,
     job_id,
@@ -171,7 +175,7 @@ def update_job(  # pylint: disable=too-many-arguments
         status_extra += " --update-git-hash"
 
     cmd_substitutions = []
-
+    added_tic_ids = []
     for entry in job_entries:
         substitution = {"job_id": job_id, "ticid": getattr(entry, "id", None)}
         if entry is not None and (
@@ -188,7 +192,9 @@ def update_job(  # pylint: disable=too-many-arguments
             replacement.job_id = job_id
             substitution["ticid"] = replacement.id
             substitution["extra_cmdline"] = status_extra
+            added_tic_ids.append(replacement.id)
         cmd_substitutions.append(substitution)
+    copy_seeded_samples(added_tic_ids)
     launcher_cmd = make_file["launcher_cmd"](cmd_substitutions)
     return make_file["slurm"](
         [{"job_id": job_id, "launcher_cmd": launcher_cmd}]

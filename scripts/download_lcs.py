@@ -194,6 +194,30 @@ def _get_downloaded_fits(tic, sector, provenance):
     ]
 
 
+def get_complete_lightcurve_files(tic, provenances=("SPOC", "QLP")):
+    """
+    Return the local files holding all light curves of a TIC, if complete.
+
+    For each provenance: its complete marker (`_complete_marker_fname`) and
+    the light curves it lists, which must all exist (`_get_downloaded_fits`).
+    These are exactly the files a likelihood of the TIC uses without
+    querying MAST. Paths are relative to this directory.
+
+    Returns:
+        [str] or None:    The marker and light-curve filenames, or None if the
+            light curves of any provenance are not all available locally.
+    """
+
+    files = []
+    for provenance in provenances:
+        fits_list = _get_downloaded_fits(tic, "all", provenance)
+        if fits_list is None:
+            return None
+        files.extend(fits_fname for fits_fname, _ in fits_list)
+        files.append(_complete_marker_fname(tic, provenance))
+    return files
+
+
 def _get_download_objects(tic, sector, provenance, list_sectors_only=False):
     """Return a list of the objects to download."""
 

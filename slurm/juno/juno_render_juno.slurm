@@ -33,12 +33,10 @@ render() {
 
     cd ${source_dir}
 
-    conda run -n py311 python3 -u \
+    conda run --no-capture-output -n py314 python3 -u \
         ${source_dir}/bui/select_ticids/plots.py "${plot_mode}" \
-	--limit-to-statuses 2 4 \
+	--limit-to-statuses 4 5 \
 	--limit-to-jobs 5:@@JOBID@@ \
-	--samples-fname-template \
-	/scratch/juno/kxp174430/TESS_EBs/juno/samples/tess{tic_id:d}_samples.h5 \
         --num-parallel 16 \
         --table-name "${table}" \
         --plot-dir ${plot_dir} \

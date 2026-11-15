@@ -1,12 +1,13 @@
 """Create a new group of sampling jobs and fill it."""
 
 import os
+import shutil
 
 from sqlalchemy import update, select
 
 from bui.db_interface import Session
 from bui.select_ticids.data_model import JobGroup, get_ticid_select_tables
-from paths import slurm_fname
+from paths import slurm_fname, samples, samples_seeded
 from command_line_util import (
     create_parser,
     identify_hpc,
@@ -79,6 +80,13 @@ def parse_command_line():
         "changed since the last sampling run (default: changed_likelihood). "
         "Passed directly to mcmc_sampling.py.",
     )
+    parser.add_argument(
+        "--update-git-hash",
+        action="store_true",
+        help="Pass --update-git-hash to mcmc_sampling.py: the samples files "
+        "take the current commit instead of the one they were prepared "
+        "with. Only if the likelihood did not change between the two.",
+    )
     return parser.parse_args()
 
 
@@ -150,6 +158,8 @@ def get_file_makers(group_id, config):
         extra_cmdline += " --changed-likelihood-statuses " + " ".join(
             str(s) for s in config.changed_likelihood_statuses
         )
+    if getattr(config, "update_git_hash", False):
+        extra_cmdline += " --update-git-hash"
     substitutions = {
         "hpc": config.hpc,
         "job_group": group_id,
@@ -200,6 +210,44 @@ def get_pending_tics(
     return pending
 
 
+def copy_seeded_samples(tic_ids):
+    """
+    Start each target's chain from its prepared walkers.
+
+    Copies the samples file written by the preparation (`paths.samples_seeded`)
+    to where sampling reads and extends it (`paths.samples`), leaving the
+    prepared one untouched. Every target is checked before anything is
+    copied.
+
+    Raises:
+        FileNotFoundError:    If a target has no prepared samples file.
+
+        FileExistsError:    If a target already has a chain: it may be being
+            sampled, and is never replaced.
+    """
+
+    copies = [
+        (
+            tic_id,
+            samples_seeded.format(tic_id=tic_id),
+            samples.format(tic_id=tic_id),
+        )
+        for tic_id in tic_ids
+    ]
+    for tic_id, source, destination in copies:
+        if not os.path.exists(source):
+            raise FileNotFoundError(
+                f"No prepared walkers for TIC {tic_id}: {source}"
+            )
+        if os.path.exists(destination):
+            raise FileExistsError(
+                f"TIC {tic_id} already has a chain: {destination}"
+            )
+    for _, source, destination in copies:
+        os.makedirs(os.path.dirname(destination), exist_ok=True)
+        shutil.copy2(source, destination)
+
+
 def create_job(  # pylint: disable=too-many-arguments, too-many-positional-arguments
     group_id,
     job_id,
@@ -210,6 +258,7 @@ def create_job(  # pylint: disable=too-many-arguments, too-many-positional-argum
 ):
     """Create a single job in the given group and return slurm filename."""
 
+    copy_seeded_samples(job_tic_ids)
     db_session.execute(
         update(SelectTICTable),
         [
@@ -245,7 +294,10 @@ def create_job_group(config):
         db_session.flush()
         make_file = get_file_makers(job_group.id, config)
         pending_tics = get_pending_tics(config, SelectTICTable, db_session)
-        assert len(pending_tics) > num_tics * config.num_jobs
+        assert len(pending_tics) >= num_tics * config.num_jobs, (
+            f"Only {len(pending_tics)} TICs pending, "
+            f"{num_tics * config.num_jobs} needed."
+        )
         return [
             create_job(
                 job_group.id,

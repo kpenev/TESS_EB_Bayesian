@@ -56,7 +56,7 @@ def parse_command_line():
     )
     parser.add_argument(
         "--samples-dir",
-        default=path.join(paths.results_dir, "samples_seeded"),
+        default=path.dirname(paths.samples_seeded),
         help="Where to store the samples files (default: %(default)s).",
     )
     return parser.parse_args()
