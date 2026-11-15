@@ -3,7 +3,7 @@
 """Utilities for calculating and predicting broadband magnitudes of EBs."""
 
 import logging
-from time import sleep
+from time import monotonic, sleep
 
 import numpy
 from astroquery.mast import Catalogs
@@ -143,6 +143,63 @@ class GaiaExtinctionCoefficients:
         )
 
 
+def query_gaia(query, *, timeout=600.0, attempts=3, poll_interval=2.0):
+    """
+    Run an asynchronous Gaia archive query, giving up on jobs that hang.
+
+    The archive occasionally leaves a job EXECUTING indefinitely, and
+    astroquery's own wait polls with no time limit. Instead, the job is
+    submitted without waiting, its phase is polled here, and a job not
+    finished within ``timeout`` seconds is abandoned and submitted again
+    (astroquery only aborts jobs that have not started yet).
+
+    Args:
+        query(str):    The ADQL query.
+
+        timeout(float):    Seconds to wait for each job to finish.
+
+        attempts(int):    How many times to submit the job.
+
+        poll_interval(float):    Seconds between checks of the job phase.
+
+    Returns:
+        astropy.table.Table:    The query results.
+
+    Raises:
+        RuntimeError:    If the job ends in a phase other than COMPLETED.
+
+        TimeoutError:    If no attempt finished within ``timeout``.
+    """
+
+    gaia = GaiaClass()
+    for attempt in range(1, attempts + 1):
+        job = gaia.launch_job_async(query, background=True, verbose=True)
+        deadline = monotonic() + timeout
+        while monotonic() < deadline:
+            phase = job.get_phase(update=True).strip().upper()
+            if phase == "COMPLETED":
+                return job.get_results()
+            if phase not in ("PENDING", "QUEUED", "EXECUTING"):
+                raise RuntimeError(
+                    f"Gaia job {job.jobid} ended in phase {phase} for query: "
+                    f"{query!r}"
+                )
+            sleep(poll_interval)
+        _logger.warning(
+            "Gaia job %s not finished after %s s (attempt %d of %d), "
+            "abandoning it: %r",
+            job.jobid,
+            timeout,
+            attempt,
+            attempts,
+            query,
+        )
+    raise TimeoutError(
+        f"Gaia query not finished in {attempts} attempts of {timeout} s: "
+        f"{query!r}"
+    )
+
+
 def get_gaia_distance(gaia_id):
     """
     Return 16-th, 50-th, & 84-th percentiles of the geometric distance.
@@ -153,12 +210,10 @@ def get_gaia_distance(gaia_id):
     not available.
     """
 
-    gaia = GaiaClass()
-    gaia_distance_entry = gaia.launch_job_async(
+    gaia_distance_entry = query_gaia(
         "SELECT r_lo_geo, r_med_geo, r_hi_geo FROM external.gaiaedr3_distance "
-        f"WHERE source_id = {gaia_id};",
-        verbose=True,
-    ).get_results()
+        f"WHERE source_id = {gaia_id};"
+    )
     print("Gaia distance entry: ", gaia_distance_entry)
     if len(gaia_distance_entry) == 0:
         return None
@@ -278,12 +333,10 @@ def get_gaia_photometry(gaia_id, **correction_kwargs):
         for band in ("g", "bp", "rp")
         for quantity in ("mag", "flux", "flux_error")
     ] + ["bp_rp", "phot_bp_rp_excess_factor"]
-    gaia = GaiaClass()
-    gaia_entry = gaia.launch_job_async(
+    gaia_entry = query_gaia(
         f"SELECT {', '.join(gaia_photometry_columns)} "
-        f"FROM gaiadr3.gaia_source WHERE source_id = {gaia_id};",
-        verbose=True,
-    ).get_results()
+        f"FROM gaiadr3.gaia_source WHERE source_id = {gaia_id};"
+    )
     if len(gaia_entry) == 0:
         return None
     return correct_gaia_photometry(
