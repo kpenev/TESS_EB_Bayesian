@@ -154,8 +154,30 @@ def get_rows(session, model):
 
 
 def check_incoming_rows(incoming, tic_ids):
-    """Raise if the incoming cache lacks a bls or sed row of a target."""
+    """
+    Raise if the incoming cache lacks a target's BLS row or SED values.
 
+    A SED row can hold only the bad SED settings, its values blank until the
+    preparation computes them. The values must be there: `LogLikelihood`
+    computes the SED itself (querying the archives) when any shared column
+    is empty or all magnitudes are, and the target would be sampled with
+    another SED than it was prepared with.
+    """
+
+    names = get_column_names(CachedSED)
+    incomplete = sorted(
+        tic_id
+        for tic_id in tic_ids & incoming[CachedSED].keys()
+        for values in [
+            dict(zip(names, next(iter(incoming[CachedSED][tic_id]))))
+        ]
+        if any(values[name] is None for name in CachedSED.shared_columns)
+        or all(values[name] is None for name in CachedSED.band_columns)
+    )
+    if incomplete:
+        raise RuntimeError(
+            f"The incoming cache has no SED values for TIC(s) {incomplete}."
+        )
     for model in (CachedBLS, CachedSED):
         missing = sorted(tic_ids - set(incoming[model]))
         if missing:
