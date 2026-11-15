@@ -425,17 +425,42 @@ class LightCurvePlotter:
         )
 
     def plot_sed(self, tess_target, binaries):
-        """Create a plot of the SED of the target along with model."""
+        """
+        Create a plot of the SED of the target along with model.
+
+        The error bars are the square root of the diagonal of the full SED
+        covariance (photometric, distance, reddening, extinction law and
+        ``sed_sys``) used by the likelihood. It depends on the model (the
+        extinction coefficients follow the component temperatures), so the
+        first plotted model is used; without one, the error bars are the
+        photometric errors only.
+        """
 
         plot_x = numpy.array(
             [self.sed_filters["Gaia"][filter] for filter in ["G", "BP", "RP"]]
             + [self.sed_filters["2MASS"][filter] for filter in ["J", "H", "Ks"]]
             + [self.sed_filters["WISE"][filter] for filter in ["W1", "W2"]]
         )
+        sed_errors = tess_target.sed[1]
+        first_binary = next(
+            (bnry for bnry in binaries or () if bnry != "bls"), None
+        )
+        if first_binary is not None:
+            finite = numpy.isfinite(tess_target.sed[0])
+            sed_errors = numpy.full(finite.shape, numpy.nan)
+            sed_errors[finite] = numpy.sqrt(
+                numpy.diag(
+                    tess_target.get_sed_covariance(
+                        finite,
+                        first_binary.sed_sys_err,
+                        tess_target.get_model_sed(first_binary)[1],
+                    )
+                )
+            )
         pyplot.errorbar(
             plot_x,
             tess_target.sed[0],
-            yerr=tess_target.sed[1],
+            yerr=sed_errors,
             **self.sed_plot_config,
         )
         config_key = (
