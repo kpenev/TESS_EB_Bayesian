@@ -23,6 +23,11 @@
 #   PYTHON       the Python command (default python3), e.g.
 #                "conda run -n py311 python3"
 #   WALKER_SEED  random seed for initial_walkers.py (default: random)
+#   EXCHANGE_DIR if set, the outcome (review images, samples file, the
+#                target's cache rows, any failure record) is copied to
+#                EXCHANGE_DIR/from_prep/TIC by export_prepared.py, whether the
+#                preparation succeeds or fails. Unset (the default), nothing
+#                is exported.
 #
 # Runs from the directory of this script, like mcmc_sampling.py. The
 # intermediate results and plots go to OUTPUT_DIR. The walkers are saved as
@@ -74,7 +79,17 @@ write_failure_record() {
         fi
     } > "${failure_record}"
 }
-trap '[ $? -eq 0 ] || write_failure_record' EXIT
+
+# Copy the outcome to the exchange folder, if EXCHANGE_DIR is set. A failed
+# export only warns: the preparation's own outputs are unaffected.
+export_prepared() {
+    [ -n "${EXCHANGE_DIR:-}" ] || return 0
+    ${python} -u export_prepared.py "${tic}" "${output_dir}" "${samples}" \
+        "${EXCHANGE_DIR}" > "${output_dir}/export_prepared.log" 2>&1 \
+        || echo "$(date) Export failed, see" \
+            "${output_dir}/export_prepared.log."
+}
+trap '[ $? -eq 0 ] || { write_failure_record; export_prepared; }' EXIT
 
 # run_step OUTPUT LOG COMMAND...: run COMMAND (output to LOG) unless OUTPUT
 # exists; stop the pipeline if it fails.
@@ -133,4 +148,5 @@ plot_step "${output_dir}/init_models.txt" \
     ${python} -u plot_init_models.py "${tic}" "${samples}" \
     "${output_dir}/init_models"
 
+export_prepared
 echo "$(date) Done: ${samples}"
