@@ -515,7 +515,7 @@ class BinaryParams(batman.TransitParams):
             self._t0_both["primary"] - self._calc_perpass_eclipse_time_diff()
         )
 
-        print(f"Evolving orbit: {self._evolving_orbit!r}")
+        _logger.debug("Evolving orbit: %r", self._evolving_orbit)
         if not self._evolving_orbit:
             self._fix_evolving_orbit()
 

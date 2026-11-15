@@ -857,9 +857,9 @@ class TESSTarget:
         """
 
         # bls = self._best_fit_bls
-        print(
-            f"Checking if masked BLS is significant based on:\n\t"
-            + "\n\t".join([f"{key}: {value!r}" for key, value in bls.items()])
+        TESSTarget._logger.debug(
+            "Checking if masked BLS is significant based on:\n\t%s",
+            "\n\t".join(f"{key}: {value!r}" for key, value in bls.items()),
         )
         return (
             bls["masked_depth"][0] > 10.0 * bls["masked_depth"][1]
