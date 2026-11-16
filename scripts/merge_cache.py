@@ -36,7 +36,6 @@ from argparse import ArgumentParser
 from collections import Counter
 from datetime import datetime
 import logging
-from os import chdir, path
 import sqlite3
 import sys
 
@@ -44,6 +43,8 @@ from sqlalchemy import create_engine, delete, inspect, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool
 
+from bui.db_interface import Session
+from bui.select_ticids.data_model import get_ticid_select_tables
 import paths
 from cache_interface import (
     CacheSession,
@@ -317,14 +318,6 @@ def warn_assigned(tic_ids, review_table):
     job yet: one that does may be sampled with other rows than it was
     prepared with.
     """
-
-    # The BUI database is opened relative to the working directory.
-    chdir(path.dirname(path.abspath(__file__)))
-    # pylint: disable=import-outside-toplevel
-    from bui.db_interface import Session
-    from bui.select_ticids.data_model import get_ticid_select_tables
-
-    # pylint: enable=import-outside-toplevel
 
     select_table, _ = get_ticid_select_tables(review_table, must_exist=True)
     with Session() as db_session:  # pylint: disable=not-callable

@@ -29,10 +29,13 @@ from glob import glob
 from hashlib import sha256
 import json
 import logging
-from os import chdir, makedirs, path, remove
+from os import makedirs, path, remove
 import shutil
 import sqlite3
 
+from bui.db_interface import Session
+from bui.select_ticids.data_model import get_ticid_select_tables
+from bui.select_ticids.path_util import get_render_dir
 import paths
 
 _logger = logging.getLogger(__name__)
@@ -165,9 +168,6 @@ def merge_cache_rows(rows_fname):
 def update_status(select_table, tic_id, outcome):
     """Set prepare_failed after a failure, or clear it after a success."""
 
-    # pylint: disable=import-outside-toplevel
-    from bui.db_interface import Session
-
     with Session.begin() as db_session:  # pylint: disable=no-member
         entry = db_session.get(select_table, tic_id)
         if entry is None:
@@ -188,14 +188,6 @@ def update_status(select_table, tic_id, outcome):
 
 def main(config):
     """Install every complete target in the exchange folder."""
-
-    # The BUI database is opened relative to the working directory.
-    chdir(path.dirname(path.abspath(__file__)))
-    # pylint: disable=import-outside-toplevel
-    from bui.select_ticids.data_model import get_ticid_select_tables
-    from bui.select_ticids.path_util import get_render_dir
-
-    # pylint: enable=import-outside-toplevel
 
     render_dirs = {
         plot_type: get_render_dir(config.review_table, plot_type)

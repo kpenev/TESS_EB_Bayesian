@@ -30,6 +30,10 @@ import subprocess
 import sys
 from tempfile import TemporaryDirectory
 
+from sqlalchemy import select
+
+from bui.db_interface import Session
+from bui.select_ticids.data_model import get_ticid_select_tables
 from download_lcs import get_complete_lightcurve_files
 from merge_cache import save_copy
 from paths import results_dir, samples_seeded
@@ -58,6 +62,18 @@ def parse_command_line():
         default="sample_prsa",
         help="The BUI table of the reviewed TICs (default: %(default)s).",
     )
+    add_host_arguments(parser)
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Copy the cache to the host, but only check and compare there.",
+    )
+    return parser.parse_args()
+
+
+def add_host_arguments(parser):
+    """Add the options locating the sampling host and its repository."""
+
     parser.add_argument(
         "--host",
         default="kxp174430@juno",
@@ -74,25 +90,10 @@ def parse_command_line():
         default="conda run --no-capture-output -n py314 python3",
         help="The Python command on the host (default: %(default)s).",
     )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Copy the cache to the host, but only check and compare there.",
-    )
-    return parser.parse_args()
 
 
 def get_sample_tic_ids(review_table):
     """Return the TICs with a status to sample in the BUI review table."""
-
-    # The BUI database is opened relative to the working directory.
-    chdir(path.dirname(path.abspath(__file__)))
-    # pylint: disable=import-outside-toplevel
-    from sqlalchemy import select
-    from bui.db_interface import Session
-    from bui.select_ticids.data_model import get_ticid_select_tables
-
-    # pylint: enable=import-outside-toplevel
 
     select_table, _ = get_ticid_select_tables(review_table, must_exist=True)
     with Session() as db_session:  # pylint: disable=not-callable
@@ -179,12 +180,26 @@ def push_files(files, local_root, remote_subdir, config, *, extra_args=()):
         )
 
 
-def main(config):
-    """Send the cache and merge it on the host."""
+def push(config, tic_ids=()):
+    """
+    Send the targets' data to the host and merge their cache rows there.
+
+    Args:
+        config:    The host options (`add_host_arguments()`), ``review_table``
+            and ``dry_run``.
+
+        tic_ids:    The targets to send; by default those with a status to
+            sample in the review table.
+
+    Returns:
+        int:    merge_cache.py's exit status on the host (0 if all compared
+            targets match, 3 if some differ), or 1 if there was nothing to
+            send.
+    """
 
     # The light-curve paths are relative to this directory.
     chdir(path.dirname(path.abspath(__file__)))
-    tic_ids = config.tic_ids or get_sample_tic_ids(config.review_table)
+    tic_ids = tic_ids or get_sample_tic_ids(config.review_table)
     if not tic_ids:
         _logger.error("No targets to send.")
         return 1
@@ -226,6 +241,12 @@ def main(config):
     return subprocess.run(
         ["ssh", config.host, remote_command], check=False
     ).returncode
+
+
+def main(config):
+    """Send the given targets' data, or those to sample."""
+
+    return push(config, config.tic_ids)
 
 
 if __name__ == "__main__":

@@ -1,11 +1,17 @@
 """Connect to the database and provide a session scope for queries."""
 
+from os import path
+
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 from sqlalchemy import create_engine
 from sqlalchemy.pool import NullPool
 
+# The database is in scripts/, whatever the working directory.
+db_fname = path.join(
+    path.dirname(path.dirname(path.abspath(__file__))), "TESS_EBs.db"
+)
 db_engine = create_engine(
-    "sqlite:///TESS_EBs.db?timeout=100&uri=true",
+    f"sqlite:///{db_fname}?timeout=100&uri=true",
     echo=True,
     pool_pre_ping=True,
     pool_recycle=3600,
@@ -18,7 +24,6 @@ Session = sessionmaker(db_engine, expire_on_commit=False)
 # pylint: enable=invalid-name
 
 if __name__ == "__main__":
-    from os import path
     from glob import glob
     from bui.select_ticids.data_model import (
         SelectTICIDBase,
