@@ -154,26 +154,59 @@ def get_rows(session, model):
     return result
 
 
+def has_sed_values(rows, tic_id):
+    """
+    Return whether a cache's SED row of a target holds its values.
+
+    A SED row can hold only the bad SED settings, its values blank until the
+    preparation computes them. `LogLikelihood` computes the SED itself
+    (querying the archives) when any shared column is empty or all
+    magnitudes are.
+
+    Args:
+        rows(dict):    A cache's rows (`get_rows()` of each model).
+
+        tic_id(int):    The target.
+    """
+
+    if tic_id not in rows[CachedSED]:
+        return False
+    values = dict(
+        zip(get_column_names(CachedSED), next(iter(rows[CachedSED][tic_id])))
+    )
+    return not (
+        any(values[name] is None for name in CachedSED.shared_columns)
+        or all(values[name] is None for name in CachedSED.band_columns)
+    )
+
+
+def get_prepared(rows, tic_ids):
+    """
+    Return the targets a cache has prepared rows for.
+
+    That is a BLS row or SED values: a SED row with only the bad SED settings
+    does not count (see `has_sed_values()`).
+    """
+
+    return {
+        tic_id
+        for tic_id in tic_ids
+        if tic_id in rows[CachedBLS] or has_sed_values(rows, tic_id)
+    }
+
+
 def check_incoming_rows(incoming, tic_ids):
     """
     Raise if the incoming cache lacks a target's BLS row or SED values.
 
-    A SED row can hold only the bad SED settings, its values blank until the
-    preparation computes them. The values must be there: `LogLikelihood`
-    computes the SED itself (querying the archives) when any shared column
-    is empty or all magnitudes are, and the target would be sampled with
-    another SED than it was prepared with.
+    The SED values must be there (see `has_sed_values()`): otherwise the
+    target would be sampled with another SED than it was prepared with.
     """
 
-    names = get_column_names(CachedSED)
     incomplete = sorted(
         tic_id
         for tic_id in tic_ids & incoming[CachedSED].keys()
-        for values in [
-            dict(zip(names, next(iter(incoming[CachedSED][tic_id]))))
-        ]
-        if any(values[name] is None for name in CachedSED.shared_columns)
-        or all(values[name] is None for name in CachedSED.band_columns)
+        if not has_sed_values(incoming, tic_id)
     )
     if incomplete:
         raise RuntimeError(
@@ -274,8 +307,14 @@ def report_differing_columns(here_rows, incoming_rows, model, differ):
 
 
 def compare_rows(here, incoming, skip, max_listed):
-    """Report the targets other than ``skip`` whose rows differ."""
+    """
+    Report the targets other than ``skip`` whose rows differ.
 
+    Targets without prepared rows here (no BLS row and no SED values, see
+    `has_sed_values()`) have not been sent here yet, and are not compared.
+    """
+
+    skip = skip | get_not_sent(here, skip)
     any_differ = False
     for model in _models:
         here_rows, incoming_rows = get_compared_rows(here, incoming, model)
@@ -306,7 +345,33 @@ def compare_rows(here, incoming, skip, max_listed):
                 )
         # Targets only in the incoming cache have not been sent here yet.
         any_differ = any_differ or bool(differ or only_here)
+    if any_differ:
+        warn_differ()
     return any_differ
+
+
+def get_not_sent(here, skip):
+    """Return (and report) the targets not sent here yet, except ``skip``."""
+
+    known = here[CachedSED].keys() | here[ExcludeDataTable].keys()
+    not_sent = known - get_prepared(here, known) - skip
+    print(
+        f"{len(not_sent)} targets have no prepared rows here (not sent yet); "
+        "not compared."
+    )
+    return not_sent
+
+
+def warn_differ():
+    """Print a banner that cache rows differ, hard to overlook."""
+
+    banner = "!" * 78
+    print(
+        f"\n{banner}\n!!! CACHE ROWS DIFFER (listed above): a target may be "
+        "sampled with other\n!!! rows than it was prepared with. Nothing was "
+        f"changed for these targets.\n{banner}\n",
+        file=sys.stderr,
+    )
 
 
 def warn_assigned(tic_ids, review_table):
@@ -353,7 +418,7 @@ def main(config):
     with CacheSession() as session:
         here = {model: get_rows(session, model) for model in _models}
     check_incoming_rows(incoming, tic_ids)
-    existing = tic_ids & (here[CachedBLS].keys() | here[CachedSED].keys())
+    existing = get_prepared(here, tic_ids)
     if existing and not config.replace_existing:
         print(
             f"Not replacing {len(existing)} TICs this cache already has "
