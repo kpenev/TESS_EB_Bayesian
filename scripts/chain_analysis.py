@@ -23,7 +23,7 @@ from general_purpose_python_modules.emcee_quantile_convergence import (
 from general_purpose_python_modules.multi_pickle import MultiPickle
 
 from sample_params import SampleParams
-from utils import fit_least_squares
+from utils import fit_least_squares, params_to_sample
 from bui.select_ticids.data_model import clear_skip_review
 
 
@@ -290,7 +290,13 @@ def get_lstsq(backend, log_likelihood, config):
     best_params = backend.get_blobs(discard=config.burn_in, thin=config.thin)[
         best_index
     ]
-    lstsq_result = fit_least_squares(log_likelihood, best_mcmc)
+    # Start from the physical parameters (the blobs), converted to the
+    # current latent coordinates: the chain's own may come from an older
+    # parametrization.
+    lstsq_result = fit_least_squares(
+        log_likelihood,
+        params_to_sample(SampleParams(*best_params), log_likelihood),
+    )
     print(f"Least squares fit result: {lstsq_result!r}")
 
     min_log_prob = log_prob[numpy.isfinite(log_prob)].min()

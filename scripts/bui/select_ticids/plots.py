@@ -150,8 +150,13 @@ def starting(tic_id, fname=None):
     )
 
 
-def best(tic_id, fname=None):
-    """Plot the best fit model on top of the lightcurve and SED."""
+def best(tic_id, fname=None, *, show_lstsq=False):
+    """
+    Plot the best fit model on top of the lightcurve and SED.
+
+    With ``show_lstsq``, the least-squares refinement of the best sample is
+    drawn too, highlighted (see `maximized()`).
+    """
 
     return plot_tic(
         Namespace(
@@ -164,6 +169,7 @@ def best(tic_id, fname=None):
                 " [folded_diff,  folded_diff, sed]]",
             ],
             show_model_with_lc=["top1"],
+            show_lstsq=show_lstsq,
             data_on_top=False,
             samples_fname=samples_fname_template.format(tic_id=tic_id),
             chain_name="mcmc",
@@ -174,6 +180,21 @@ def best(tic_id, fname=None):
         ),
         fname,
     )
+
+
+def maximized(tic_id, fname=None):
+    """
+    Plot the maximum-likelihood model with the best sample, as `best()`.
+
+    The highest log-probability sample of the chain is refined by the
+    least-squares fit (`chain_analysis.get_lstsq()`, starting from its
+    physical parameters, so chains from older parametrizations work too), and
+    the maximized model is drawn highlighted, with the best sample. A
+    maximized model much better than any sample means the chain has not
+    reached the mode; one that still misfits the data, a model problem.
+    """
+
+    return best(tic_id, fname, show_lstsq=True)
 
 
 def convergence(tic_id, fname=None):
@@ -325,7 +346,7 @@ def get_tics_to_render(config):
             ).scalars()
         )[config.start :]
 
-    if config.plot_type in ["starting", "best", "convergence"]:
+    if config.plot_type in ["starting", "best", "maximized", "convergence"]:
         sample_fnames = [
             config.samples_fname_template.format(tic_id=tic_id)
             for tic_id in tic_id_list
