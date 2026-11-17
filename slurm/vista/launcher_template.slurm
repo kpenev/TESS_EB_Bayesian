@@ -21,6 +21,13 @@ export OMP_NUM_THREADS=1
 
 SOURCE_DIR=~/projects/git/TESS_EB_Bayesian/scripts
 
+# Memory mapped copies of the isochrone grids, shared by all processes on a
+# node (see CMDInterpolator). Not removed at the end of the job: a later job on
+# the node reuses them. Listed (first node only) to see what earlier jobs left.
+export ISOCHRONE_BINARY_DIR=/dev/shm/$USER/isochrones
+echo "Isochrone copies on $(hostname) at job start:"
+ls -la --time-style=full-iso $ISOCHRONE_BINARY_DIR 2>&1
+
 cd $SOURCE_DIR
 python3 -c \
     'import pylauncher; pylauncher.ClassicLauncher("@@LAUNCHER_CMD@@", cores=@@NUM_PARALLEL@@, debug="host+job")'

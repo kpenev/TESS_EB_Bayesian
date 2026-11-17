@@ -16,7 +16,7 @@ from general_purpose_python_modules.kepler_angles import (
 from general_purpose_python_modules.cmd_utils import CMDInterpolator
 
 from gravity_darkening import GravDarkInterpolator
-from paths import cmd_data_fname
+from paths import cmd_data_fname, isochrone_binary_dir
 
 _logger = logging.getLogger(__name__)
 
@@ -123,13 +123,20 @@ class BinaryParams(batman.TransitParams):
         if hasattr(BinaryParams, "_cmd_interpolators"):
             return
         cls._cmd_interpolators = tuple(
-            (photsys, CMDInterpolator(cmd_data_fname.format(photsys=photsys)))
+            (
+                photsys,
+                CMDInterpolator(
+                    cmd_data_fname.format(photsys=photsys),
+                    binary_dir=isochrone_binary_dir,
+                ),
+            )
             for photsys in ["gaiaEDR3", "2mass_spitzer_wise"]
         )
         # Kept separate from the SED interpolators above: only used for the
         # TESS-band flux ratio of the two stars.
         cls._tess_interpolator = CMDInterpolator(
-            cmd_data_fname.format(photsys="tess_2mass")
+            cmd_data_fname.format(photsys="tess_2mass"),
+            binary_dir=isochrone_binary_dir,
         )
         cls._gravdark_interp = GravDarkInterpolator()
 

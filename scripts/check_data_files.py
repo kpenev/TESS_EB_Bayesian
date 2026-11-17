@@ -68,7 +68,7 @@ def load_isochrones(fname):
     # pylint: disable=import-outside-toplevel
     from general_purpose_python_modules.cmd_utils import CMDInterpolator
 
-    CMDInterpolator(fname)
+    CMDInterpolator(fname, binary_dir=paths.isochrone_binary_dir)
 
 
 def load_gravity_darkening(_):

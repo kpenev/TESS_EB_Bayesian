@@ -1,6 +1,9 @@
 *.dat
 *.in
 *.ssv
+*.ssv.grid.npy
+*.ssv.grid.json
+*.ssv.grid.lock
 *.fits
 *.csv
 Green_et_al_2019_reddening
