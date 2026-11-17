@@ -55,6 +55,7 @@ from sqlalchemy.pool import NullPool
 
 from bui.db_interface import Session, db_fname
 from bui.select_ticids.data_model import JobGroup, get_ticid_select_tables
+from paths import cache_db
 from push_cache import add_host_arguments, push
 
 _logger = logging.getLogger(__name__)
@@ -102,6 +103,13 @@ def parse_command_line():
         action="store_true",
         help="Show what would change (conflicts resolved as this machine's), "
         "without asking or changing anything.",
+    )
+    parser.add_argument(
+        "--exchange-dir",
+        default=os.environ.get("EXCHANGE_DIR"),
+        help="The folder shared with the preparation machine; snapshots of "
+        "this machine's databases go to its to_prep/ (default: the "
+        "EXCHANGE_DIR environment variable, %(default)s).",
     )
     parser.add_argument(
         "--apply-status-changes",
@@ -460,6 +468,26 @@ def read_both_states(config):
         )
 
 
+def export_to_prep(exchange_dir):
+    """
+    Put snapshots of this machine's databases in the exchange folder.
+
+    The preparation machine reads from them what to prepare (targets with
+    status prepare), the re-preparation requests, and the requested targets'
+    exclusions and bad SED settings (prepare_pending.py). Each snapshot is
+    written under Syncthing's temporary-file pattern, which it does not
+    synchronize, and then renamed, so it is never received half written.
+    """
+
+    destination = path.join(exchange_dir, "to_prep")
+    os.makedirs(destination, exist_ok=True)
+    for source in (db_fname, cache_db):
+        fname = path.basename(source)
+        temp_fname = path.join(destination, f".syncthing.{fname}.tmp")
+        save_copy(source, temp_fname)
+        os.replace(temp_fname, path.join(destination, fname))
+
+
 def push_data(config):
     """
     Push the data of the targets to sample, before any status reaches the
@@ -494,9 +522,22 @@ def push_data(config):
 
 
 def sync(config):
-    """Push the targets' data, then merge both machines' databases."""
+    """
+    Export snapshots for the preparation machine, push the targets' data to
+    the sampling host, then merge both machines' databases.
+    """
 
     base = read_baseline(config)
+    if config.dry_run:
+        pass
+    elif config.exchange_dir:
+        export_to_prep(config.exchange_dir)
+    else:
+        print(
+            "WARNING: no exchange folder (--exchange-dir or EXCHANGE_DIR): "
+            "nothing exported for the preparation machine.",
+            file=sys.stderr,
+        )
     if not push_data(config):
         return 1
     host_state, here_state, host_name = read_both_states(config)
