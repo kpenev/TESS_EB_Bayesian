@@ -18,13 +18,14 @@ from detrending import (
 )
 from extinction_correction import Green19Correction, GaiaExtinctionCoefficients
 from binary import Binary
+from binary_parameters import BinaryParams
 from cache_interface import CacheSession, CachedSED, CachedBLS
 from sample_params import SampleParams
 from exclude_data import exclude_data
 from catalog_interface import get_eb_info
 
 
-class LogLikelihood(TESSTarget):
+class LogLikelihood(TESSTarget):  # pylint: disable=too-many-instance-attributes
     """Class for calculating the log-likelihood function for a given EB."""
 
     _logger = logging.getLogger(__name__)
@@ -470,9 +471,19 @@ class LogLikelihood(TESSTarget):
         ignore_extinction_flags=True,
         save_detrending=False,
         pad_duration=0.4,
+        isochrone_interpolation=BinaryParams.default_isochrone_interpolation,
     ):
-        """Prepare to evaluate the log-likelihood for the given TIC ID."""
+        """
+        Prepare to evaluate the log-likelihood for the given TIC ID.
 
+        ``isochrone_interpolation`` ("linear" or "pchip") is applied to the
+        whole process (`BinaryParams.set_isochrone_interpolation()`), here and
+        when the likelihood is unpickled. For an existing samples file, use the
+        file's (`mcmc_sampling.get_isochrone_interpolation()`).
+        """
+
+        self.isochrone_interpolation = isochrone_interpolation
+        BinaryParams.set_isochrone_interpolation(isochrone_interpolation)
         super().__init__(tic_id)
         overwrite_cache = [item.upper() for item in overwrite_cache]
 
@@ -1671,6 +1682,17 @@ class LogLikelihood(TESSTarget):
                         "noerr\n"
                     )
 
+    def __setstate__(self, state):
+        """
+        Restore a pickled likelihood, with its isochrone interpolation.
+
+        Worker processes (forkserver) receive the likelihood by pickling and
+        start with the default interpolation, so it is applied here.
+        """
+
+        self.__dict__.update(state)
+        BinaryParams.set_isochrone_interpolation(self.isochrone_interpolation)
+
     def __call__(self, mcmc_sample, exact=False):
         """
         Return the log-likelihood of the given MCMC sample.
@@ -1678,6 +1700,17 @@ class LogLikelihood(TESSTarget):
         See `calc_lc_log_likelihood()` for ``exact``.
         """
 
+        if (
+            BinaryParams.get_isochrone_interpolation()
+            != self.isochrone_interpolation
+        ):
+            raise RuntimeError(
+                f"This likelihood uses {self.isochrone_interpolation!r} "
+                "isochrone interpolation, but the process was switched to "
+                f"{BinaryParams.get_isochrone_interpolation()!r} (by another "
+                "likelihood?). Apply it again with "
+                "BinaryParams.set_isochrone_interpolation() first."
+            )
         sample_params = self.get_sample_params(mcmc_sample)
         self._logger.debug("Sample params: %s", sample_params)
         try:

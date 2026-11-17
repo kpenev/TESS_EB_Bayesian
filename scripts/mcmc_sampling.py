@@ -31,6 +31,7 @@ from bui.select_ticids.data_model import JobGroup, get_ticid_select_tables
 from utils import lmfit_and_tweak, params_to_sample
 from hacked_emcee_hdf5_backend import HDFBackend
 from log_likelihood import SampleParams, LogLikelihood
+from binary_parameters import BinaryParams
 from log_likelihood_priors import LogLikelihoodPriorsOnly
 from paths import results_dir, samples as samples_fname_pattern
 from find_starting_positions import (
@@ -47,6 +48,27 @@ default_logging_format = (
     "%(levelname)s %(asctime)s %(name)s: %(message)s | "
     "%(pathname)s.%(funcName)s:%(lineno)d"
 )
+
+
+def get_isochrone_interpolation(samples_fname=None):
+    """
+    Return the isochrone interpolation of a likelihood for a samples file.
+
+    Args:
+        samples_fname(str or None):    The samples file the likelihood is for,
+            or None if there is none (e.g. a new preparation).
+
+    Returns:
+        str:    The file's IsochroneInterpolation attribute; "linear" if the
+            file has none (it predates the setting); the current default
+            (`BinaryParams.default_isochrone_interpolation`) without a file.
+    """
+
+    if samples_fname is None:
+        return BinaryParams.default_isochrone_interpolation
+    with h5py.File(samples_fname, "r") as samples_file:
+        method = samples_file.attrs.get("IsochroneInterpolation", "linear")
+    return method.decode() if isinstance(method, bytes) else method
 
 
 def parse_command_line():

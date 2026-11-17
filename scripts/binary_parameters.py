@@ -14,6 +14,9 @@ from general_purpose_python_modules.kepler_angles import (
     E_to_M,
 )
 from general_purpose_python_modules.cmd_utils import CMDInterpolator
+from general_purpose_python_modules.grid_tracks_interpolate import (
+    interpolation_methods,
+)
 
 from gravity_darkening import GravDarkInterpolator
 from paths import cmd_data_fname, isochrone_binary_dir
@@ -116,6 +119,39 @@ class classproperty:
 class BinaryParams(batman.TransitParams):
     """Extend the batman parameters with everything needed by model."""
 
+    # The isochrone interpolation ("linear" or "pchip", see
+    # grid_tracks_interpolate()) used where nothing chooses one, e.g. new
+    # preparations (TEC-103).
+    default_isochrone_interpolation = "linear"
+    _isochrone_interpolation = default_isochrone_interpolation
+
+    @classmethod
+    def set_isochrone_interpolation(cls, method):
+        """
+        Set the isochrone interpolation for every binary in this process.
+
+        Applies to the interpolators whether or not they are built yet. A
+        process-wide setting because the interpolators are built once per
+        process.
+        """
+
+        if method not in interpolation_methods:
+            raise ValueError(
+                f"Unknown isochrone interpolation {method!r}, expected one of "
+                f"{interpolation_methods}"
+            )
+        BinaryParams._isochrone_interpolation = method
+        if hasattr(BinaryParams, "_cmd_interpolators"):
+            for _, interpolator in BinaryParams._cmd_interpolators:
+                interpolator.method = method
+            BinaryParams._tess_interpolator.method = method
+
+    @classmethod
+    def get_isochrone_interpolation(cls):
+        """Return the isochrone interpolation of this process."""
+
+        return BinaryParams._isochrone_interpolation
+
     @classmethod
     def prepare_class(cls):
         """Prepare the class for use."""
@@ -127,6 +163,7 @@ class BinaryParams(batman.TransitParams):
                 photsys,
                 CMDInterpolator(
                     cmd_data_fname.format(photsys=photsys),
+                    method=BinaryParams._isochrone_interpolation,
                     binary_dir=isochrone_binary_dir,
                 ),
             )
@@ -136,6 +173,7 @@ class BinaryParams(batman.TransitParams):
         # TESS-band flux ratio of the two stars.
         cls._tess_interpolator = CMDInterpolator(
             cmd_data_fname.format(photsys="tess_2mass"),
+            method=BinaryParams._isochrone_interpolation,
             binary_dir=isochrone_binary_dir,
         )
         cls._gravdark_interp = GravDarkInterpolator()
