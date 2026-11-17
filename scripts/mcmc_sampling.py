@@ -775,9 +775,15 @@ def main(config):
     backend, final_run = get_backend(samples_fname, config)
     if config.force_restart:
         final_run = False
+    # The samples file exists by now (get_backend() records the default
+    # interpolation in a new one), so its interpolation is always defined.
     log_likelihood = (
         LogLikelihoodPriorsOnly if config.priors_only else LogLikelihood
-    )(config.tic_id, overwrite_cache=config.overwrite_cache)
+    )(
+        config.tic_id,
+        overwrite_cache=config.overwrite_cache,
+        isochrone_interpolation=get_isochrone_interpolation(samples_fname),
+    )
     if log_likelihood.sed_recomputed:
         config.changed_likelihood = True
 

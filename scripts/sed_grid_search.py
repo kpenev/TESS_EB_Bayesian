@@ -28,6 +28,10 @@ from astropy.table import Table
 import numpy
 from scipy import optimize
 
+from general_purpose_python_modules.grid_tracks_interpolate import (
+    interpolation_methods,
+)
+
 from command_line_util import create_parser
 from binary_parameters import BinaryParams
 from log_likelihood import LogLikelihood
@@ -90,6 +94,13 @@ def parse_command_line():
         "--output",
         default="sed_grid_search_{tic_id:d}.ecsv",
         help="Where to save all fit results.",
+    )
+    parser.add_argument(
+        "--isochrone-interpolation",
+        choices=interpolation_methods,
+        default=BinaryParams.default_isochrone_interpolation,
+        help="The isochrone interpolation of the preparation. Recorded in the "
+        "output, and from there used by every later step.",
     )
     return parser.parse_args()
 
@@ -341,7 +352,9 @@ def main(config):
     """Run the grid search and report the distinct minima."""
 
     global _target  # pylint: disable=global-statement
-    _target = LogLikelihood(config.tic_id)
+    _target = LogLikelihood(
+        config.tic_id, isochrone_interpolation=config.isochrone_interpolation
+    )
     # pylint: disable=protected-access
     threshold, _, sharpness = _target._sed[2]
     _target._sed = (
@@ -379,6 +392,7 @@ def main(config):
             ]
         }
     )
+    output.meta["IsochroneInterpolation"] = config.isochrone_interpolation
     output.write(config.output.format(tic_id=config.tic_id), overwrite=True)
 
     minima = distinct(results)

@@ -62,7 +62,9 @@ def parse_command_line():
         "from the matching _x.npy file.",
     )
     parser.add_argument(
-        "output", help="Where to save the best point of each family (.npy)."
+        "output",
+        help="Where to save the best point of each family (.npz: ``points`` "
+        "and the preparation's ``isochrone_interpolation``).",
     )
     parser.add_argument(
         "--keep-delta",
@@ -394,7 +396,18 @@ def main(config):
     """Group the end points and save the best of each family."""
 
     global _target  # pylint: disable=global-statement
-    _target = LogLikelihood(config.tic_id)
+    if not config.output.endswith(".npz"):
+        raise ValueError(
+            f"The output must be a .npz file, got {config.output!r}."
+        )
+    # The preparation's interpolation, carried by sed_seeded_fits.py's results
+    # ("linear" for results that predate recording it).
+    _target = LogLikelihood(
+        config.tic_id,
+        isochrone_interpolation=Table.read(config.results).meta.get(
+            "IsochroneInterpolation", "linear"
+        ),
+    )
     with get_context("fork").Pool(config.num_parallel) as pool:
         points, log_prob = get_candidates(config, pool)
         labels = group(points, log_prob, config, pool)
@@ -404,7 +417,11 @@ def main(config):
         seeds = numpy.array([fold_periodic(points[index]) for index in best])
         changed = (seeds != points[best]).any(axis=1)
         check_same_solution(points[best][changed], seeds[changed], pool)
-    numpy.save(config.output, seeds)
+    numpy.savez(
+        config.output,
+        points=seeds,
+        isochrone_interpolation=_target.isochrone_interpolation,
+    )
     for index, seed in zip(best, seeds):
         params = _target.get_sample_params(seed)
         print(

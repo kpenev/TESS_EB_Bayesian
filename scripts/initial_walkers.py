@@ -63,8 +63,9 @@ def parse_command_line():
     parser.add_argument("tic_id", type=int, help="The TIC ID to sample.")
     parser.add_argument(
         "points",
-        help="A .npy file with the best latent sample of each family, one "
-        "per row.",
+        help="The best latent sample of each family, one per row: the .npz "
+        "file of select_families.py (with the preparation's isochrone "
+        "interpolation), or an older .npy file (linear interpolation).",
     )
     parser.add_argument(
         "samples",
@@ -327,10 +328,20 @@ def main(config):
     """Find the proposals, split the walkers and save them."""
 
     global _target  # pylint: disable=global-statement
-    _target = LogLikelihood(config.tic_id)
     if path.exists(config.samples):
         raise FileExistsError(f"{config.samples!r} already exists.")
-    centers = numpy.atleast_2d(numpy.load(config.points))
+    families = numpy.load(config.points)
+    if isinstance(families, numpy.ndarray):
+        # A .npy file from before the interpolation was recorded.
+        centers, isochrone_interpolation = families, "linear"
+    else:
+        with families:
+            centers = families["points"]
+            isochrone_interpolation = str(families["isochrone_interpolation"])
+    centers = numpy.atleast_2d(centers)
+    _target = LogLikelihood(
+        config.tic_id, isochrone_interpolation=isochrone_interpolation
+    )
     rng = numpy.random.default_rng(config.seed)
     with get_context("fork").Pool(config.num_parallel) as pool:
         center_log_prob = numpy.array(pool.map(_log_prob, centers))

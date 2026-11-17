@@ -17,7 +17,9 @@ from general_purpose_python_modules.multiprocessing_util import (
 )
 
 from binary import Binary
+from binary_parameters import BinaryParams
 from log_likelihood import LogLikelihood
+from mcmc_sampling import get_isochrone_interpolation
 from detrending import (
     detrend_with_gaps,
     fit_ooe_model,
@@ -506,7 +508,17 @@ class MeasureETV(LogLikelihood):
 
         if "pad_duration" not in config:
             config["pad_duration"] = 0.0
-        best_params = self._get_best_params(samples_fname.format(tic_id=tic_id))
+        samples_fname = samples_fname.format(tic_id=tic_id)
+        config.setdefault(
+            "isochrone_interpolation",
+            get_isochrone_interpolation(samples_fname),
+        )
+        # Applied now: the best-fit binaries below are built before
+        # LogLikelihood.__init__() would apply it.
+        BinaryParams.set_isochrone_interpolation(
+            config["isochrone_interpolation"]
+        )
+        best_params = self._get_best_params(samples_fname)
         self._lc_sys_err = best_params.lc_sys
         self._config = {
             k: config.pop(k) if k in config else default

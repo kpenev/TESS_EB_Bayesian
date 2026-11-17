@@ -17,6 +17,7 @@ from astropy import units as u
 from command_line_util import create_parser
 import paths
 from visualize import get_plot_data
+from mcmc_sampling import get_isochrone_interpolation
 from sample_params import SampleParams, param_units, param_descriptions
 
 
@@ -80,7 +81,7 @@ def parse_command_line():
         help="The minimum and maximum allowed number of steps to include in the"
         " release. Note that for each step there will be many walkers. If more "
         "than maximum steps are left after burn-in thinning is applied. If less"
-        " than minimum, no release is generated."
+        " than minimum, no release is generated.",
     )
     return parser.parse_args()
 
@@ -277,8 +278,8 @@ def create_release(config):
         log_prob[burnin::thin, :].flatten() * u.dimensionless_unscaled,
         name="log_prob",
     )
-    med_logprob = numpy.median(release_data['log_prob'])
-    release_data = release_data[release_data['log_prob'] > med_logprob - 15]
+    med_logprob = numpy.median(release_data["log_prob"])
+    release_data = release_data[release_data["log_prob"] > med_logprob - 15]
     ensure_directory(config.release_fname)
 
     print("Generating diagnostic plots")
@@ -289,6 +290,13 @@ def create_release(config):
         plot_release_quantile_diff(plot_data, release_data, config, pdf)
     print(f"Diagnostic plots saved to: {pdf_fname!r}")
     print(f"Release data stats: {release_data.info(['attributes', 'stats'])}")
+    # The isochrone interpolation of the likelihood that was sampled.
+    release_data.meta["ISOINTRP"] = get_isochrone_interpolation(
+        config.samples_fname
+    )
+    release_data.meta["comments"] = [
+        "ISOINTRP: isochrone interpolation of the likelihood (linear or pchip)"
+    ]
     release_data.write(config.release_fname, format="fits", overwrite=True)
     print(f"Written to: {config.release_fname!r}")
 

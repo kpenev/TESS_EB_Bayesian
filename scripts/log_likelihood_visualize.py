@@ -5,6 +5,7 @@ import numpy
 from configargparse import ArgumentParser, DefaultsFormatter
 
 from log_likelihood import LogLikelihood
+from mcmc_sampling import get_isochrone_interpolation
 from paths import samples as samples_fname_pattern
 from hacked_emcee_hdf5_backend import HDFBackend
 from sample_params import SampleParams
@@ -154,7 +155,10 @@ def main(config):
     """Show the calculation of the max likelihood point in given samples."""
 
     samples_fname = config.samples_fname_pattern.format(tic_id=config.tic_id)
-    log_likelihood = LogLikelihoodVisualize(config.tic_id)
+    log_likelihood = LogLikelihoodVisualize(
+        config.tic_id,
+        isochrone_interpolation=get_isochrone_interpolation(samples_fname),
+    )
     backend = HDFBackend(samples_fname, name=config.chain_name, read_only=True)
     log_prob = backend.get_log_prob()
     best_index = numpy.argmax(log_prob)

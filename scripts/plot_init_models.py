@@ -37,6 +37,7 @@ from binary import Binary
 from exclude_data import exclude_data
 from hacked_emcee_hdf5_backend import HDFBackend
 from log_likelihood import LogLikelihood
+from mcmc_sampling import get_isochrone_interpolation
 from sample_params import SampleParams
 from visualize import main as visualize
 
@@ -242,7 +243,10 @@ def add_header(fname, header, output, *, header_size=30, margin=10):
 def main(config):
     """Make the plot of each family."""
 
-    log_likelihood = LogLikelihood(config.tic_id)
+    log_likelihood = LogLikelihood(
+        config.tic_id,
+        isochrone_interpolation=get_isochrone_interpolation(config.samples),
+    )
     rng = numpy.random.default_rng(config.seed)
     families = load_families(config.samples)
     family_list = []

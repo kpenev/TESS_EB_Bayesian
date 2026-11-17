@@ -23,6 +23,11 @@
 #   PYTHON       the Python command (default python3), e.g.
 #                "conda run -n py311 python3"
 #   WALKER_SEED  random seed for initial_walkers.py (default: random)
+#   ISOCHRONE_INTERPOLATION
+#                "linear" or "pchip" (default: the code's current default).
+#                Given to sed_grid_search.py only: each step records it in its
+#                output and the next step reads it from there, so a resumed
+#                preparation keeps the interpolation it started with.
 #   EXCHANGE_DIR if set, the outcome (review images, samples file, the
 #                target's cache rows, any failure record) is copied to
 #                EXCHANGE_DIR/from_prep/TIC by export_prepared.py, whether the
@@ -57,7 +62,7 @@ mkdir -p "${output_dir}" "$(dirname "${samples}")"
 
 sed_results=${output_dir}/sed_grid_search_${tic}.ecsv
 seeded_results=${output_dir}/sed_seeded_fits_${tic}.ecsv
-families=${output_dir}/families.npy
+families=${output_dir}/families.npz
 
 # If the pipeline stops with an error, the record of the failure (for the
 # review: the system becomes prepare_failed) is written here; a new run
@@ -116,7 +121,8 @@ plot_step() {
 run_step "${sed_results}" "${output_dir}/sed_grid_search.log" \
     ${python} -u sed_grid_search.py "${tic}" \
     --num-parallel "${num_parallel}" \
-    --output "${sed_results}"
+    --output "${sed_results}" \
+    ${ISOCHRONE_INTERPOLATION:+--isochrone-interpolation "${ISOCHRONE_INTERPOLATION}"}
 
 plot_step "${output_dir}/sed_grid_corner_${tic}.pdf" \
     "${output_dir}/plot_sed_grid_search.log" \
