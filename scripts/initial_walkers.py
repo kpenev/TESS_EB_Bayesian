@@ -372,6 +372,10 @@ def save_walkers(config, centers, center_log_prob, drawn):
                 path.dirname(path.dirname(path.abspath(__file__)))
             ).commit()
         )
+        # Every later likelihood for this file uses the same interpolation.
+        samples_file.attrs["IsochroneInterpolation"] = (
+            _target.isochrone_interpolation
+        )
         samples_file["mcmc"].attrs["final_run"] = True
     index = 0
     for center, best_log_prob, (walkers, log_prob) in zip(

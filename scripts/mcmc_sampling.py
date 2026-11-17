@@ -349,6 +349,11 @@ def get_backend(samples_fname, config):
         with h5py.File(samples_fname, "a") as samples_file:
             samples_file.attrs["TICID"] = config.tic_id
             samples_file.attrs["GitHash"] = _git_hash
+            # A new chain without prepared walkers: the current default, as
+            # for any likelihood without a samples file.
+            samples_file.attrs["IsochroneInterpolation"] = (
+                get_isochrone_interpolation()
+            )
         _logger.info(
             "Starting new chain for TIC ID: %d.",
             config.tic_id,

@@ -147,6 +147,10 @@ def write_samples_file(fname, tic_id, samples, log_prob, log_likelihood):
     )
     with h5py.File(fname, "a") as samples_file:
         samples_file.attrs["TICID"] = tic_id
+        # Likelihoods rebuilt for this file use the same interpolation.
+        samples_file.attrs["IsochroneInterpolation"] = (
+            log_likelihood.isochrone_interpolation
+        )
 
 
 def plot_models(tic_id, samples_fname, num_models, output):
