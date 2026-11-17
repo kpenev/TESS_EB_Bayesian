@@ -97,7 +97,24 @@ def parse_command_line():
         "number of tics. Instead they should contain no more than that. Extra "
         "TIC IDs will be selected for sampling to fill any missing slots.",
     )
-    return parser.parse_args()
+    parser.add_argument(
+        "--add-jobs",
+        type=int,
+        default=0,
+        help="Add this many jobs to the group, filled with TICs waiting to be "
+        "sampled, and create only their job files (existing jobs are left as "
+        "they are). Fails without changes if fewer TICs are waiting than the "
+        "new jobs need.",
+    )
+    config = parser.parse_args()
+    if config.add_jobs and (
+        config.job_id is not None or config.add_nodes_per_job
+    ):
+        parser.error(
+            "--add-jobs creates new jobs only, so it cannot be combined with "
+            "--job-id or --add-nodes-per-job."
+        )
+    return config
 
 
 def get_pending_tics(
@@ -152,7 +169,7 @@ def update_job(  # pylint: disable=too-many-arguments,too-many-locals
     ).all()
     expected_num_tics = config.nodes_per_job * tic_per_node[config.hpc]
 
-    if config.fill_partial_jobs or config.add_nodes_per_job:
+    if config.fill_partial_jobs or config.add_nodes_per_job or config.add_jobs:
         assert len(job_entries) <= expected_num_tics, (
             f"Got {len(job_entries)} TICS instead of {expected_num_tics} or "
             f"fewer entries for job group {group_id}, job {job_id} on "
@@ -218,7 +235,26 @@ def update_job_group(config):
         make_file = get_file_makers(job_group.id, config)
         pending_tics = get_pending_tics(config, SelectTICTable, db_session)
 
-        for job_id in range(job_group.num_jobs):
+        job_ids = range(job_group.num_jobs)
+        if config.add_jobs:
+            needed = (
+                config.add_jobs
+                * config.nodes_per_job
+                * tic_per_node[config.hpc]
+            )
+            if len(pending_tics) < needed:
+                # Raised inside the session, so nothing is changed.
+                raise ValueError(
+                    f"Only {len(pending_tics)} TICs are waiting to be sampled, "
+                    f"but {config.add_jobs} new job(s) of "
+                    f"{config.nodes_per_job} nodes on {config.hpc} need "
+                    f"{needed}."
+                )
+            job_ids = range(
+                job_group.num_jobs, job_group.num_jobs + config.add_jobs
+            )
+            job_group.num_jobs += config.add_jobs
+        for job_id in job_ids:
             if config.job_id is not None and job_id != config.job_id:
                 continue
             update_job(
