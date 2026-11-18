@@ -25,7 +25,6 @@ render() {
     plot_mode=$1
 
     source_dir=~/projects/git/TESS_EB_Bayesian/scripts
-    export PYTHONPATH=$PYTHONPATH:${source_dir}:~/projects/git
 
     output_root=/scratch/juno/kxp174430/TESS_EBs/juno/output/render_juno/
     log_dir=${output_root}/logs/@@TABLE_NAME@@/@@JOB_NAME@@/${plot_mode}
@@ -35,7 +34,10 @@ render() {
 
     cd ${source_dir}
 
-    conda run --no-capture-output -n py314 python3 -u \
+    # plots.py imports from scripts/, so it must be on the path. Set inside
+    # conda run: activating py314 replaces PYTHONPATH with its own value.
+    conda run --no-capture-output -n py314 \
+        env PYTHONPATH=${source_dir}:${HOME}/projects/git python3 -u \
         ${source_dir}/bui/select_ticids/plots.py "${plot_mode}" \
         --limit-to-jobs @@JOB_GROUP@@:@@JOB_ID@@ \
         --num-parallel @@NUM_PARALLEL@@ \
