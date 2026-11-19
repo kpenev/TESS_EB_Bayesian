@@ -8,10 +8,11 @@ preparation machine's, synchronized here) and its prepared samples file
 (``paths.samples_seeded``; one already on the host is not replaced). Then
 takes a consistent copy of this machine's likelihood cache, copies it to the
 sampling host (by default Juno) with rsync, and runs merge_cache.py there:
-the BLS, SED and exclusion rows of the given targets the host does not have
-yet are added to its cache, and every target the host already has (given or
-not) is compared with this machine's instead of being changed, since it may
-be being sampled (see merge_cache.py). The targets are those given on the
+the BLS, SED and exclusion rows of the given targets replace the host's,
+except for targets the host has assigned to a sampling job (they may be
+being sampled), which, like all other targets, are compared with this
+machine's instead of being changed (see merge_cache.py). The targets are
+those given on the
 command line or, by default, those with status *sample* in the BUI review
 table.
 

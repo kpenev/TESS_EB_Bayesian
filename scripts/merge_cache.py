@@ -14,12 +14,15 @@ There, this script:
 
 * checks that the tables have the same columns in both caches,
 * saves a timestamped copy of this cache next to it,
-* adds the incoming ``bls``, ``sed`` and ``exclude_data`` rows of the given
-  targets this cache does not have yet (refusing if the incoming cache has no
+* replaces this cache's ``bls``, ``sed`` and ``exclude_data`` rows of the
+  given targets with the incoming ones (refusing if the incoming cache has no
   ``bls`` or ``sed`` row for one of them: this machine would compute its
-  own). Given targets this cache already has (a ``bls`` or ``sed`` row) are
-  left alone and compared like the others, since one may be being sampled:
-  changing its rows would change the likelihood under the running chain.
+  own), so each is sampled with the rows it was prepared and reviewed with,
+  including data exclusions set in the review after an earlier push. Given
+  targets this cache already has (a ``bls`` or ``sed`` row) that are
+  assigned to a sampling job in this machine's BUI database are left alone
+  and compared like the others, since one may be being sampled: changing its
+  rows would change the likelihood under the running chain.
   ``--replace-existing`` replaces them too, for when none is running,
 * compares the rows of every other target, and reports those that differ or
   that only this cache has: a target sampled with rows other than those it
@@ -86,9 +89,10 @@ def parse_command_line():
     parser.add_argument(
         "--replace-existing",
         action="store_true",
-        help="Also replace the rows of given targets this cache already has. "
-        "Only when none of them is being sampled: changing a target's rows "
-        "changes the likelihood under a running chain.",
+        help="Also replace the rows of given targets this cache already has "
+        "that are assigned to a sampling job (those not assigned are always "
+        "replaced). Only when none of them is being sampled: changing a "
+        "target's rows changes the likelihood under a running chain.",
     )
     parser.add_argument(
         "--dry-run",
@@ -374,6 +378,28 @@ def warn_differ():
     )
 
 
+def get_assigned(tic_ids, review_table):
+    """
+    Return the targets assigned to a sampling job in this machine's BUI DB.
+
+    Returns:
+        [(int, int, int)]:    The TIC, job group and job of each assigned
+            target.
+    """
+
+    select_table, _ = get_ticid_select_tables(review_table, must_exist=True)
+    with Session() as db_session:  # pylint: disable=not-callable
+        return db_session.execute(
+            select(
+                select_table.id, select_table.job_group, select_table.job_id
+            ).where(
+                select_table.id.in_(tic_ids),
+                select_table.job_group.is_not(None)
+                | select_table.job_id.is_not(None),
+            )
+        ).all()
+
+
 def warn_assigned(tic_ids, review_table):
     """
     Warn about targets already assigned to a sampling job.
@@ -384,18 +410,7 @@ def warn_assigned(tic_ids, review_table):
     prepared with.
     """
 
-    select_table, _ = get_ticid_select_tables(review_table, must_exist=True)
-    with Session() as db_session:  # pylint: disable=not-callable
-        assigned = db_session.execute(
-            select(
-                select_table.id, select_table.job_group, select_table.job_id
-            ).where(
-                select_table.id.in_(tic_ids),
-                select_table.job_group.is_not(None)
-                | select_table.job_id.is_not(None),
-            )
-        ).all()
-    for tic_id, job_group, job_id in assigned:
+    for tic_id, job_group, job_id in get_assigned(tic_ids, review_table):
         _logger.warning(
             "TIC %d is already assigned to job group %s, job %s.",
             tic_id,
@@ -420,11 +435,26 @@ def main(config):
     check_incoming_rows(incoming, tic_ids)
     existing = get_prepared(here, tic_ids)
     if existing and not config.replace_existing:
-        print(
-            f"Not replacing {len(existing)} TICs this cache already has "
-            f"(compared below instead): {sorted(existing)}"
-        )
-        tic_ids = tic_ids - existing
+        # Only a target assigned to a sampling job may be being sampled; the
+        # rows of the others are replaced, so they are sampled with the rows
+        # they were prepared and reviewed with (BLS, SED and exclusions).
+        protected = {
+            tic_id
+            for tic_id, _, _ in get_assigned(existing, config.review_table)
+        }
+        if protected:
+            print(
+                f"Not replacing {len(protected)} TICs this cache already has "
+                "that are assigned to a sampling job (compared below "
+                f"instead): {sorted(protected)}"
+            )
+        if existing - protected:
+            print(
+                f"Replacing {len(existing - protected)} TICs this cache "
+                "already has that are not assigned to a sampling job: "
+                f"{sorted(existing - protected)}"
+            )
+        tic_ids = tic_ids - protected
     if tic_ids:
         warn_assigned(tic_ids, config.review_table)
         if config.dry_run:
