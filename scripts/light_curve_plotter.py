@@ -6,6 +6,7 @@ from asteval import Interpreter
 
 from tess_target import get_bls_eclipse_mask, get_bls_model
 from log_likelihood import LogLikelihood
+from binary_parameters import BinaryParams
 
 
 class LightCurvePlotter:
@@ -598,8 +599,12 @@ class LightCurvePlotter:
         """
 
         title_pre = f"TIC {tic_id}\n"
+        # The interpolation already in effect (that of the samples file the
+        # binaries came from, set by its likelihood, else the default): a
+        # different one would switch the whole process.
         log_likelihood = LogLikelihood(
             tic_id,
+            isochrone_interpolation=BinaryParams.get_isochrone_interpolation(),
             save_detrending=getattr(self._config, "show_lc_detrending", False),
         )
         if self._folding_period is None:

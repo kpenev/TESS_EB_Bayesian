@@ -30,5 +30,12 @@ export LAUNCHER_JOB_FILE='@@LAUNCHER_CMD@@'
 
 export PYTHONPATH=$PYTHONPATH:~/projects/git
 
+# Memory mapped copies of the isochrone grids, shared by all processes on a
+# node (see CMDInterpolator). Not removed at the end of the job: a later job on
+# the node reuses them. Listed (first node only) to see what earlier jobs left.
+export ISOCHRONE_BINARY_DIR=/dev/shm/$USER/isochrones
+echo "Isochrone copies on $(hostname) at job start:"
+ls -la --time-style=full-iso $ISOCHRONE_BINARY_DIR 2>&1
+
 $LAUNCHER_DIR/paramrun
 

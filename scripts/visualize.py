@@ -28,6 +28,7 @@ from general_purpose_python_modules.visuals import make_corner_plot
 from hacked_emcee_hdf5_backend import HDFBackend
 from sample_params import SampleParams
 from log_likelihood import LogLikelihood
+from mcmc_sampling import get_isochrone_interpolation
 from paths import samples as samples_fname
 from binary import Binary
 from light_curve_plotter import LightCurvePlotter
@@ -1024,10 +1025,16 @@ def main(config):
         f"{getattr(config, 'chain_name', '')}"
     )
     lstsq_data = None
+    # Likelihoods for the samples file use its isochrone interpolation.
+    isochrone_interpolation = get_isochrone_interpolation(
+        config.samples_fname if path.exists(config.samples_fname) else None
+    )
     if path.exists(config.samples_fname):
         print("Print found samples file. Loading data ...")
         if log_likelihood is None:
-            log_likelihood = LogLikelihood(config.tic_id)
+            log_likelihood = LogLikelihood(
+                config.tic_id, isochrone_interpolation=isochrone_interpolation
+            )
         print("Initializing HDF5 backend")
         print("Extracting data from HDF5 file")
         plot_data, raw_data, log_prob, selected, backend = get_plot_data(
@@ -1056,7 +1063,10 @@ def main(config):
             and plot_data is not None
         ):
             if log_likelihood is None:
-                log_likelihood = LogLikelihood(config.tic_id)
+                log_likelihood = LogLikelihood(
+                    config.tic_id,
+                    isochrone_interpolation=isochrone_interpolation,
+                )
             binaries = get_model_binaries(
                 config,
                 raw_data,

@@ -610,7 +610,15 @@ def main(config):
     """Fit from all seeds and w values and report the results."""
 
     global _target  # pylint: disable=global-statement
-    _target = LogLikelihood(config.tic_id)
+    sed_results = Table.read(config.sed_results)
+    # The preparation's interpolation, chosen by sed_grid_search.py ("linear"
+    # for results that predate recording it).
+    _target = LogLikelihood(
+        config.tic_id,
+        isochrone_interpolation=sed_results.meta.get(
+            "IsochroneInterpolation", "linear"
+        ),
+    )
     if config.bad_sed is not None:
         # pylint: disable=protected-access
         _target._sed = (
@@ -618,7 +626,7 @@ def main(config):
         )
         # pylint: enable=protected-access
 
-    seeds = select_seeds(Table.read(config.sed_results))[1]
+    seeds = select_seeds(sed_results)[1]
     if config.max_seeds is not None:
         seeds = seeds[: config.max_seeds]
     omegas = (
@@ -701,7 +709,8 @@ def main(config):
             key: [row.get(key, numpy.nan) for row in rows]
             for key in columns
             if key not in ("fit_x", "heuristic_x", "message")
-        }
+        },
+        meta={"IsochroneInterpolation": _target.isochrone_interpolation},
     ).write(output_fname, overwrite=True)
     numpy.save(
         output_fname.rsplit(".", 1)[0] + "_x.npy",

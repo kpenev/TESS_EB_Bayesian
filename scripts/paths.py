@@ -1,11 +1,16 @@
 """Define constants containing the paths to various input files."""
 
-from os import path
+from os import environ, path
 
 data_dir = path.join(path.dirname(path.dirname(path.abspath(__file__))), "data")
 
 grav_dark = {"TESS": path.join(data_dir, "claret_gravity_darkening_TESS.fits")}
 cmd_data_fname = path.join(data_dir, "isochrone_data_{photsys}.ssv")
+# Where the memory mapped binary copies of the isochrone grids are kept (see
+# CMDInterpolator). None means next to the text files. Cluster job scripts set
+# ISOCHRONE_BINARY_DIR to a directory in node-local memory (/dev/shm), so the
+# grids are never read over a networked file system while sampling.
+isochrone_binary_dir = environ.get("ISOCHRONE_BINARY_DIR")
 gaia_extinction_model = path.join(
     data_dir, "dustapprox", "oct2025_a0r0_gaia_dr3_kurucz_F99_teff_A0_R0.ecsv"
 )

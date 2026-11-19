@@ -360,9 +360,12 @@ def get_lstsq(backend, log_likelihood, config):
     """Max likelihood mcmc sample, parameters, log prob and LSQ fit versions."""
 
     pickler = MultiPickle("lstsq_data.pickle")
+    # The fit depends on the interpolation: results cached without it (or with
+    # another) do not match, so they are recomputed.
     pickler_config = {
         "samples_fname": backend.filename,
         "num_steps": backend.iteration,
+        "isochrone_interpolation": log_likelihood.isochrone_interpolation,
     }
     pickled = pickler.check_for_pickled(pickler_config)
     if pickled is not None:
