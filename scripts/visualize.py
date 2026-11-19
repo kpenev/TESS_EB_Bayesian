@@ -288,6 +288,10 @@ def parse_command_line():
     result.samples_fname = result.samples_fname_pattern.format(
         tic_id=result.tic_id
     )
+    if result.corner_plot_fname is not None:
+        result.corner_plot_fname = result.corner_plot_fname.format(
+            tic_id=result.tic_id
+        )
     return result
 
 

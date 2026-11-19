@@ -77,6 +77,12 @@ def get_chain_expressions(plot_data, chain_expressions):
             name, value_expression = value_expression.split("=")
             plot_data[name] = evaluate(value_expression)
             ranges[name] = plot_range
+    else:
+        # Every entry (log-probability and parameters), full range.
+        plot_data = {
+            name: plot_data[name] for name in plot_data if name != "selected"
+        }
+        ranges = dict.fromkeys(plot_data, 1.0)
     for value in plot_data.values():
         if numpy.atleast_1d(value).size > 1:
             print(f"Plot data: {plot_data!r}")
