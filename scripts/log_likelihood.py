@@ -573,7 +573,10 @@ class LogLikelihood(TESSTarget):  # pylint: disable=too-many-instance-attributes
             primary_beaming_coef=(-2, 2),
             secondary_beaming_coef=(-2, 2),
             lc_sys=(min(numpy.log10(self._find_syserr_and_outliers()), -1), 0),
-            sed_sys=(-10, -1),
+            # At most 0.03 mag (2026-11-18): the photometric, distance and
+            # reddening errors are in the SED covariance; a larger systematic
+            # let light curves outvote solutions the SED rules out.
+            sed_sys=(-10, numpy.log10(0.03)),
         )
 
         self._logger.debug("LCs: %s", repr(self._lcs))
