@@ -12,7 +12,6 @@ db_fname = path.join(
 )
 db_engine = create_engine(
     f"sqlite:///{db_fname}?timeout=100&uri=true",
-    echo=True,
     pool_pre_ping=True,
     pool_recycle=3600,
     poolclass=NullPool,
