@@ -238,6 +238,40 @@ class SplitNormalProposal:
         )
 
 
+# The group of the samples file holding the family proposals, and the
+# `SplitNormalProposal` attributes saved there (one dataset each, stacked over
+# families).
+_proposals_group = "family_proposals"
+_proposal_attributes = ("center", "axes", "widths_plus", "widths_minus")
+
+
+def save_proposals(samples_file, proposals):
+    """Add the family proposals to an open (writable) samples file."""
+
+    group = samples_file.create_group(_proposals_group)
+    for attribute in _proposal_attributes:
+        group.create_dataset(
+            attribute,
+            data=numpy.stack(
+                [getattr(proposal, attribute) for proposal in proposals]
+            ),
+        )
+
+
+def load_proposals(samples_fname):
+    """Return the family proposals saved in the given samples file."""
+
+    with h5py.File(samples_fname, "r") as samples_file:
+        if _proposals_group not in samples_file:
+            raise KeyError(
+                f"{samples_fname!r} has no family proposals: it was prepared "
+                "before they were saved; rerun initial_walkers.py."
+            )
+        group = samples_file[_proposals_group]
+        values = [group[attribute][:] for attribute in _proposal_attributes]
+    return [SplitNormalProposal(*family) for family in zip(*values)]
+
+
 def get_proposal(center, pool, config):
     """Return the split normal proposal of the family best at center."""
 
@@ -350,17 +384,21 @@ def main(config):
             draw_walkers(proposal, count, pool, rng)
             for proposal, count in zip(proposals, counts)
         ]
-    save_walkers(config, centers, center_log_prob, drawn)
+    save_walkers(config, proposals, center_log_prob, drawn)
 
 
-def save_walkers(config, centers, center_log_prob, drawn):
+def save_walkers(config, proposals, center_log_prob, drawn):
     """
     Create the samples file with the walkers as its starting positions.
+
+    The family proposals are saved too (see `save_proposals()`), for sampling
+    moves that propose from them.
 
     Args:
         config:    The command line configuration.
 
-        centers(array):    The best point of each family.
+        proposals([SplitNormalProposal]):    The proposal of each family,
+            centered on its best point.
 
         center_log_prob(array):    The log-probability of each center.
 
@@ -374,7 +412,7 @@ def save_walkers(config, centers, center_log_prob, drawn):
     partial_fname = config.samples + ".partial"
     if path.exists(partial_fname):
         remove(partial_fname)
-    HDFBackend(partial_fname).reset(num_walkers, centers.shape[1])
+    HDFBackend(partial_fname).reset(num_walkers, proposals[0].center.size)
     with h5py.File(partial_fname, "a") as samples_file:
         samples_file.attrs["TICID"] = config.tic_id
         samples_file.attrs["GitHash"] = str(
@@ -383,10 +421,12 @@ def save_walkers(config, centers, center_log_prob, drawn):
             ).commit()
         )
         samples_file["mcmc"].attrs["final_run"] = True
+        save_proposals(samples_file, proposals)
     index = 0
-    for center, best_log_prob, (walkers, log_prob) in zip(
-        centers, center_log_prob, drawn
+    for proposal, best_log_prob, (walkers, log_prob) in zip(
+        proposals, center_log_prob, drawn
     ):
+        center = proposal.center
         for walker, walker_log_prob in zip(walkers, log_prob):
             save_initial_position(
                 walker,

@@ -9,6 +9,7 @@ import time
 import numpy
 from scipy import optimize
 from scipy.stats import uniform, norm
+from scipy.special import logsumexp
 
 from general_purpose_python_modules.multiprocessing_util import (
     setup_process_map,
@@ -877,3 +878,46 @@ def lmfit_and_tweak(
         lstsq_log_likelihood,
         lstsq_log_likelihood,
     )
+
+
+class FamilyMixtureProposal:
+    """
+    Independence proposal from an equal weight mixture of family proposals.
+
+    Callable as the ``proposal_function`` of `emcee.moves.MHMove`: the
+    proposed positions do not depend on the current ones, and the returned
+    log-ratio of proposal densities, ln q(x) - ln q(x'), keeps the move in
+    detailed balance with the posterior. How well the mixture matches the
+    posterior (shapes, relative masses, how the families were merged) only
+    sets how often proposals are accepted, not where the chain converges.
+    """
+
+    def __init__(self, proposals):
+        """
+        Mix the given family proposals with equal weight.
+
+        Args:
+            proposals:    The proposal of each family, with ``draw(num_draws,
+                rng)`` and ``log_density(samples)`` methods, as
+                `initial_walkers.SplitNormalProposal`.
+        """
+
+        self.proposals = proposals
+
+    def log_density(self, samples):
+        """Return the log of the mixture density at each sample (row)."""
+
+        return logsumexp(
+            [proposal.log_density(samples) for proposal in self.proposals],
+            axis=0,
+        ) - numpy.log(len(self.proposals))
+
+    def __call__(self, coords, random):
+        """Return proposed positions and ln q(coords) - ln q(proposed)."""
+
+        family = random.randint(len(self.proposals), size=coords.shape[0])
+        proposed = numpy.empty_like(coords)
+        for family_index, proposal in enumerate(self.proposals):
+            selected = family == family_index
+            proposed[selected] = proposal.draw(selected.sum(), random)
+        return proposed, self.log_density(coords) - self.log_density(proposed)

@@ -11,7 +11,7 @@ from traceback import format_exc
 
 from configargparse import ArgumentParser, DefaultsFormatter
 from emcee import EnsembleSampler, walkers_independent
-from emcee.moves import DEMove, StretchMove
+from emcee.moves import DEMove, StretchMove, MHMove
 import h5py
 import numpy
 import git.repo
@@ -28,7 +28,8 @@ from general_purpose_python_modules.emcee_util import (
 from sqlalchemy import select, update
 from bui.db_interface import Session
 from bui.select_ticids.data_model import JobGroup, get_ticid_select_tables
-from utils import lmfit_and_tweak, params_to_sample
+from utils import lmfit_and_tweak, params_to_sample, FamilyMixtureProposal
+from initial_walkers import load_proposals
 from hacked_emcee_hdf5_backend import HDFBackend
 from log_likelihood import SampleParams, LogLikelihood
 from log_likelihood_priors import LogLikelihoodPriorsOnly
@@ -227,6 +228,17 @@ def parse_command_line():
         "gamma = 1, ter Braak 2006) instead of the stretch move. This lets "
         "walkers jump between separated solutions (e.g. young and old) in "
         "proportion to their posterior mass.",
+    )
+    parser.add_argument(
+        "--mode-hop-move",
+        choices=["differential-evolution", "family-mixture"],
+        default="differential-evolution",
+        help="The move used for the ``--mode-hop-fraction`` of steps. "
+        "``differential-evolution`` is as described there. ``family-mixture`` "
+        "instead proposes each walker independently from an equal weight "
+        "mixture of the family proposals saved by initial_walkers.py in the "
+        "samples file (Metropolis-Hastings with the proposal density ratio), "
+        "so jumps do not need the solutions to have similar shapes.",
     )
     parser.add_argument(
         "--initial-state-from",
@@ -730,6 +742,32 @@ def check_log_likelihood_consistency(backend, log_likelihood, config):
     _logger.info("Log-likelihood consistency check passed.")
 
 
+def get_moves(config, samples_fname):
+    """
+    Return the emcee moves (with weights) per the configuration.
+
+    The stretch move is used for all but ``config.mode_hop_fraction`` of
+    steps, which use the move selected by ``config.mode_hop_move``. The
+    ``family-mixture`` move proposes from the family proposals saved in the
+    samples file by initial_walkers.py.
+    """
+
+    if config.mode_hop_move == "differential-evolution":
+        mode_hop = DEMove(gamma0=1.0)
+    else:
+        assert config.mode_hop_move == "family-mixture"
+        proposals = load_proposals(samples_fname)
+        _logger.info(
+            "Mode hops propose from a mixture of %d family proposals.",
+            len(proposals),
+        )
+        mode_hop = MHMove(FamilyMixtureProposal(proposals))
+    return [
+        (StretchMove(), 1.0 - config.mode_hop_fraction),
+        (mode_hop, config.mode_hop_fraction),
+    ]
+
+
 def main(config):
     """Avoid polluting global namespace."""
 
@@ -830,10 +868,7 @@ def main(config):
                 log_likelihood,
                 backend=backend,
                 pool=pool,
-                moves=[
-                    (StretchMove(), 1.0 - config.mode_hop_fraction),
-                    (DEMove(gamma0=1.0), config.mode_hop_fraction),
-                ],
+                moves=get_moves(config, backend.filename),
             ).run_mcmc(
                 initial_state,
                 nsteps=config.max_mcmc_steps
