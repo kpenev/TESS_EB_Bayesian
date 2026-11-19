@@ -121,8 +121,10 @@ class BinaryParams(batman.TransitParams):
 
     # The isochrone interpolation ("linear" or "pchip", see
     # grid_tracks_interpolate()) used where nothing chooses one, e.g. new
-    # preparations (TEC-103).
-    default_isochrone_interpolation = "linear"
+    # preparations (TEC-103). PCHIP since 2026-11-18 (evaluated in TEC-111);
+    # samples files without an IsochroneInterpolation attribute (made before
+    # it was recorded) still mean linear.
+    default_isochrone_interpolation = "pchip"
     _isochrone_interpolation = default_isochrone_interpolation
 
     @classmethod
