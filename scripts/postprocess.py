@@ -93,15 +93,18 @@ def parse_command_line():
     parser.add_argument(
         "--group-kmeans-restarts",
         type=int,
-        default=5,
-        help="Each bisection keeps the best of this many 2-means runs.",
+        default=50,
+        help="Each bisection tries this many 2-means runs and keeps the one "
+        "with the fewest crossings per position of its smaller half. About "
+        "0.35 s per run per 400 000 positions.",
     )
     parser.add_argument(
         "--group-min-large-walkers",
         type=int,
         default=22,
-        help="Linked sets of walkers smaller than this (ndim + 1 by "
-        "default) become groups of their own (step 1b).",
+        help="Groups with fewer walkers than this (ndim + 1 by default) "
+        "cannot sample their region; they are drawn with large, opaque "
+        "markers in the corner plot.",
     )
     parser.add_argument(
         "--walker-link-factor",
@@ -265,7 +268,8 @@ def find_coarse_groups(positions, config):
     ``config.group_max_dip``) and walkers moved between them fewer than
     ``config.group_min_crossings`` times. A group whose split is rejected is
     not tried again, so a group hiding behind a rejected split (e.g. the
-    middle one of three in a row) is missed.
+    middle one of three in a row, if every 2-means run cut through it) is
+    missed here; `find_isolated_walkers()` catches it.
 
     Args:
         positions(array):    The walker positions after the burn-in, shape
@@ -394,7 +398,7 @@ def get_walker_distances(walker_positions, rng, max_points):
 
 def find_isolated_sets(walker_positions, coarse_group, rng, config):
     """
-    Return the small linked sets among the walkers of one coarse group.
+    Return the linked sets among the walkers of one coarse group.
 
     See `find_isolated_walkers()` for how walkers are linked.
 
@@ -410,9 +414,9 @@ def find_isolated_sets(walker_positions, coarse_group, rng, config):
 
     Returns:
         [(array, float)]:
-            For each small set other than the largest: which of the walkers
-            are in it, and their closest approach to the other walkers
-            relative to the group's median.
+            For each set other than the largest: which of the walkers are in
+            it, and their closest approach to the other walkers relative to
+            the group's median.
     """
 
     distances = get_walker_distances(
@@ -424,15 +428,12 @@ def find_isolated_sets(walker_positions, coarse_group, rng, config):
     )[1]
     set_sizes = numpy.bincount(walker_set)
     if (set_sizes >= config.group_min_large_walkers).sum() > 1:
-        _logger.warning(
-            "Coarse group %d splits into linked sets of %s walkers: "
-            "bisection missed a split.",
+        _logger.info(
+            "Coarse group %d splits into linked sets of %s walkers, "
+            "including several large ones that bisection missed.",
             coarse_group,
             set_sizes.tolist(),
         )
-    # The largest set stays in the coarse group, even if it is small.
-    small_sets = set_sizes < config.group_min_large_walkers
-    small_sets[numpy.argmax(set_sizes)] = False
     return [
         (
             walker_set == set_index,
@@ -440,27 +441,29 @@ def find_isolated_sets(walker_positions, coarse_group, rng, config):
                 numpy.ix_(walker_set == set_index, walker_set != set_index)
             ].min(),
         )
-        for set_index in numpy.flatnonzero(small_sets)
+        for set_index in range(set_sizes.size)
+        if set_index != numpy.argmax(set_sizes)
     ]
 
 
 def find_isolated_walkers(positions, labels, config):
     """
-    Give each small set of isolated walkers its own group (step 1b).
+    Give each set of walkers isolated within its coarse group its own group.
 
-    Within each coarse group (`find_coarse_groups()`), its walkers' positions
-    in it are whitened by the group's own covariance, and two walkers are
-    linked if their closest approach (see `get_walker_distances()`) is at
-    most ``config.walker_link_factor`` times the group's median closest
-    approach of a walker to its nearest other walker. Linked sets (single
-    linkage) with fewer than ``config.group_min_large_walkers`` walkers,
-    other than the group's largest set, become new groups, taking their
-    walkers' positions in that coarse group, unless those walkers spend less
-    than ``config.walker_min_stay_fraction`` of the window there: such a set
-    is a brief excursion of walkers living elsewhere, and is only logged.
-    This catches the one or few walkers far from everyone else that
-    bisection cannot split off. A coarse group splitting into several large
-    linked sets means bisection missed a split; it is logged, not changed.
+    Step 1b: within each coarse group (`find_coarse_groups()`), its walkers'
+    positions in it are whitened by the group's own covariance, and two
+    walkers are linked if their closest approach (see
+    `get_walker_distances()`) is at most ``config.walker_link_factor`` times
+    the group's median closest approach of a walker to its nearest other
+    walker. Walkers that never exchanged never came close, so each linked
+    set (single linkage) other than the group's largest becomes a new group,
+    taking its walkers' positions in that coarse group, unless those walkers
+    spend less than ``config.walker_min_stay_fraction`` of the window there:
+    such a set is a brief excursion of walkers living elsewhere, and is only
+    logged. This catches the one or few walkers far from everyone else that
+    bisection cannot split off, and any large group bisection missed (e.g.
+    the middle one of three in a row when every 2-means run cut through
+    it).
 
     Args:
         positions(array):    The walker positions, shape (steps, walkers,
