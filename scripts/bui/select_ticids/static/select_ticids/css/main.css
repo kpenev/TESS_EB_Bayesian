@@ -99,6 +99,36 @@ body {
     margin: 0;
 }
 
+.param-summary {
+    border-collapse: collapse;
+    margin: 0.5em;
+    font-family: monospace;
+}
+
+.param-summary caption {
+    text-align: left;
+    padding-bottom: 0.3em;
+}
+
+.param-summary .not-converged {
+    color: red;
+    font-weight: bold;
+}
+
+.param-summary th,
+.param-summary td {
+    border: 1px solid #ccc;
+    padding: 0.1em 0.5em;
+}
+
+.param-summary td.value {
+    text-align: right;
+}
+
+.param-summary tr:hover {
+    background-color: #e0e0ff;
+}
+
 .ticid_lists {
     display: flex;
     flex-direction: column;

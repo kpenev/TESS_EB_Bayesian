@@ -3,5 +3,35 @@
         {% for encoded in entry.1 %}
         <img src="data:image/png;base64,{{ encoded }}" style="display: block">
         {% endfor %}
+        {% if entry.3 %}
+        <table class="param-summary">
+            <caption>
+                {% if entry.3.converged %}
+                Burn-in: {{ entry.3.burnin }} of {{ entry.3.num_steps }} steps
+                {% else %}
+                <span class="not-converged">Not converged</span> (burn-in
+                estimate {{ entry.3.burnin }} &gt; {{ entry.3.num_steps }}
+                steps): quantiles from all steps
+                {% endif %}
+            </caption>
+            <tr>
+                <th>Parameter</th>
+                <th>Unit</th>
+                <th>Best sample</th>
+                {% for quantile in entry.3.quantiles %}
+                <th>q={{ quantile }}</th>
+                {% endfor %}
+            </tr>
+            {% for row in entry.3.rows %}
+            <tr title="{{ row.2 }}">
+                <td>{{ row.0 }}</td>
+                <td>{{ row.1 }}</td>
+                {% for value in row|slice:"3:" %}
+                <td class="value">{{ value }}</td>
+                {% endfor %}
+            </tr>
+            {% endfor %}
+        </table>
+        {% endif %}
     </div>
 {% endfor %}

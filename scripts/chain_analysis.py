@@ -11,6 +11,8 @@ progressed past burn-in for every parameter, it clears the
 See ``bui.select_ticids.data_model.clear_skip_review``.
 """
 
+import json
+
 import numpy
 import pandas
 from asteval import Interpreter
@@ -168,6 +170,84 @@ def get_convergence_data(plot_data, config, num_walkers):
         pickler.add_result(config, convergence_data)
 
     return convergence_data
+
+
+def save_parameter_summary(
+    summary_fname, plot_data, num_walkers, burnin, quantiles=(0.1, 0.5, 0.9)
+):
+    """
+    Save the best sample and the posterior quantiles of each parameter.
+
+    The summary is a JSON file with the number of steps, the burn-in (as
+    found for the convergence plot), whether the chain converged (burn-in
+    below the number of steps), the quantiles, and per parameter the value of
+    the highest log-probability sample (any step) and the quantiles after
+    burn-in (all steps if not converged, as for the convergence plot). The
+    parameters are the sampling parameters, plus the primary and secondary
+    masses.
+
+    Args:
+        summary_fname(str):    The JSON file to create.
+
+        plot_data(pandas.DataFrame):    The chain, as returned by
+            `visualize.get_plot_data()`: a ``logprob`` column and one column
+            per sampling parameter, one row per step and walker (step major).
+
+        num_walkers(int):    The number of walkers in the chain.
+
+        burnin(int):    The number of steps to discard before calculating the
+            quantiles.
+
+        quantiles(tuple):    The quantiles to calculate.
+
+    Returns:
+        None
+    """
+
+    num_steps = plot_data.shape[0] // num_walkers
+    assert num_walkers * num_steps == plot_data.shape[0]
+
+    converged = bool(burnin < num_steps)
+    post_burnin = plot_data.iloc[(burnin if converged else 0) * num_walkers :]
+    best_sample = plot_data.iloc[int(numpy.nanargmax(plot_data["logprob"]))]
+
+    def mass_split(data):
+        """Return the primary and secondary mass for the given sample(s)."""
+
+        return (
+            data["mtotal"] / (1.0 + data["mratio"]),
+            data["mtotal"] * data["mratio"] / (1.0 + data["mratio"]),
+        )
+
+    parameters = {}
+    for name in SampleParams._fields:
+        parameters[name] = (best_sample[name], post_burnin[name])
+        if name == "mtotal":
+            parameters.update(
+                zip(
+                    ["primary_mass", "secondary_mass"],
+                    zip(mass_split(best_sample), mass_split(post_burnin)),
+                )
+            )
+
+    # Complete the summary before creating the file, so a failure leaves none.
+    summary = {
+        "num_steps": int(num_steps),
+        "burnin": int(burnin),
+        "converged": converged,
+        "quantiles": list(quantiles),
+        "parameters": {
+            name: {
+                "best": float(best),
+                "quantiles": numpy.nanquantile(
+                    chain.to_numpy(), quantiles
+                ).tolist(),
+            }
+            for name, (best, chain) in parameters.items()
+        },
+    }
+    with open(summary_fname, "w", encoding="utf-8") as summary_file:
+        json.dump(summary, summary_file, indent=4)
 
 
 def get_lstsq_interpreters(lstsq_data):

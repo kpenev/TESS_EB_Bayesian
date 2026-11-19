@@ -1,14 +1,17 @@
 """The available views for the app allowing the selection of TIC IDs."""
 
 import sys
+import json
 from glob import glob
 from os import path, remove
 from base64 import b64encode
 from functools import cached_property
+from math import floor, log10, isfinite
 
 sys.path.append(path.dirname(path.dirname(__file__)))
 
 # pylint: disable=wrong-import-position
+from astropy import units as units_module
 from sqlalchemy import select, update, delete, func, and_, or_
 from django.shortcuts import render, redirect
 from django.views import View
@@ -22,6 +25,7 @@ from db_interface import Session
 from download_lcs import get_available_sectors
 from exclude_data import exclude_data
 from cache_interface import CacheSession, CachedBLS, CachedSED
+from sample_params import param_units, param_descriptions
 
 from .data_model import get_ticid_select_tables, PrepareRequest
 from .path_util import get_render_dir
@@ -51,6 +55,63 @@ def _plot_files(plot_dir, ticid):
     return ([single] if path.exists(single) else []) + [
         numbered[k] for k in sorted(numbered)
     ]
+
+
+def _format_values(values, spread, min_significant=2):
+    """
+    Format values to show their spread with ``min_significant`` digits.
+
+    Values with no (or no finite) spread get ``min_significant + 2`` digits.
+    """
+
+    largest = max((abs(v) for v in values if isfinite(v) and v), default=0)
+    if largest and isfinite(spread) and spread > 0:
+        significant = max(
+            min_significant,
+            floor(log10(largest)) - floor(log10(spread)) + min_significant,
+        )
+    else:
+        significant = min_significant + 2
+    return [f"{v:#.{significant}g}" for v in values]
+
+
+def _load_parameter_summary(plot_dir, ticid):
+    """
+    Return the TIC's parameter summary in a render directory, ready to show.
+
+    That is ``tess<TIC>_parameters.json`` (see
+    `chain_analysis.save_parameter_summary()`), with ``rows`` added: per
+    parameter its name, unit, description and the formatted best value and
+    quantiles. None if the directory has no summary for the TIC.
+    """
+
+    summary_fname = path.join(plot_dir, f"tess{ticid}_parameters.json")
+    if not path.exists(summary_fname):
+        return None
+    with open(summary_fname, "r", encoding="utf-8") as summary_file:
+        summary = json.load(summary_file)
+
+    units = param_units | {
+        "primary_mass": units_module.M_sun,
+        "secondary_mass": units_module.M_sun,
+    }
+    descriptions = param_descriptions | {
+        "primary_mass": "Primary mass",
+        "secondary_mass": "Secondary mass",
+    }
+    summary["rows"] = []
+    for name, values in summary["parameters"].items():
+        unit = units[name].to_string()
+        summary["rows"].append(
+            (name, unit, descriptions[name])
+            + tuple(
+                _format_values(
+                    [values["best"]] + values["quantiles"],
+                    values["quantiles"][-1] - values["quantiles"][0],
+                )
+            )
+        )
+    return summary
 
 
 class TICIdSelectorView(View):
@@ -349,14 +410,22 @@ class TICIdSelectorView(View):
             self._get_sector_context(displayed_ticid, pending_toggles)
         )
         # One entry per plot directory, with all of the TIC's images there
-        # (shown one below the other in the directory's grid area).
+        # (shown one below the other in the directory's grid area), followed
+        # by the TIC's parameter summary there, if any.
         for dirname, area in self.plot_dirs:
             encoded = []
             for plot_fname in _plot_files(dirname, displayed_ticid):
                 with open(plot_fname, "rb") as plotf:
                     encoded.append(b64encode(plotf.read()).decode("utf-8"))
             if encoded:
-                context["images"].append((dirname, encoded, area))
+                context["images"].append(
+                    (
+                        dirname,
+                        encoded,
+                        area,
+                        _load_parameter_summary(dirname, displayed_ticid),
+                    )
+                )
 
         return context
 

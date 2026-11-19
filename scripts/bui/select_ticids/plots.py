@@ -198,13 +198,24 @@ def maximized(tic_id, fname=None):
 
 
 def convergence(tic_id, fname=None):
-    """Create a plot to compare steps to burni-in."""
+    """
+    Create a plot to compare steps to burn-in.
+
+    When rendering to a file, the parameter summary (see
+    `chain_analysis.save_parameter_summary()`) is saved next to it, as
+    ``<plot name>_parameters.json``.
+    """
 
     return plot_tic(
         Namespace(
             tic_id=tic_id,
             remove_lc_trend="moving_median",
             plot_convergence=[None, "[[burnin], [stdev]]"],
+            parameter_summary_fname=(
+                None
+                if fname is None
+                else path.splitext(fname)[0] + "_parameters.json"
+            ),
             diagnostic_quantiles=numpy.array([0.1, 0.5, 0.9]),
             burnin_tolerance=1e-3,
             quantile_variance_realizations=100,

@@ -34,6 +34,7 @@ from light_curve_plotter import LightCurvePlotter
 from chain_analysis import (
     get_chain_expressions,
     get_convergence_data,
+    save_parameter_summary,
     get_lstsq_interpreters,
     get_initial_positions,
     get_walker_step_params,
@@ -181,6 +182,14 @@ def parse_command_line():
         "chain length to Raftery-Lewis burn-in estimate and/or quantile "
         "precision estimate for either the directly sampled quantities or those"
         " specified in ``--chain-expression``.",
+    )
+    parser.add_argument(
+        "--parameter-summary-fname",
+        default=None,
+        help="If specified along with ``--plot-convergence``, a JSON file is "
+        "created with the best sample and the 10, 50 and 90th percentiles "
+        "after the burn-in found for the convergence plot, for every sampling "
+        "parameter and the two masses.",
     )
     parser.add_argument(
         "--check-pickled",
@@ -416,8 +425,14 @@ def create_corner_plot(
 
 
 def create_convergence_plot(plot_data, config, num_walkers, _):
-    """Create a figure to gauge convergence of the chain per Raftery-Lewis."""
+    """
+    Create a figure to gauge convergence of the chain per Raftery-Lewis.
 
+    If ``config.parameter_summary_fname`` is set, also save the parameter
+    summary there (see `save_parameter_summary()`), using the same burn-in.
+    """
+
+    chain_data = plot_data
     plot_data = get_chain_expressions(plot_data, config.chain_expression)[0]
 
     print("Creating convergence plot")
@@ -432,6 +447,13 @@ def create_convergence_plot(plot_data, config, num_walkers, _):
         ]
     )
     convergence_data = get_convergence_data(plot_data, config, num_walkers)
+    if getattr(config, "parameter_summary_fname", None):
+        save_parameter_summary(
+            config.parameter_summary_fname,
+            chain_data,
+            num_walkers,
+            convergence_data["burnin"].max(),
+        )
 
     if len(config.diagnostic_quantiles) <= 10:
         cmap = colormaps["tab10"]
