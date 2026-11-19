@@ -205,11 +205,21 @@ class SplitNormalProposal:
         self.widths_minus = widths_minus
 
     def draw(self, num_draws, rng):
-        """Return num_draws samples, one per row."""
+        """
+        Return num_draws samples, one per row, distributed per `log_density`.
 
-        normal = rng.standard_normal((num_draws, self.center.size))
-        coordinates = normal * numpy.where(
-            normal > 0, self.widths_plus, self.widths_minus
+        Along each axis the positive side is chosen with probability
+        widths_plus / (widths_plus + widths_minus), the share of the density
+        on that side, and the distance from a half normal of that side's
+        width.
+        """
+
+        shape = (num_draws, self.center.size)
+        positive = rng.uniform(size=shape) * (
+            self.widths_plus + self.widths_minus
+        ) < self.widths_plus
+        coordinates = numpy.abs(rng.standard_normal(shape)) * numpy.where(
+            positive, self.widths_plus, -self.widths_minus
         )
         return self.center + coordinates @ self.axes.T
 
