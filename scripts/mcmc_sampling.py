@@ -163,6 +163,16 @@ def parse_command_line():
         help="The number of parallel processes to use.",
     )
     parser.add_argument(
+        "--worker-max-tasks",
+        type=int,
+        default=25600,
+        help="How many log-likelihood evaluations each worker process does "
+        "before it is replaced by a fresh one (a safeguard against memory "
+        "growth; none was seen over 4000 evaluations, 2026-11-19). The "
+        "default is 100 steps of 256 walkers. Every worker writes its own log "
+        "files, so a low value leaves many files.",
+    )
+    parser.add_argument(
         "--fname-datetime-format",
         default="%Y%m%d%H%M%S",
         help="How to format date and time as part of filenames (e.g. when "
@@ -547,7 +557,7 @@ def restart_sampling(
             max_workers=config.num_parallel,
             initializer=setup_process_map,
             initargs=(vars(config),),
-            max_tasks_per_child=1024,
+            max_tasks_per_child=config.worker_max_tasks,
         ) as pool:
             seed_log_prob = numpy.array(
                 [e[0] for e in pool.map(log_likelihood, seed_samples)]
@@ -708,7 +718,7 @@ def is_final_start(initial_state, log_likelihood, config, source):
         max_workers=config.num_parallel,
         initializer=setup_process_map,
         initargs=(vars(config),),
-        max_tasks_per_child=1024,
+        max_tasks_per_child=config.worker_max_tasks,
     ) as pool:
         initial_log_prob = numpy.array(
             [entry[0] for entry in pool.map(log_likelihood, initial_state)]
@@ -751,7 +761,7 @@ def check_log_likelihood_consistency(backend, log_likelihood, config):
         max_workers=config.num_parallel,
         initializer=setup_process_map,
         initargs=(vars(config),),
-        max_tasks_per_child=1024,
+        max_tasks_per_child=config.worker_max_tasks,
     ) as pool:
         computed = numpy.array(
             [e[0] for e in pool.map(log_likelihood, last_positions)]
@@ -896,7 +906,7 @@ def main(config):
             max_workers=config.num_parallel,
             initializer=setup_process_map,
             initargs=(vars(config),),
-            max_tasks_per_child=1024,
+            max_tasks_per_child=config.worker_max_tasks,
         ) as pool:
             EnsembleSampler(
                 *backend.shape,
