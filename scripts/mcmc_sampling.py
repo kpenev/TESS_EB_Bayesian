@@ -245,22 +245,24 @@ def parse_command_line():
         "--mode-hop-fraction",
         type=float,
         default=0.1,
-        help="Fraction of steps that propose moving each walker by the full "
-        "difference between two other walkers (differential evolution with "
-        "gamma = 1, ter Braak 2006) instead of the stretch move. This lets "
-        "walkers jump between separated solutions (e.g. young and old) in "
-        "proportion to their posterior mass.",
+        help="Fraction of steps that use the ``--mode-hop-move`` instead of "
+        "the stretch move, to let walkers jump between separated solutions "
+        "(e.g. young and old) in proportion to their posterior mass.",
     )
     parser.add_argument(
         "--mode-hop-move",
-        choices=["differential-evolution", "family-mixture"],
-        default="differential-evolution",
+        choices=["family-mixture", "differential-evolution"],
+        default="family-mixture",
         help="The move used for the ``--mode-hop-fraction`` of steps. "
-        "``differential-evolution`` is as described there. ``family-mixture`` "
-        "instead proposes each walker independently from an equal weight "
-        "mixture of the family proposals saved by initial_walkers.py in the "
-        "samples file (Metropolis-Hastings with the proposal density ratio), "
-        "so jumps do not need the solutions to have similar shapes.",
+        "``family-mixture`` proposes each walker independently from an equal "
+        "weight mixture of the family proposals saved by initial_walkers.py "
+        "in the samples file (Metropolis-Hastings with the proposal density "
+        "ratio), so jumps do not need the solutions to have similar shapes; "
+        "samples files prepared without proposals are refused. "
+        "``differential-evolution`` moves each walker by the full difference "
+        "between two other walkers (gamma = 1, ter Braak 2006), which rarely "
+        "crosses between solutions of different shapes in many dimensions "
+        "(TEC-119).",
     )
     parser.add_argument(
         "--initial-state-from",
