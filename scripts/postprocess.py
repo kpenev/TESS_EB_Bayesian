@@ -799,7 +799,9 @@ def main(config):
             ": discarded" if group in discarded else "",
         )
     if config.local_chains:
-        resolve_small_groups(backend, positions, labels, discarded, config)
+        labels = resolve_small_groups(
+            backend, positions, labels, discarded, config
+        )[0]
     if config.corner_plot_fname is None:
         return
     blobs = backend.get_blobs(discard=config.burn_in, thin=config.thin)
