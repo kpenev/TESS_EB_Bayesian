@@ -20,9 +20,15 @@ SED settings). This script:
      ``OUTPUT_DIR/<TIC>/superseded-<time>/``, with its samples file:
      prepare_sampling.sh skips a step whose output exists.
 
-2. Prints, one per line, the targets to prepare: status prepare in the
-   snapshot and no samples file yet (``OUTPUT_DIR/samples_seeded/``), those
-   in the ``--priority`` list first.
+2. Sets the data exclusions and bad SED settings of every target to prepare
+   (status prepare in the snapshot and no samples file yet,
+   ``OUTPUT_DIR/samples_seeded/``) to the snapshot's, as for a request, so
+   changes made in the review without a request reach this machine too. A
+   target whose rows change has any outputs of an unfinished preparation
+   moved to ``OUTPUT_DIR/<TIC>/superseded-<time>/``.
+
+3. Prints, one per line, the targets to prepare, those in the ``--priority``
+   list first.
 
 Without a database snapshot, the ``--priority`` list is printed as given
 (prepare exactly those targets); without either, it fails.
@@ -142,9 +148,13 @@ def update_cache(tic_id, cache_snapshot):
     """
     Set a target's exclusions and bad SED settings to the snapshot's.
 
+    A target without an SED row in the snapshot keeps this machine's settings
+    (no row is added for it).
+
     Returns:
-        bool:    Whether the exclusions changed (then the BLS row, computed
-            from the old selection of data, is deleted).
+        (bool, bool):    Whether the exclusions changed (then the BLS row,
+            computed from the old selection of data, is deleted), and whether
+            the bad SED settings changed.
     """
 
     with sessionmaker(open_snapshot(cache_snapshot))() as incoming:
@@ -181,12 +191,18 @@ def update_cache(tic_id, cache_snapshot):
             )
             cache.execute(delete(CachedBLS).where(CachedBLS.tic_id == tic_id))
         sed = cache.get(CachedSED, tic_id)
-        if sed is None:
+        if not settings:
+            settings_changed = False
+        elif sed is None:
             cache.add(CachedSED(tic_id=tic_id, **settings))
+            settings_changed = True
         else:
+            settings_changed = any(
+                getattr(sed, name) != value for name, value in settings.items()
+            )
             for name, value in settings.items():
                 setattr(sed, name, value)
-    return changed
+    return changed, settings_changed
 
 
 def move_outputs(tic_id, restart_step, output_dir):
@@ -235,7 +251,9 @@ def apply_requests(snapshots, review_table, output_dir):
                 f"Unknown restart step {request['restart_step']!r} of request "
                 f"{request['id']} (TIC {request['tic_id']})."
             )
-        exclusions_changed = update_cache(request["tic_id"], snapshots["cache"])
+        exclusions_changed = update_cache(
+            request["tic_id"], snapshots["cache"]
+        )[0]
         move_outputs(request["tic_id"], request["restart_step"], output_dir)
         with open(record_fname, "a", encoding="ascii") as record:
             record.write(f"{request['id']}\n")
@@ -251,6 +269,47 @@ def apply_requests(snapshots, review_table, output_dir):
                 else ""
             ),
         )
+
+
+def update_pending_cache(pending, cache_snapshot, output_dir):
+    """
+    Set the exclusions and bad SED settings of the targets to prepare to the
+    snapshot's.
+
+    Changes made in the review without a re-preparation request (e.g. to a
+    target sampled before and later returned to prepare) would otherwise
+    never reach this machine. A target whose rows change and which has
+    outputs from an earlier, unfinished preparation has all of them moved
+    aside, so it is prepared from the start with the new rows.
+    """
+
+    num_changed = 0
+    for tic_id in pending:
+        exclusions_changed, settings_changed = update_cache(
+            tic_id, cache_snapshot
+        )
+        if not (exclusions_changed or settings_changed):
+            continue
+        num_changed += 1
+        _logger.info(
+            "TIC %d: set to the review's %s%s.",
+            tic_id,
+            " and ".join(
+                name
+                for name, changed in (
+                    ("exclusions", exclusions_changed),
+                    ("bad SED settings", settings_changed),
+                )
+                if changed
+            ),
+            "; BLS row deleted" if exclusions_changed else "",
+        )
+        move_outputs(tic_id, "sed_grid_search", output_dir)
+    _logger.info(
+        "Updated the cache rows of %d of %d targets to prepare.",
+        num_changed,
+        len(pending),
+    )
 
 
 def get_pending(database_snapshot, review_table, output_dir):
@@ -307,6 +366,7 @@ def main(config):
     pending = get_pending(
         snapshots["database"], config.review_table, config.output_dir
     )
+    update_pending_cache(pending, snapshots["cache"], config.output_dir)
     pending_set = set(pending)
     for tic_id in priority:
         if tic_id not in pending_set:
