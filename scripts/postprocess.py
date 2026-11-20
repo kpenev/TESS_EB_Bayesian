@@ -109,11 +109,11 @@ def parse_command_line():
     parser.add_argument(
         "--walker-link-factor",
         type=float,
-        default=2.5,
+        default=1.5,
         help="Within a coarse group, two walkers are linked if their closest "
         "approach (whitened by the group's covariance) is at most this times "
-        "the group's median closest approach of a walker to its nearest "
-        "other walker.",
+        "the larger of their spreads (median distance of a walker's "
+        "positions from their mean).",
     )
     parser.add_argument(
         "--walker-min-stay-fraction",
@@ -122,6 +122,14 @@ def parse_command_line():
         help="An isolated set of walkers becomes a group only if they spend "
         "at least this fraction of the window there; otherwise it is logged "
         "as an excursion.",
+    )
+    parser.add_argument(
+        "--discard-move-fraction",
+        type=float,
+        default=0.1,
+        help="Groups with fewer than --group-min-large-walkers walkers, all "
+        "moving less often than this times the median move rate of all "
+        "walkers, are discarded as walkers stuck in small holes.",
     )
     parser.add_argument(
         "--walker-max-points",
@@ -359,7 +367,15 @@ def whiten(points, eigenvalue_floor=1e-6):
 
 def get_walker_distances(walker_positions, rng, max_points):
     """
-    Return the closest approach between every pair of walkers.
+    Return the closest approach between every pair of walkers, per spread.
+
+    Distances are in coordinates whitened by the covariance of all the given
+    positions (see `whiten()`). Each pair's closest approach is divided by
+    the larger of the two walkers' spreads (median distance of a walker's
+    positions from their mean), so it says whether the walkers came within
+    each other's range of motion, whatever the other walkers do: walkers
+    sampling one region come within a fraction of their spread of each
+    other, while walkers each stuck in its own hole stay many spreads apart.
 
     Args:
         walker_positions([array]):    The positions of each walker, one per
@@ -371,10 +387,9 @@ def get_walker_distances(walker_positions, rng, max_points):
             of its distinct positions, chosen at random.
 
     Returns:
-        array:    The smallest distance between positions of each pair of
-            walkers (infinite on the diagonal), shape (walkers, walkers), in
-            coordinates whitened by the covariance of all the given positions
-            (see `whiten()`).
+        array:    The closest approach of each pair of walkers divided by the
+            larger of their spreads (infinite on the diagonal), shape
+            (walkers, walkers).
     """
 
     transform = whiten(numpy.concatenate(walker_positions))
@@ -384,6 +399,14 @@ def get_walker_distances(walker_positions, rng, max_points):
         if len(points) > max_points:
             points = points[rng.choice(len(points), max_points, replace=False)]
         subsets.append(transform(points))
+    spreads = numpy.array(
+        [
+            numpy.median(
+                numpy.linalg.norm(points - points.mean(axis=0), axis=1)
+            )
+            for points in subsets
+        ]
+    )
     starts = numpy.cumsum([0] + [len(points) for points in subsets[:-1]])
     pooled = numpy.concatenate(subsets)
     result = numpy.empty((len(subsets), len(subsets)))
@@ -393,7 +416,8 @@ def get_walker_distances(walker_positions, rng, max_points):
         )
     result = numpy.minimum(result, result.T)
     numpy.fill_diagonal(result, numpy.inf)
-    return result
+    with numpy.errstate(divide="ignore"):
+        return result / numpy.maximum.outer(spreads, spreads)
 
 
 def find_isolated_sets(walker_positions, coarse_group, rng, config):
@@ -416,13 +440,12 @@ def find_isolated_sets(walker_positions, coarse_group, rng, config):
         [(array, float)]:
             For each set other than the largest: which of the walkers are in
             it, and their closest approach to the other walkers relative to
-            the group's median.
+            the walkers' spreads (see `get_walker_distances()`).
     """
 
     distances = get_walker_distances(
         walker_positions, rng, config.walker_max_points
     )
-    distances /= numpy.median(distances.min(axis=1))
     walker_set = connected_components(
         distances <= config.walker_link_factor, directed=False
     )[1]
@@ -454,14 +477,15 @@ def find_isolated_walkers(positions, labels, config):
     positions in it are whitened by the group's own covariance, and two
     walkers are linked if their closest approach (see
     `get_walker_distances()`) is at most ``config.walker_link_factor`` times
-    the group's median closest approach of a walker to its nearest other
-    walker. Walkers that never exchanged never came close, so each linked
-    set (single linkage) other than the group's largest becomes a new group,
-    taking its walkers' positions in that coarse group, unless those walkers
-    spend less than ``config.walker_min_stay_fraction`` of the window there:
-    such a set is a brief excursion of walkers living elsewhere, and is only
-    logged. This catches the one or few walkers far from everyone else that
-    bisection cannot split off, and any large group bisection missed (e.g.
+    the larger of their spreads. Walkers that never exchanged never came
+    within each other's range of motion, so each linked set (single linkage)
+    other than the group's largest becomes a new group, taking its walkers'
+    positions in that coarse group, unless those walkers spend less than
+    ``config.walker_min_stay_fraction`` of the window there: such a set is a
+    brief excursion of walkers living elsewhere, and is only logged. This
+    catches the one or few walkers far from everyone else that bisection
+    cannot split off, walkers each stuck in its own hole (even when many of
+    them make up a coarse group), and any large group bisection missed (e.g.
     the middle one of three in a row when every 2-means run cut through
     it).
 
@@ -481,7 +505,7 @@ def find_isolated_walkers(positions, labels, config):
             The group of each position with the new groups added, and for
             each new group: its index, the coarse group it came from, its
             walkers and their closest approach to the coarse group's other
-            walkers relative to the group's median.
+            walkers relative to the walkers' spreads.
     """
 
     rng = numpy.random.default_rng(config.seed)
@@ -524,6 +548,78 @@ def find_isolated_walkers(positions, labels, config):
             )
             num_groups += 1
     return new_labels, isolated
+
+
+def get_move_rates(backend, burn_in, chunk_size=1000):
+    """
+    Return the fraction of steps after the burn-in in which each walker moved.
+
+    Every step is used (not thinned), read ``chunk_size`` steps at a time.
+
+    Args:
+        backend(HDFBackend):    The samples file's chain.
+
+        burn_in(int):    The steps to skip.
+
+    Returns:
+        array:    The move rate of each walker.
+    """
+
+    num_steps = backend.iteration
+    moves = 0
+    with backend.open() as samples_file:
+        chain = samples_file[backend.name]["chain"]
+        previous = chain[burn_in]
+        for first in range(burn_in + 1, num_steps, chunk_size):
+            positions = chain[first : min(first + chunk_size, num_steps)]
+            moves = moves + numpy.sum(
+                numpy.any(
+                    numpy.concatenate([previous[None], positions[:-1]])
+                    != positions,
+                    axis=-1,
+                ),
+                axis=0,
+            )
+            previous = positions[-1]
+    return moves / (num_steps - burn_in - 1)
+
+
+def find_discarded_groups(labels, move_rates, config):
+    """
+    Return the small groups whose walkers barely move.
+
+    A walker's move rate is roughly the size of the acceptable region around
+    it (along the directions it proposes in) over its distance to the
+    walkers it pairs with. A walker stuck in its own small hole accepts
+    almost nothing, while a lone walker in a broad region moves about as
+    often as the slow walkers of a large group. Groups with fewer than
+    ``config.group_min_large_walkers`` walkers, all of which move less often
+    than ``config.discard_move_fraction`` times the median move rate of all
+    walkers, are discarded.
+
+    Args:
+        labels(array):    The group of each position, shape (steps,
+            walkers).
+
+        move_rates(array):    The move rate of each walker (see
+            `get_move_rates()`).
+
+        config:    The command line configuration.
+
+    Returns:
+        set:    The discarded groups.
+    """
+
+    threshold = config.discard_move_fraction * numpy.median(move_rates)
+    discarded = set()
+    for group in range(labels.max() + 1):
+        walkers = numpy.flatnonzero((labels == group).any(axis=0))
+        if (
+            walkers.size < config.group_min_large_walkers
+            and (move_rates[walkers] < threshold).all()
+        ):
+            discarded.add(group)
+    return discarded
 
 
 def get_plot_ranges(plot_data, ranges):
@@ -583,7 +679,7 @@ def rescale_histograms(figure, num_columns):
         axis.set_ylim(0, 1.1)
 
 
-def plot_groups(labels, plot_data, ranges, config):
+def plot_groups(labels, plot_data, ranges, discarded, config):
     """
     Save a corner plot of the walker positions, colored by group.
 
@@ -592,7 +688,7 @@ def plot_groups(labels, plot_data, ranges, config):
     fewer than ``config.group_min_large_walkers`` walkers, so small groups
     stay visible) and histograms each scaled to a maximum of 1 (see
     `rescale_histograms()`); the legend gives each group's fraction of all
-    positions.
+    positions and marks discarded groups.
 
     Args:
         labels(array):    The group of each position, shape (steps,
@@ -603,6 +699,9 @@ def plot_groups(labels, plot_data, ranges, config):
 
         ranges:    The range of each column (see `get_plot_ranges()`).
 
+        discarded(set):    The discarded groups (see
+            `find_discarded_groups()`).
+
         config:    The command line configuration (``corner_plot_fname``,
             ``corner_max_points``, ``group_min_large_walkers``, ``seed`` and
             ``tic_id``).
@@ -611,7 +710,6 @@ def plot_groups(labels, plot_data, ranges, config):
     flat_labels = labels.flatten()
     rng = numpy.random.default_rng(config.seed)
     plot_ranges = get_plot_ranges(plot_data, ranges)
-    colors = pyplot.rcParams["axes.prop_cycle"].by_key()["color"]
     figure = None
     legend_handles = []
     for group in range(flat_labels.max() + 1):
@@ -628,7 +726,8 @@ def plot_groups(labels, plot_data, ranges, config):
             indices = numpy.tile(
                 indices, len(plot_data.columns) // indices.size + 1
             )
-        color = colors[group % len(colors)]
+        # The default color cycle (wraps around).
+        color = f"C{group}"
         figure = corner(
             plot_data.iloc[indices].to_numpy(),
             fig=figure,
@@ -651,7 +750,8 @@ def plot_groups(labels, plot_data, ranges, config):
                 [],
                 color=color,
                 label=f"group {group}: {fraction:.3f} of positions, "
-                f"{num_walkers} walkers",
+                f"{num_walkers} walkers"
+                + (" (discarded)" if group in discarded else ""),
             )
         )
     rescale_histograms(figure, len(plot_data.columns))
@@ -695,20 +795,26 @@ def main(config):
     for group in isolated:
         _logger.info(
             "Isolated walkers %s of group %d -> group %d (closest approach "
-            "to the group's other walkers %.1f times the group's typical).",
+            "to the group's other walkers %.1f times their spreads).",
             group["walkers"],
             group["coarse_group"],
             group["group"],
             group["separation"],
         )
+    move_rates = get_move_rates(backend, config.burn_in)
+    discarded = find_discarded_groups(labels, move_rates, config)
     for group in range(labels.max() + 1):
         here = labels == group
         _logger.info(
-            "Group %d: %.3f of positions, %d walkers ever, %d always.",
+            "Group %d: %.3f of positions, %d walkers ever, %d always, "
+            "median move rate %.3f of all walkers' median%s.",
             group,
             here.mean(),
             here.any(axis=0).sum(),
             here.all(axis=0).sum(),
+            numpy.median(move_rates[here.any(axis=0)])
+            / numpy.median(move_rates),
+            ": discarded" if group in discarded else "",
         )
     if config.corner_plot_fname is None:
         return
@@ -725,7 +831,7 @@ def main(config):
     plot_data, ranges = get_chain_expressions(
         plot_data, config.chain_expression
     )
-    plot_groups(labels, plot_data, ranges, config)
+    plot_groups(labels, plot_data, ranges, discarded, config)
 
 
 if __name__ == "__main__":
