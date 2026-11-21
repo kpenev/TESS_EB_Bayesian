@@ -889,12 +889,13 @@ def get_model_binaries(
     return result
 
 
-def get_plot_data(  # pylint: disable=too-many-statements
+def get_plot_data(  # pylint: disable=too-many-statements,too-many-locals
     config, log_likelihood
 ):
     """Return the data required to generate the plots spceified by config."""
 
     num_iterations = 0
+    chains_read = []
     raw_data = None
     log_prob = None
     selected = None
@@ -910,6 +911,7 @@ def get_plot_data(  # pylint: disable=too-many-statements
             )
 
             if backend.iteration > 0:
+                chains_read.append(chain_name)
                 num_iterations += min(
                     backend.iteration - config.burn_in, max_steps
                 )
@@ -977,6 +979,14 @@ def get_plot_data(  # pylint: disable=too-many-statements
                 "logprob",
                 sub_log_prob,
             )
+            if len(chains_read) == 1:
+                # Where the plotted steps sit in the chain, so results in
+                # plotted steps (e.g. the burn-in) can be converted to chain
+                # steps. Undefined for concatenated preliminary chains.
+                # Plotted step i is chain step first_step + i * thin.
+                plot_data.attrs["first_step"] = int(burn_in + config.thin - 1)
+                plot_data.attrs["thin"] = int(config.thin)
+                plot_data.attrs["chain_steps"] = int(burn_in + num_iterations)
     if config.burn_in == -1:
         plot_data = get_initial_positions(config, backend.shape[0])
         plot_data = pandas.DataFrame(

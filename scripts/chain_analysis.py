@@ -192,12 +192,21 @@ def save_parameter_summary(
     parameters are the sampling parameters, plus the primary and secondary
     masses.
 
+    ``num_steps`` and ``burnin`` count plotted steps, which may be the
+    thinned tail of the chain. To relate them to the chain, the summary also
+    has the chain step of the first plotted step (``first_chain_step``), the
+    thinning (``thin``), the chain length when read (``chain_steps``) and the
+    chain step at which the burn-in ends (``burnin_chain_step``, null if not
+    converged): discarding that many steps of the chain discards the burn-in.
+
     Args:
         summary_fname(str):    The JSON file to create.
 
         plot_data(pandas.DataFrame):    The chain, as returned by
-            `visualize.get_plot_data()`: a ``logprob`` column and one column
-            per sampling parameter, one row per step and walker (step major).
+            `visualize.get_plot_data()` for a single chain: a ``logprob``
+            column and one column per sampling parameter, one row per step and
+            walker (step major), with ``first_step``, ``thin`` and
+            ``chain_steps`` in ``attrs``.
 
         num_walkers(int):    The number of walkers in the chain.
 
@@ -212,6 +221,16 @@ def save_parameter_summary(
 
     num_steps = plot_data.shape[0] // num_walkers
     assert num_walkers * num_steps == plot_data.shape[0]
+    chain_position = {
+        key: plot_data.attrs.get(key)
+        for key in ["first_step", "thin", "chain_steps"]
+    }
+    if None in chain_position.values():
+        raise ValueError(
+            "The parameter summary needs the position of the plotted steps in "
+            f"the chain (plot_data.attrs, got {chain_position!r}), only "
+            "defined when a single chain is read."
+        )
 
     converged = bool(burnin < num_steps)
     post_burnin = plot_data.iloc[(burnin if converged else 0) * num_walkers :]
@@ -241,6 +260,15 @@ def save_parameter_summary(
         "num_steps": int(num_steps),
         "burnin": int(burnin),
         "converged": converged,
+        # The above count plotted steps; these are steps of the chain.
+        "first_chain_step": int(chain_position["first_step"]),
+        "thin": int(chain_position["thin"]),
+        "chain_steps": int(chain_position["chain_steps"]),
+        "burnin_chain_step": (
+            int(chain_position["first_step"] + burnin * chain_position["thin"])
+            if converged
+            else None
+        ),
         "quantiles": list(quantiles),
         "parameters": {
             name: {
