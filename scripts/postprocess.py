@@ -178,6 +178,41 @@ def parse_command_line():
         "distances from its mean (whitened by the group's covariance).",
     )
     parser.add_argument(
+        "--bridge-max-components",
+        type=int,
+        default=8,
+        help="Reference densities for bridge sampling are Gaussian mixtures "
+        "of at most this many components (step 4).",
+    )
+    parser.add_argument(
+        "--bridge-mixture-inits",
+        type=int,
+        default=5,
+        help="Each mixture is the best of this many initializations.",
+    )
+    parser.add_argument(
+        "--bridge-mixture-max-iterations",
+        type=int,
+        default=1000,
+        help="Fitting a mixture fails if it has not converged after this many "
+        "iterations.",
+    )
+    parser.add_argument(
+        "--bridge-samples-per-parameter",
+        type=float,
+        default=10.0,
+        help="Mixtures need at least this many effective samples per "
+        "parameter of each component (252 parameters each in 21-D), which "
+        "caps the number of components.",
+    )
+    parser.add_argument(
+        "--bridge-noise-factor",
+        type=float,
+        default=2.0,
+        help="The mixture used has the fewest components whose held-out score "
+        "is within this many standard errors of the best one's.",
+    )
+    parser.add_argument(
         "--local-chain-fname-pattern",
         default=path.join(
             results_dir, "local_chains", "tess{tic_id:d}_walkers{walkers}.h5"
