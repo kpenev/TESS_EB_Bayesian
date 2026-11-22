@@ -30,7 +30,7 @@ from bui.db_interface import Session
 from bui.select_ticids.data_model import JobGroup, get_ticid_select_tables
 from utils import lmfit_and_tweak, params_to_sample, FamilyMixtureProposal
 from initial_walkers import load_proposals
-from hacked_emcee_hdf5_backend import HDFBackend
+from hacked_emcee_hdf5_backend import HDFBackend, CorruptSamplesError
 from log_likelihood import SampleParams, LogLikelihood
 from binary_parameters import BinaryParams
 from log_likelihood_priors import LogLikelihoodPriorsOnly
@@ -930,6 +930,9 @@ def main(config):
                     initial_state is None and not config.changed_likelihood
                 ),
             )
+            # Steps are written to the HDF5 file in batches; the restart
+            # below reads the chain from it.
+            backend.flush()
             if not final_run:
                 backend, initial_state, final_run = restart_sampling(
                     backend, config, log_likelihood
@@ -938,4 +941,9 @@ def main(config):
 
 if __name__ == "__main__":
     numpy.set_printoptions(edgeitems=20)
-    main(parse_command_line())
+    try:
+        main(parse_command_line())
+    except CorruptSamplesError:
+        # Already logged as CRITICAL. The launcher loop stops retrying after
+        # a few of these in a row (they may also come from a storage outage).
+        raise SystemExit(3) from None

@@ -1,30 +1,71 @@
 # -*- coding: utf-8 -*-
 
-"""Modified HDF5 EMCEE backend EMCEE that buffers steps in case saving fails."""
+"""
+Modified HDF5 EMCEE backend that buffers steps in case saving fails.
+
+Each step is appended to a buffer file (``<samples>.unsaved_steps``) as soon
+as it is generated, and the buffered steps are written to the HDF5 file in
+batches. The buffer starts with the HDF5 iteration at which its first step
+belongs, followed by the pickled steps. It is best-effort: a buffer that is
+inconsistent with the HDF5 file is discarded, since the few steps it holds
+are quick to redo.
+
+Writes are ordered so that an interrupted write leaves the files consistent:
+chain rows are on disk before the iteration counting them, and the buffer is
+replaced atomically only after that. Damage the storage may still cause is
+repaired when a samples file is opened for writing, where possible (logged as
+ERROR), otherwise ``CorruptSamplesError`` is raised. See TEC-145.
+
+The random state of the sampler is not stored, so each resumed run starts
+from a fresh one.
+"""
 
 from __future__ import division, print_function
 
-__all__ = ["HDFBackend", "TempHDFBackend"]
+__all__ = ["HDFBackend", "TempHDFBackend", "CorruptSamplesError"]
 
 import os
 import os.path
+import re
 from tempfile import NamedTemporaryFile
 import pickle
 import logging
-from time import sleep
+from time import monotonic
 
 import numpy as np
 
 from emcee import __version__
 from emcee.backends import Backend
 
-
 try:
     import h5py
 except ImportError:
     h5py = None
 
+_logger = logging.getLogger(__name__)
 
+# How HDF5 reports a file shorter than the size recorded in it.
+_truncated_file_message = re.compile(
+    r"truncated file: eof = (\d+).*stored_eof = (\d+)"
+)
+
+
+class CorruptSamplesError(RuntimeError):
+    """The samples file is damaged beyond automatic repair."""
+
+
+def _fsync_path(path):
+    """Make sure everything written to a file or directory is on disk."""
+
+    descriptor = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+# The buffer and batching state adds to the attributes inherited from emcee.
+# pylint: disable-next=too-many-instance-attributes
 class HDFBackend(Backend):
     """A backend that stores the chain in an HDF5 file using h5py
 
@@ -41,71 +82,191 @@ class HDFBackend(Backend):
 
     """
 
-    # Inherited from EMCEE
-    # pylint: disable=invalid-name
-    def _save_step_to_file(self, state, accepted, f):
-        """Save a single step to already appropriately open HDF5 file."""
+    @staticmethod
+    def _write_steps(steps, group, iteration):
+        """
+        Write steps to the chain rows starting at the given iteration.
 
-        g = f[self.name]
-        iteration = g.attrs["iteration"]
+        Does not update the iteration attribute: the caller does that once
+        the rows are on disk.
 
-        g["chain"][iteration, :, :] = state.coords
-        g["log_prob"][iteration, :] = state.log_prob
-        if state.blobs is not None:
-            g["blobs"][iteration, :] = state.blobs
-        g["accepted"][:] += accepted
+        Args:
+            steps(list):    The ``(state, accepted)`` steps to write.
 
-        for i, v in enumerate(state.random_state):
-            g.attrs["random_state_{0}".format(i)] = v
+            group(h5py.Group):    The chain group of the open samples file.
 
-        g.attrs["iteration"] = iteration + 1
+            iteration(int):    The row for the first step.
 
-    # pylint: enable=invalid-name
+        Returns:
+            int:
+                The iteration after the last written step.
+        """
 
-    def _flush_unsaved_steps(self):
-        """Save any unsaved steps and initialize a fresh unsaved steps file."""
+        end = iteration + len(steps)
+        group["chain"][iteration:end] = np.stack(
+            [state.coords for state, _ in steps]
+        )
+        group["log_prob"][iteration:end] = np.stack(
+            [state.log_prob for state, _ in steps]
+        )
+        if steps[0][0].blobs is not None:
+            group["blobs"][iteration:end] = np.stack(
+                [state.blobs for state, _ in steps]
+            )
+        group["accepted"][:] += np.sum(
+            [accepted for _, accepted in steps], axis=0
+        )
+        return end
 
-        pending_steps = os.path.exists(self.unsaved_steps_fname)
-        saved_iterations = 0
-        if os.path.exists(self.filename):
-            with self.open("r+" if pending_steps else "r") as progress_file:
-                if self.name not in progress_file:
-                    return
-                saved_iterations = progress_file[self.name].attrs["iteration"]
-                if pending_steps:
-                    with open(
-                        self.unsaved_steps_fname, "rb"
-                    ) as unsaved_steps_file:
-                        unsaved_iteration = pickle.load(unsaved_steps_file)
-                        print(
-                            f"Unsaved iteration: {unsaved_iteration}, "
-                            f"Saved iterations: {saved_iterations}"
-                        )
-                        assert unsaved_iteration <= saved_iterations
-                        try:
-                            while unsaved_iteration < saved_iterations:
-                                pickle.load(unsaved_steps_file)
-                                unsaved_iteration += 1
-                            while True:
-                                step = pickle.load(unsaved_steps_file)
-                                self._save_step_to_file(*step, progress_file)
-                                saved_iterations += 1
-                        except EOFError:
-                            logging.getLogger(__name__).info(
-                                "Successfully added %d steps to %s",
-                                saved_iterations - unsaved_iteration,
-                                self.filename,
-                            )
-        elif pending_steps:
-            with open(self.unsaved_steps_fname, "rb") as unsaved_steps_file:
-                assert pickle.load(unsaved_steps_file) == 0
+    def _load_buffer(self):
+        """
+        Return the contents of the buffer, dropping what cannot be used.
 
-        with open(self.unsaved_steps_fname, "wb") as unsaved_steps_file:
-            pickle.dump(saved_iterations, unsaved_steps_file)
+        Reading stops at the first unreadable record (normally a step whose
+        writing was interrupted); the records before it are kept.
+
+        Returns:
+            (int or None, list):
+                The iteration of the first buffered step (None if the buffer
+                is missing or unusable) and the buffered ``(state, accepted)``
+                steps.
+        """
+
+        if not os.path.exists(self.unsaved_steps_fname):
+            return None, []
+        records = []
+        with open(self.unsaved_steps_fname, "rb") as buffer_file:
+            while True:
+                try:
+                    records.append(pickle.load(buffer_file))
+                except EOFError:
+                    break
+                # Unpickling damaged data can raise almost anything.
+                # pylint: disable=broad-exception-caught
+                except Exception:
+                    # pylint: enable=broad-exception-caught
+                    _logger.error(
+                        "Dropping unreadable data after %d records of %s",
+                        len(records),
+                        repr(self.unsaved_steps_fname),
+                        exc_info=True,
+                    )
+                    break
+        if not records:
+            return None, []
+        if not isinstance(records[0], (int, np.integer)) or not all(
+            isinstance(step, tuple) and len(step) == 2 for step in records[1:]
+        ):
+            _logger.error(
+                "Discarding %s: it does not start with an iteration followed "
+                "by steps",
+                repr(self.unsaved_steps_fname),
+            )
+            return None, []
+        return int(records[0]), records[1:]
+
+    def _start_buffer(self, iteration):
+        """Atomically replace the buffer by an empty one at the iteration."""
+
+        directory = os.path.dirname(os.path.abspath(self.unsaved_steps_fname))
+        with NamedTemporaryFile(
+            dir=directory,
+            prefix=os.path.basename(self.unsaved_steps_fname) + ".",
+            suffix=".tmp",
+            delete=False,
+        ) as new_buffer:
+            pickle.dump(int(iteration), new_buffer)
+            new_buffer.flush()
+            os.fsync(new_buffer.fileno())
+        os.replace(new_buffer.name, self.unsaved_steps_fname)
+        _fsync_path(directory)
+        self._steps_since_flush = 0
+        self._last_flush = monotonic()
+
+    def flush(self):
+        """
+        Write the buffered steps to the HDF5 file and start a new buffer.
+
+        The chain rows are made durable before the iteration attribute that
+        counts them, and the buffer is replaced only after that, so an
+        interruption at any point leaves files that the next flush handles:
+        rows written past the iteration are overwritten, and steps already
+        counted by the iteration are skipped.
+        """
+
+        start, steps = self._load_buffer()
+        if not os.path.exists(self.filename):
+            if steps:
+                _logger.error(
+                    "Discarding %d buffered steps: %s does not exist",
+                    len(steps),
+                    repr(self.filename),
+                )
+            self._start_buffer(0)
+            return
+        with self.open("r+" if steps else "r") as samples_file:
+            if self.name not in samples_file:
+                return
+            group = samples_file[self.name]
+            saved = int(group.attrs["iteration"])
+            if start is None:
+                if steps:
+                    _logger.error(
+                        "Discarding %d buffered steps of unknown iteration",
+                        len(steps),
+                    )
+                steps = []
+            elif start > saved:
+                _logger.error(
+                    "Discarding %d buffered steps from iteration %d: %s has "
+                    "only %d, the steps in between were lost",
+                    len(steps),
+                    start,
+                    repr(self.filename),
+                    saved,
+                )
+                steps = []
+            else:
+                steps = steps[saved - start :]
+            if steps:
+                end = self._write_steps(steps, group, saved)
+                samples_file.flush()
+                _fsync_path(self.filename)
+                group.attrs["iteration"] = end
+                samples_file.flush()
+                _fsync_path(self.filename)
+                _logger.debug(
+                    "Added %d steps to %s", len(steps), repr(self.filename)
+                )
+                saved = end
+        self._start_buffer(saved)
 
     # Inherited from EMCEE
     # pylint: disable=super-init-not-called
-    def __init__(self, filename, name="mcmc", read_only=False, dtype=None):
+    # pylint: disable=too-many-arguments
+    def __init__(
+        self,
+        filename,
+        name="mcmc",
+        read_only=False,
+        dtype=None,
+        *,
+        flush_steps=100,
+        flush_seconds=600.0,
+    ):
+        """
+        Open (and if writable, check and repair) the given samples file.
+
+        Args:
+            flush_steps(int):    Write buffered steps to the HDF5 file after
+                this many steps.
+
+            flush_seconds(float):    Write buffered steps to the HDF5 file
+                after this many seconds, even if fewer than ``flush_steps``.
+
+        See the class docstring for the other arguments.
+        """
+
         if h5py is None:
             raise ImportError("you must install 'h5py' to use the HDFBackend")
         self.filename = filename
@@ -119,13 +280,110 @@ class HDFBackend(Backend):
             self.dtype = dtype
 
         self._has_blobs = None
+        self._shape = None
+        self.flush_steps = flush_steps
+        self.flush_seconds = flush_seconds
+        self._steps_since_flush = 0
+        self._last_flush = monotonic()
         self.unsaved_steps_fname = (
             os.path.splitext(filename)[0] + ".unsaved_steps"
         )
         if not read_only:
-            self._flush_unsaved_steps()
+            if os.path.exists(filename):
+                self._check_and_repair()
+            self.flush()
 
+    # pylint: enable=too-many-arguments
     # pylint: enable=super-init-not-called
+
+    def _open_for_check(self):
+        """Open the samples file for reading, padding it if truncated."""
+
+        try:
+            return h5py.File(self.filename, "r")
+        except OSError as error:
+            truncated = _truncated_file_message.search(str(error))
+            if truncated is None or int(truncated[2]) <= int(truncated[1]):
+                raise
+            _logger.error(
+                "%s is %d bytes shorter than the size recorded in it (the "
+                "storage lost a write); padding it with zeros",
+                repr(self.filename),
+                int(truncated[2]) - int(truncated[1]),
+            )
+            os.truncate(self.filename, int(truncated[2]))
+            _fsync_path(self.filename)
+            return h5py.File(self.filename, "r")
+
+    def _check_and_repair(self):
+        """
+        Repair the damage interrupted writes can leave in the samples file.
+
+        Each repair is logged as ERROR:
+
+            * a file shorter than the size recorded in it is padded with
+              zeros;
+
+            * unreadable random state attributes (no longer used) are
+              deleted;
+
+            * rows counted by the iteration but never written (all zero) are
+              uncounted.
+
+        Raises:
+            CorruptSamplesError:    If the file cannot be read for any other
+                reason. This may also be a storage outage, so callers should
+                retry a few times before giving up on the file.
+        """
+
+        try:
+            with self._open_for_check() as samples_file:
+                if self.name not in samples_file:
+                    return
+                group = samples_file[self.name]
+                bad_attributes = []
+                for attribute in list(group.attrs):
+                    try:
+                        group.attrs[attribute]
+                    except OSError:
+                        if not attribute.startswith("random_state_"):
+                            raise
+                        bad_attributes.append(attribute)
+                iteration = int(group.attrs["iteration"])
+                valid = min(iteration, group["chain"].shape[0])
+                while valid > 0 and not group["chain"][valid - 1].any():
+                    valid -= 1
+            if not bad_attributes and valid == iteration:
+                return
+            with h5py.File(self.filename, "r+") as samples_file:
+                group = samples_file[self.name]
+                for attribute in bad_attributes:
+                    _logger.error(
+                        "Deleting unreadable attribute %s of %s",
+                        attribute,
+                        repr(self.filename),
+                    )
+                    del group.attrs[attribute]
+                if valid < iteration:
+                    _logger.error(
+                        "Rolling back %s from iteration %d to %d: the last "
+                        "rows were never written",
+                        repr(self.filename),
+                        iteration,
+                        valid,
+                    )
+                    group.attrs["iteration"] = valid
+                samples_file.flush()
+            _fsync_path(self.filename)
+        except OSError as error:
+            _logger.critical(
+                "%s is damaged beyond automatic repair",
+                repr(self.filename),
+                exc_info=True,
+            )
+            raise CorruptSamplesError(
+                f"{self.filename!r} is damaged beyond automatic repair"
+            ) from error
 
     # Inherited from EMCEE
     # pylint: disable=missing-function-docstring
@@ -189,9 +447,10 @@ class HDFBackend(Backend):
                 maxshape=(None, nwalkers),
                 dtype=self.dtype,
             )
+        self._shape = (nwalkers, ndim)
         if os.path.exists(self.unsaved_steps_fname):
             os.remove(self.unsaved_steps_fname)
-        self._flush_unsaved_steps()
+        self.flush()
 
     def has_blobs(self):
         if self._has_blobs is None:
@@ -229,9 +488,13 @@ class HDFBackend(Backend):
 
     @property
     def shape(self):
-        with self.open() as f:
-            g = f[self.name]
-            return g.attrs["nwalkers"], g.attrs["ndim"]
+        # Read once: emcee checks every step against it, and it changes only
+        # through reset().
+        if self._shape is None:
+            with self.open() as f:
+                g = f[self.name]
+                self._shape = (g.attrs["nwalkers"], g.attrs["ndim"])
+        return self._shape
 
     @property
     def iteration(self):
@@ -245,16 +508,15 @@ class HDFBackend(Backend):
 
     @property
     def random_state(self):
-        with self.open() as f:
-            elements = [
-                v
-                for k, v in sorted(f[self.name].attrs.items())
-                if k.startswith("random_state_")
-            ]
-        # Inherited from EMCEE
-        # pylint: disable=len-as-condition
-        return elements if len(elements) else None
-        # pylint: enable=len-as-condition
+        """
+        Always None: the random state is not stored (TEC-145).
+
+        Files written before still hold it as attributes; it is ignored so
+        that resumed runs do not all replay the same stale state. emcee then
+        starts from a fresh random state.
+        """
+
+        return None
 
     # pylint: enable=missing-function-docstring
 
@@ -302,30 +564,31 @@ class HDFBackend(Backend):
 
         """
 
-        retry_check = 10
-        while retry_check > 0:
+        self._check(state, accepted)
+
+        with open(self.unsaved_steps_fname, "ab") as buffer_file:
+            pickle.dump((state, accepted), buffer_file)
+            buffer_file.flush()
+            os.fsync(buffer_file.fileno())
+        self._steps_since_flush += 1
+
+        if (
+            self._steps_since_flush >= self.flush_steps
+            or monotonic() - self._last_flush >= self.flush_seconds
+        ):
             try:
-                self._check(state, accepted)
-                retry_check = 0
-            except (BlockingIOError, OSError):
-                retry_check -= 1
-                if retry_check > 0:
-                    logging.getLogger(__name__).error(
-                        "Failed to _check step for saving. Retry in 1 min"
-                    )
-                    sleep(60)
-                else:
-                    raise
-
-        with open(self.unsaved_steps_fname, "ab") as unsaved_steps_file:
-            pickle.dump((state, accepted), unsaved_steps_file)
-
-        try:
-            self._flush_unsaved_steps()
-        except (BlockingIOError, OSError):
-            logging.getLogger(__name__).error(
-                "Failed to save step to HDF5 file, will try again later"
-            )
+                self.flush()
+            except OSError:
+                _logger.error(
+                    "Failed to save buffered steps to %s, will try again "
+                    "after the next %d steps or %s seconds",
+                    repr(self.filename),
+                    self.flush_steps,
+                    self.flush_seconds,
+                    exc_info=True,
+                )
+                self._steps_since_flush = 0
+                self._last_flush = monotonic()
 
 
 class TempHDFBackend:
