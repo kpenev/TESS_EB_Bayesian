@@ -1,13 +1,15 @@
 """
 Bridge sampling of the mass of each confirmed region (step 4 of TEC-142).
 
-So far: the reference density of a region, a Gaussian mixture fitted to
-samples of the region, with the number of components chosen by how well the
-mixture matches the posterior on samples held out from the fit. The
-cross-fitting (which samples are fitted and which held out) and the bridge
-estimate itself are to come.
+So far: means over a region's samples with their errors by walker batch
+means (`get_batch_mean()`), and the reference density of a region, a
+Gaussian mixture fitted to samples of the region, with the number of
+components chosen by how well the mixture matches the posterior on samples
+held out from the fit. The cross-fitting (which samples are fitted and which
+held out) and the bridge estimate itself are to come.
 """
 
+from collections import namedtuple
 import logging
 
 import numpy
@@ -133,15 +135,89 @@ def fit_mixture(points, num_components, seed, config):
     return ReferenceDensity(mixture, mean, scale)
 
 
+BatchMean = namedtuple(
+    "BatchMean", ["mean", "variance", "effective_size", "effective_walkers"]
+)
+
+
+def get_batch_mean(values, walkers):
+    """
+    Return the mean of values over samples and its variance, by walker.
+
+    Batch means with each walker as one batch: a walker's sum of the values
+    is one measurement, and walkers are treated as independent (their
+    correlation is weak, since at every step each walker is paired with a
+    different, random one). Residuals S_w - n_w * mean allow walkers with
+    different numbers of samples, e.g. walkers that leave and re-enter a
+    region. Gaps, several stretches of one walker and the autocorrelation
+    within a walker all end up inside its sum, so no autocorrelation time
+    is estimated.
+
+    Args:
+        values(array):    The value at each sample along the last axis;
+            leading axes are separate functions, each estimated on its own.
+
+        walkers(array):    The walker of each sample, in any order.
+
+    Returns:
+        BatchMean:
+            ``mean``, its ``variance`` and the ``effective_size`` (the
+            variance of the values over the variance of their mean, at most
+            the number of samples, which is also used where the values do
+            not vary), each with the leading shape of ``values``; and the
+            ``effective_walkers``, N^2 / sum of n_w^2 for N samples of which
+            n_w are walker w's (a diagnostic of how many walkers the
+            estimate rests on).
+    """
+
+    walker_index = numpy.unique(walkers, return_inverse=True)[1]
+    num_walkers = walker_index.max() + 1
+    if num_walkers < 2:
+        raise RuntimeError(
+            "Samples from a single walker: the variance of their mean cannot "
+            "be estimated."
+        )
+    num_samples = walker_index.size
+    counts = numpy.bincount(walker_index, minlength=num_walkers)
+    rows = numpy.reshape(values, (-1, num_samples))
+    walker_sums = numpy.stack(
+        [
+            numpy.bincount(walker_index, weights=row, minlength=num_walkers)
+            for row in rows
+        ]
+    )
+    mean = rows.mean(axis=1)
+    residuals = walker_sums - counts * mean[:, None]
+    variance = (
+        num_walkers
+        / (num_walkers - 1)
+        * numpy.sum(residuals**2, axis=1)
+        / num_samples**2
+    )
+    pooled = rows.var(axis=1, ddof=1)
+    effective_size = numpy.full(mean.shape, float(num_samples))
+    varies = pooled > 0
+    effective_size[varies] = numpy.minimum(
+        pooled[varies] / variance[varies], num_samples
+    )
+    shape = numpy.shape(values)[:-1]
+    return BatchMean(
+        mean.reshape(shape),
+        variance.reshape(shape),
+        effective_size.reshape(shape),
+        num_samples**2 / numpy.sum(counts**2),
+    )
+
+
 def get_score_differences(log_ratios, best, walkers):
     """
     Return each candidate's held-out score minus the best one's, with errors.
 
     The score of a candidate density g is the variance of log q - log g over
     the held-out samples. Differences are paired (the same samples for every
-    candidate), and their standard errors treat walkers as independent
-    units (each walker's samples are autocorrelated, different walkers
-    nearly independent).
+    candidate), and their standard errors come from `get_batch_mean()`
+    (walkers as independent units: each walker's samples are
+    autocorrelated, different walkers nearly independent).
 
     Args:
         log_ratios(array):    log q - log g of each candidate (rows) at each
@@ -160,26 +236,8 @@ def get_score_differences(log_ratios, best, walkers):
     """
 
     contributions = (log_ratios - log_ratios.mean(axis=1, keepdims=True)) ** 2
-    differences = contributions - contributions[best]
-    walker_index = numpy.unique(walkers, return_inverse=True)[1]
-    num_walkers = walker_index.max() + 1
-    if num_walkers < 2:
-        raise RuntimeError(
-            "Held-out samples from a single walker: the score's error cannot "
-            "be estimated."
-        )
-    counts = numpy.bincount(walker_index, minlength=num_walkers)
-    walker_sums = numpy.stack(
-        [
-            numpy.bincount(walker_index, weights=row, minlength=num_walkers)
-            for row in differences
-        ]
-    )
-    mean_differences = differences.mean(axis=1)
-    residuals = walker_sums - counts * mean_differences[:, None]
-    return mean_differences, numpy.sqrt(
-        num_walkers / (num_walkers - 1) * numpy.sum(residuals**2, axis=1)
-    ) / len(walkers)
+    differences = get_batch_mean(contributions - contributions[best], walkers)
+    return differences.mean, numpy.sqrt(differences.variance)
 
 
 def get_max_components(num_parameters, effective_size, config):

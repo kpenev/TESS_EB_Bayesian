@@ -82,8 +82,10 @@ def parse_command_line():
         type=int,
         default=44,
         help="Groups with fewer walkers are not bisected: neither half could "
-        "have the ndim + 1 = 22 walkers of a large group, and small groups "
-        "are found by step 1b.",
+        "have ndim + 1 = 22 walkers, and smaller groups are found by step "
+        "1b. Deliberately below twice --group-min-large-walkers: a gap "
+        "missed here gives a wrong weight silently, while splitting into "
+        "two small halves only costs local chains.",
     )
     parser.add_argument(
         "--group-histogram-bins",
@@ -111,10 +113,12 @@ def parse_command_line():
     parser.add_argument(
         "--group-min-large-walkers",
         type=int,
-        default=22,
-        help="Groups with fewer walkers than this (ndim + 1 by default) "
-        "cannot sample their region; they are drawn with large, opaque "
-        "markers in the corner plot.",
+        default=32,
+        help="Groups with fewer walkers ever in them than this cannot be "
+        "trusted to sample their region (they need at least ndim + 1 = 22 "
+        "walkers that stay, and a kept split allows up to about 10 brief "
+        "visitors; TEC-146 checks the cost); they get local chains and are "
+        "drawn with large, opaque markers in the corner plot.",
     )
     parser.add_argument(
         "--walker-link-factor",
