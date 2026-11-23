@@ -23,8 +23,6 @@ import h5py
 import numpy
 
 from hacked_emcee_hdf5_backend import HDFBackend
-from log_likelihood import LogLikelihood
-from mcmc_sampling import get_isochrone_interpolation
 from walker_distances import whiten
 
 _logger = logging.getLogger(__name__)
@@ -41,7 +39,8 @@ def check_likelihood(log_likelihood, positions, log_prob, pool, num_checks=5):
     Raise if the likelihood does not reproduce stored log-probabilities.
 
     Args:
-        log_likelihood(LogLikelihood):    The likelihood for the local chain.
+        log_likelihood:    The function the main chain sampled (see
+            `MainChain.log_probability`).
 
         positions(array):    Positions from the main chain, one per row.
 
@@ -178,7 +177,8 @@ def start_local_chain(group, log_likelihood, rng, config):
     Args:
         group(dict):    See `run_local_chain()`.
 
-        log_likelihood(LogLikelihood):    The likelihood.
+        log_likelihood:    The function the main chain sampled (see
+            `MainChain.log_probability`).
 
         rng(numpy.random.Generator):    Chooses the starting walkers.
 
@@ -242,7 +242,8 @@ def run_local_chain(group, typical_regions, log_likelihood, config):
         typical_regions(dict):    The typical region of each large group,
             indexed by group (see `get_typical_region()`).
 
-        log_likelihood(LogLikelihood):    The likelihood.
+        log_likelihood:    The function the main chain sampled (see
+            `MainChain.log_probability`).
 
         config:    The command line configuration.
 
@@ -341,7 +342,7 @@ def get_group_input(in_group, positions, log_prob, config):
     }
 
 
-def resolve_small_groups(backend, positions, labels, discarded, config):
+def resolve_small_groups(main_chain, labels, discarded, config):
     """
     Run the local chains of the small groups that are not discarded.
 
@@ -349,13 +350,11 @@ def resolve_small_groups(backend, positions, labels, discarded, config):
     it was not isolated, and the main chain's sampling there stands.
 
     Args:
-        backend(HDFBackend):    The main chain.
+        main_chain(MainChain):    The main chain's window and the function
+            it sampled.
 
-        positions(array):    The main chain's positions after the burn-in
-            (thinned), shape (steps, walkers, parameters).
-
-        labels(array):    The group of each position, shape (steps,
-            walkers).
+        labels(array):    The group of each position of
+            ``main_chain.positions``, shape (steps, walkers).
 
         discarded(set):    The discarded groups.
 
@@ -378,16 +377,11 @@ def resolve_small_groups(backend, positions, labels, discarded, config):
     ]
     if not small_groups:
         return labels, {}
-    log_prob = backend.get_log_prob(discard=config.burn_in, thin=config.thin)
-    log_likelihood = LogLikelihood(
-        config.tic_id,
-        isochrone_interpolation=get_isochrone_interpolation(backend.filename),
-    )
     # Small groups have too few positions for a reliable covariance, so
     # leaks are only detected into large groups.
     typical_regions = {
         group: get_typical_region(
-            positions[labels == group], config.leak_percentile
+            main_chain.positions[labels == group], config.leak_percentile
         )
         for group, count in enumerate(num_walkers)
         if count >= config.group_min_large_walkers
@@ -396,10 +390,10 @@ def resolve_small_groups(backend, positions, labels, discarded, config):
     verdicts = {}
     for group in small_groups:
         group_input = get_group_input(
-            labels == group, positions, log_prob, config
+            labels == group, main_chain.positions, main_chain.log_prob, config
         )
         verdicts[group], leaked_into = run_local_chain(
-            group_input, typical_regions, log_likelihood, config
+            group_input, typical_regions, main_chain.log_probability, config
         )
         _logger.info(
             "Group %d (walkers %s): local chain %s%s.",

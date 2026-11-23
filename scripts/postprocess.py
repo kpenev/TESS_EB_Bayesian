@@ -22,8 +22,8 @@ from scipy.sparse.csgraph import connected_components
 from sklearn.cluster import KMeans
 
 from chain_analysis import get_chain_expressions
-from hacked_emcee_hdf5_backend import HDFBackend
 from local_chain import resolve_small_groups
+from main_chain import MainChain
 from paths import results_dir, samples as samples_fname
 from sample_params import SampleParams
 from walker_distances import get_walker_distances
@@ -819,14 +819,21 @@ def plot_groups(labels, plot_data, ranges, discarded, config):
     pyplot.close(figure)
 
 
-def main(config):
-    """Find and report the coarse groups of one target's walkers."""
+def main(config, main_chain=None):
+    """
+    Find and report the coarse groups of one target's walkers.
 
-    backend = HDFBackend(
-        config.samples_fname_pattern.format(tic_id=config.tic_id),
-        read_only=True,
-    )
-    positions = backend.get_chain(discard=config.burn_in, thin=config.thin)
+    Args:
+        config:    The command line configuration.
+
+        main_chain(MainChain or None):    The main chain to post-process
+            (e.g. a toy posterior's, a subclass); None reads the target's
+            samples file.
+    """
+
+    if main_chain is None:
+        main_chain = MainChain(config)
+    positions = main_chain.positions
     _logger.info(
         "TIC %d: %d steps after burn-in %d (every %d), %d walkers.",
         config.tic_id,
@@ -860,7 +867,7 @@ def main(config):
             group["group"],
             group["separation"],
         )
-    move_rates = get_move_rates(backend, config.burn_in)
+    move_rates = get_move_rates(main_chain.backend, config.burn_in)
     discarded = find_discarded_groups(labels, move_rates, config)
     for group in range(labels.max() + 1):
         here = labels == group
@@ -876,15 +883,13 @@ def main(config):
             ": discarded" if group in discarded else "",
         )
     if config.local_chains:
-        labels = resolve_small_groups(
-            backend, positions, labels, discarded, config
-        )[0]
+        labels = resolve_small_groups(main_chain, labels, discarded, config)[0]
     if config.corner_plot_fname is None:
         return
-    blobs = backend.get_blobs(discard=config.burn_in, thin=config.thin)
-    log_prob = backend.get_log_prob(
+    blobs = main_chain.backend.get_blobs(
         discard=config.burn_in, thin=config.thin
-    ).flatten()
+    )
+    log_prob = main_chain.log_prob.flatten()
     plot_data = pandas.DataFrame(
         blobs.reshape(-1, blobs.shape[-1]), columns=SampleParams._fields
     )
