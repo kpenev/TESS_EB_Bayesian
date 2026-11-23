@@ -18,8 +18,8 @@ from matplotlib import pyplot
 from matplotlib.lines import Line2D
 import numpy
 import pandas
-from scipy.cluster.vq import kmeans2
 from scipy.sparse.csgraph import connected_components
+from sklearn.cluster import KMeans
 
 from chain_analysis import get_chain_expressions
 from hacked_emcee_hdf5_backend import HDFBackend
@@ -100,6 +100,13 @@ def parse_command_line():
         help="Each bisection tries this many 2-means runs and keeps the one "
         "with the fewest crossings per position of its smaller half. About "
         "0.35 s per run per 400 000 positions.",
+    )
+    parser.add_argument(
+        "--group-kmeans-max-iterations",
+        type=int,
+        default=1000,
+        help="Each 2-means run must converge strictly (no label changes) "
+        "within this many iterations, otherwise post-processing fails.",
     )
     parser.add_argument(
         "--group-min-large-walkers",
@@ -273,7 +280,9 @@ def parse_command_line():
     return parser.parse_args()
 
 
-def bisect(positions, selected, rng, num_restarts):
+def bisect(  # pylint: disable=too-many-locals
+    positions, selected, rng, num_restarts, max_iterations
+):
     """
     Split a group of walker positions in two, with the fewest crossings.
 
@@ -282,6 +291,10 @@ def bisect(positions, selected, rng, num_restarts):
     halves per position in its smaller half: normalizing keeps lopsided
     splits, which see few crossings only because they cut off a thinly
     visited edge, from being favored.
+
+    Every run must converge strictly (an iteration that changes no label),
+    so the positions are split exactly as ``KMeans.predict()`` with the
+    final centers splits any other point (bridge sampling draws).
 
     Args:
         positions(array):    All walker positions, shape (steps, walkers,
@@ -294,25 +307,44 @@ def bisect(positions, selected, rng, num_restarts):
 
         num_restarts(int):    How many 2-means runs to try.
 
+        max_iterations(int):    The iteration limit of each run. Reaching
+            it raises an error: the run was still converging.
+
     Returns:
-        (array, array, int) or None:
-            Whether each position of the group (in the order of
-            ``positions[selected]``) is in the second half, those positions
-            projected onto the line joining the means of the two halves
-            (scaled so the means are at 0 and 1), and the number of
-            crossings between the halves. None if every run left a half
-            empty.
+        dict or None:
+            ``in_second``: whether each position of the group (in the order
+            of ``positions[selected]``) is in the second half;
+            ``projection``: those positions projected onto the line joining
+            the means of the two halves (scaled so the means are at 0 and
+            1); ``crossings``: the number of crossings between the halves;
+            ``classifier``: the fitted ``KMeans`` (``kmeans``) and the
+            ``mean`` and ``scale`` that standardize positions for it. None
+            if every run left a half empty.
     """
 
     points = positions[selected]
+    mean = points.mean(axis=0)
     scale = points.std(axis=0)
     scale[scale == 0] = 1.0
-    standardized = (points - points.mean(axis=0)) / scale
+    standardized = (points - mean) / scale
     halves = numpy.zeros(selected.shape, dtype=int)
     best_rate = numpy.inf
     best = None
     for _ in range(num_restarts):
-        means, assignment = kmeans2(standardized, 2, minit="++", rng=rng)
+        kmeans = KMeans(
+            n_clusters=2,
+            init="k-means++",
+            n_init=1,
+            max_iter=max_iterations,
+            tol=0.0,
+            random_state=int(rng.integers(2**32)),
+        )
+        assignment = kmeans.fit_predict(standardized)
+        if kmeans.n_iter_ >= max_iterations:
+            raise RuntimeError(
+                f"2-means did not converge within {max_iterations:d} "
+                "iterations (--group-kmeans-max-iterations)."
+            )
         sizes = numpy.bincount(assignment, minlength=2)
         if sizes.min() == 0:
             continue
@@ -320,16 +352,18 @@ def bisect(positions, selected, rng, num_restarts):
         crossings = count_crossings(halves, 1, 2)
         if crossings / sizes.min() < best_rate:
             best_rate = crossings / sizes.min()
-            best = (means, assignment, crossings)
+            best = (kmeans, assignment, crossings)
     if best is None:
         return None
-    means, assignment, crossings = best
-    axis = means[1] - means[0]
-    return (
-        assignment == 1,
-        (standardized - means[0]) @ axis / (axis @ axis),
-        crossings,
-    )
+    kmeans, assignment, crossings = best
+    centers = kmeans.cluster_centers_
+    axis = centers[1] - centers[0]
+    return {
+        "in_second": assignment == 1,
+        "projection": (standardized - centers[0]) @ axis / (axis @ axis),
+        "crossings": crossings,
+        "classifier": {"kmeans": kmeans, "mean": mean, "scale": scale},
+    }
 
 
 def get_dip(projection, num_bins):
@@ -393,8 +427,10 @@ def find_coarse_groups(positions, config):
         (array, [dict]):
             The group of each position, shape (steps, walkers), and a
             record of each split tried: the group split, the new group of
-            its second half, the walkers ever in each half, the dip, the
-            crossings and whether the split was kept.
+            its second half, its classifier (see `bisect()`), the walkers
+            ever in each half, the dip, the crossings and whether the split
+            was kept. Replaying the kept splits in order, each classifying
+            the points currently in its group, reproduces the labels.
     """
 
     rng = numpy.random.default_rng(config.seed)
@@ -408,22 +444,28 @@ def find_coarse_groups(positions, config):
         if selected.any(axis=0).sum() < config.group_min_split_walkers:
             continue
         bisection = bisect(
-            positions, selected, rng, config.group_kmeans_restarts
+            positions,
+            selected,
+            rng,
+            config.group_kmeans_restarts,
+            config.group_kmeans_max_iterations,
         )
         if bisection is None:
             continue
-        in_second, projection, crossings = bisection
         trial = labels.copy()
-        trial[selected] = numpy.where(in_second, num_groups, group)
+        trial[selected] = numpy.where(bisection["in_second"], num_groups, group)
         split = {
             "group": group,
             "new_group": num_groups,
+            "classifier": bisection["classifier"],
             "walkers": tuple(
                 int((trial == label).any(axis=0).sum())
                 for label in (group, num_groups)
             ),
-            "dip": get_dip(projection, config.group_histogram_bins),
-            "crossings": crossings,
+            "dip": get_dip(
+                bisection["projection"], config.group_histogram_bins
+            ),
+            "crossings": bisection["crossings"],
         }
         split["kept"] = (
             split["dip"] < config.group_max_dip
