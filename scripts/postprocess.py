@@ -224,6 +224,13 @@ def parse_command_line():
         "is within this many standard errors of the best one's.",
     )
     parser.add_argument(
+        "--bridge-draws",
+        type=int,
+        default=5000,
+        help="Draws from each cross-fitted reference density (two per "
+        "region), each costing one likelihood evaluation.",
+    )
+    parser.add_argument(
         "--local-chain-fname-pattern",
         default=path.join(
             results_dir, "local_chains", "tess{tic_id:d}_walkers{walkers}.h5"

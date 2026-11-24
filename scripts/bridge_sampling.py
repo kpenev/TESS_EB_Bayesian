@@ -6,9 +6,9 @@ means (`get_batch_mean()`), and the reference density of a region, a
 Gaussian mixture fitted to samples of the region, with the number of
 components chosen by how well the mixture matches the posterior on samples
 held out from the fit, and the bridge estimate of a region's log evidence
-from its samples and draws from that density (`estimate_log_evidence()`).
-The cross-fitting (which samples are fitted and which held out) and the
-region rule for the draws are to come.
+from its samples and draws from that density (`estimate_log_evidence()`),
+cross-fitted over two walker sets (`cross_fit_log_evidence()`). The region
+rule for the draws is to come.
 """
 
 from collections import namedtuple
@@ -371,6 +371,8 @@ BridgeEstimate = namedtuple(
     [
         "log_evidence",
         "relative_error",
+        "draw_variance",
+        "sample_variance",
         "sample_effective_size",
         "effective_walkers",
     ],
@@ -474,10 +476,12 @@ def estimate_log_evidence(
 
     Returns:
         BridgeEstimate:
-            ``log_evidence``, its ``relative_error`` (RE), the samples'
-            final effective size n1 (``sample_effective_size``), and the
-            effective number of walkers they come from
-            (``effective_walkers``, see `get_batch_mean()`).
+            ``log_evidence``, its ``relative_error`` (RE), the two terms of
+            RE^2 (``draw_variance`` from the draws, which more draws reduce,
+            and ``sample_variance`` from the samples), the samples' final
+            effective size n1 (``sample_effective_size``), and the effective
+            number of walkers they come from (``effective_walkers``, see
+            `get_batch_mean()`).
     """
 
     if not numpy.isfinite(sample_log_ratios).all():
@@ -511,12 +515,162 @@ def estimate_log_evidence(
             f"The samples' effective size did not settle in {max_iterations} "
             f"iterations (last {sample_size:.1f})."
         )
+    variances = (
+        draw_terms.var(ddof=1) / (draws.size * draw_terms.mean() ** 2),
+        sample_mean.variance / sample_mean.mean**2,
+    )
     return BridgeEstimate(
         log_u + shift - numpy.log(1.0 - sample_weight),
-        numpy.sqrt(
-            draw_terms.var(ddof=1) / (draws.size * draw_terms.mean() ** 2)
-            + sample_mean.variance / sample_mean.mean**2
-        ),
+        numpy.sqrt(sum(variances)),
+        *variances,
         sample_size,
         sample_mean.effective_walkers,
+    )
+
+
+CrossFitEstimate = namedtuple(
+    "CrossFitEstimate",
+    ["log_evidence", "error_lower", "error_upper", "agreement", "halves"],
+)
+
+
+def bridge_half(fit, bridge, evaluate_draws, rng, config):
+    """
+    Return one cross-fit half's bridge estimate of a region's log evidence.
+
+    The reference density is fitted to ``fit`` (its number of components
+    chosen on ``bridge``, see `fit_reference_density()`), and the bridge
+    uses ``bridge``'s samples with draws from that density. K_max follows
+    from ``fit``'s effective size: the smallest over parameters of the
+    batch-means effective size (`get_batch_mean()`).
+
+    Args:
+        fit(dict):    The samples the density is fitted to: their positions
+            ("positions", one per row), the log-probabilities the chain
+            stored there ("log_prob") and their walkers ("walkers").
+
+        bridge(dict):    The other walkers' samples, as ``fit``.
+
+        evaluate_draws:    Called with draws (one per row), returns the
+            posterior's log-probability at each, as the chain stored it,
+            -inf where the region rule assigns the draw to another region.
+
+        rng(numpy.random.Generator):    Seeds the fits and the draws.
+
+        config:    The command line configuration (the ``bridge_*``
+            options).
+
+    Returns:
+        (BridgeEstimate, int):
+            The estimate (`estimate_log_evidence()`) and the reference
+            density's number of components.
+    """
+
+    effective_size = get_batch_mean(
+        fit["positions"].T, fit["walkers"]
+    ).effective_size.min()
+    density = fit_reference_density(
+        fit["positions"], bridge, effective_size, rng, config
+    )[0]
+    draws = density.draw(config.bridge_draws, rng)
+    return (
+        estimate_log_evidence(
+            bridge["log_prob"] - density.log_density(bridge["positions"]),
+            bridge["walkers"],
+            evaluate_draws(draws) - density.log_density(draws),
+        ),
+        density.num_components,
+    )
+
+
+def cross_fit_log_evidence(region, evaluate_draws, rng, config):
+    """
+    Return a region's log evidence, cross-fitted over two walker sets.
+
+    The region's walkers are split at random into sets A and B. The bridge
+    with B uses a density fitted to A, and the bridge with A one fitted to
+    B (`bridge_half()`), so no density is evaluated on the samples it was
+    fitted to. The two log evidences are averaged. Their errors are
+    positively correlated (on toys rho ~ 0.15-0.25): each half's samples are
+    bridged in one half and fitted to in the other. The correlation can only
+    come through the samples, since the draws of the halves are independent.
+    So the error of the average is bounded below by independent halves,
+    variance (RE_A^2 + RE_B^2) / 4, and above by fully correlated sample
+    terms with independent draw terms, variance (D_A + D_B) / 4 + ((sqrt(S_A)
+    + sqrt(S_B)) / 2)^2, with D and S each half's draw and sample variance.
+
+    Args:
+        region(dict):    The region's samples: "positions", "log_prob" and
+            "walkers", as in `bridge_half()`.
+
+        evaluate_draws:    See `bridge_half()`.
+
+        rng(numpy.random.Generator):    Splits the walkers, seeds the fits
+            and the draws.
+
+        config:    The command line configuration (the ``bridge_*``
+            options).
+
+    Returns:
+        CrossFitEstimate:
+            ``log_evidence``, the lower and upper bounds of its standard
+            deviation (``error_lower``, ``error_upper``), the ``agreement``
+            of the halves (their difference over its standard deviation for
+            independent halves; values often well above 3 point to a biased
+            estimate or a wrong error), and both ``halves`` (each as returned
+            by `bridge_half()`).
+    """
+
+    walker_ids = numpy.unique(region["walkers"])
+    if walker_ids.size < 4:
+        raise RuntimeError(
+            f"A region with {walker_ids.size} walkers cannot be cross-fitted: "
+            "each half needs at least two."
+        )
+    in_first = numpy.isin(
+        region["walkers"],
+        rng.permutation(walker_ids)[: walker_ids.size // 2],
+    )
+    first, second = (
+        {
+            key: region[key][selection]
+            for key in ("positions", "log_prob", "walkers")
+        }
+        for selection in (in_first, ~in_first)
+    )
+    halves = [
+        bridge_half(first, second, evaluate_draws, rng, config),
+        bridge_half(second, first, evaluate_draws, rng, config),
+    ]
+    for (estimate, num_components), name in zip(halves, "BA"):
+        _logger.info(
+            "Bridge with walker set %s (%d components): log Z %.4f +- %.4f, "
+            "effective size %.0f, effective walkers %.1f.",
+            name,
+            num_components,
+            estimate.log_evidence,
+            estimate.relative_error,
+            estimate.sample_effective_size,
+            estimate.effective_walkers,
+        )
+    log_evidences = numpy.array(
+        [estimate.log_evidence for estimate, _ in halves]
+    )
+    combined_variance = sum(
+        estimate.relative_error**2 for estimate, _ in halves
+    )
+    sample_error = sum(
+        numpy.sqrt(estimate.sample_variance) for estimate, _ in halves
+    )
+    return CrossFitEstimate(
+        log_evidences.mean(),
+        numpy.sqrt(combined_variance) / 2.0,
+        numpy.sqrt(
+            sum(estimate.draw_variance for estimate, _ in halves)
+            + sample_error**2
+        )
+        / 2.0,
+        abs(log_evidences[0] - log_evidences[1])
+        / numpy.sqrt(combined_variance),
+        halves,
     )
