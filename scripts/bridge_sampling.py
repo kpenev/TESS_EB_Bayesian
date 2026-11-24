@@ -5,14 +5,18 @@ So far: means over a region's samples with their errors by walker batch
 means (`get_batch_mean()`), and the reference density of a region, a
 Gaussian mixture fitted to samples of the region, with the number of
 components chosen by how well the mixture matches the posterior on samples
-held out from the fit. The cross-fitting (which samples are fitted and which
-held out) and the bridge estimate itself are to come.
+held out from the fit, and the bridge estimate of a region's log evidence
+from its samples and draws from that density (`estimate_log_evidence()`).
+The cross-fitting (which samples are fitted and which held out) and the
+region rule for the draws are to come.
 """
 
 from collections import namedtuple
 import logging
 
 import numpy
+from scipy.optimize import brentq
+from scipy.special import expit
 from sklearn.mixture import GaussianMixture
 
 _logger = logging.getLogger(__name__)
@@ -360,3 +364,159 @@ def fit_reference_density(fit_points, held_out, effective_size, rng, config):
             ": chosen" if record["components"] == chosen + 1 else "",
         )
     return candidates[chosen], records
+
+
+BridgeEstimate = namedtuple(
+    "BridgeEstimate",
+    [
+        "log_evidence",
+        "relative_error",
+        "sample_effective_size",
+        "effective_walkers",
+    ],
+)
+
+
+def solve_bridge_equation(sample_log_ratios, draw_log_ratios, sample_weight):
+    """
+    Solve the optimal bridge's estimating equation for fixed weights.
+
+    With r = q / g, s1 = ``sample_weight``, s2 = 1 - s1 and u = s2 Z, the
+    optimal bridge 1 / (s1 q + s2 Z g) gives
+    (s1 / s2) mean_i t(r_i) + mean_j t(r_j) = 1 with t(r) = u / (s1 r + u)
+    = expit(log u - log s1 - log r), over samples i and draws j. Every t
+    increases strictly with u, from 0 to 1 (always 1 for draws outside the
+    region, r = 0), so the root is unique; it is found by Brent's method.
+
+    Args:
+        sample_log_ratios(array):    log q - log g at the samples (finite).
+
+        draw_log_ratios(array):    log q - log g at the draws, -inf for draws
+            outside the region; at least one finite.
+
+        sample_weight(float):    s1, in (0, 1).
+
+    Returns:
+        (float, array, array):
+            log u, t at each sample (proportional to the samples' bridge
+            terms f2 = 1 / (s1 rho + s2), rho = r / Z), and 1 - t at each
+            draw (proportional to the draws' terms f1 = rho / (s1 rho + s2)).
+    """
+
+    log_sample_weight = numpy.log(sample_weight)
+    weight_ratio = sample_weight / (1.0 - sample_weight)
+
+    def excess(log_u):
+        """Return the estimating equation's left side minus its right."""
+
+        return (
+            weight_ratio
+            * expit(log_u - log_sample_weight - sample_log_ratios).mean()
+            + expit(log_u - log_sample_weight - draw_log_ratios).mean()
+            - 1.0
+        )
+
+    finite = numpy.concatenate(
+        [sample_log_ratios, draw_log_ratios[numpy.isfinite(draw_log_ratios)]]
+    )
+    log_u = brentq(
+        excess,
+        log_sample_weight + finite.min() - 50.0,
+        log_sample_weight + finite.max() + 50.0,
+        xtol=1e-12,
+    )
+    return (
+        log_u,
+        expit(log_u - log_sample_weight - sample_log_ratios),
+        expit(log_sample_weight + draw_log_ratios - log_u),
+    )
+
+
+def estimate_log_evidence(
+    sample_log_ratios,
+    walkers,
+    draw_log_ratios,
+    tolerance=1e-3,
+    max_iterations=50,
+):
+    """
+    Return a region's log evidence log Z by optimal bridge sampling.
+
+    The samples' effective size n1 sets the bridge's weights s1 = n1 / (n1 +
+    n2), s2 = n2 / (n1 + n2) for n2 draws. It starts as the effective size
+    of log q - log g at the samples (free of Z), and is replaced by the
+    effective size of the samples' bridge terms f2 at the solution until it
+    changes by less than ``tolerance`` (relative): that is the size the
+    optimal bridge calls for with autocorrelated samples, and each
+    iteration only re-solves the equation (`solve_bridge_equation()`).
+
+    The relative error of Z (Fruhwirth-Schnatter 2004, with walker batch
+    means in place of an autocorrelation time) is RE^2 = Var(f1) / (n2
+    mean(f1)^2) + V(mean f2) / mean(f2)^2: the first term from the
+    independent draws, the second from the samples (`get_batch_mean()`).
+    The variance of log Z is RE^2.
+
+    Args:
+        sample_log_ratios(array):    log q - log g at the region's samples,
+            with q the posterior the chain stored (unnormalized) and g the
+            reference density.
+
+        walkers(array):    The walker of each sample.
+
+        draw_log_ratios(array):    log q - log g at independent draws from g,
+            -inf for draws the region rule assigns to another region.
+
+        tolerance(float):    The relative change of n1 at which its
+            iterations stop.
+
+        max_iterations(int):    Raise an error if n1 has not settled after
+            this many iterations.
+
+    Returns:
+        BridgeEstimate:
+            ``log_evidence``, its ``relative_error`` (RE), the samples'
+            final effective size n1 (``sample_effective_size``), and the
+            effective number of walkers they come from
+            (``effective_walkers``, see `get_batch_mean()`).
+    """
+
+    if not numpy.isfinite(sample_log_ratios).all():
+        raise RuntimeError(
+            "log q - log g is not finite at every sample of the region."
+        )
+    if not numpy.isfinite(draw_log_ratios).any():
+        raise RuntimeError(
+            "No draw from the reference density lands in its region: the "
+            "region's evidence cannot be estimated."
+        )
+    # Keeps log u near 0 (log q is ~2e5), so Brent's tolerance is absolute.
+    shift = numpy.median(sample_log_ratios)
+    samples = sample_log_ratios - shift
+    draws = draw_log_ratios - shift
+    sample_size = float(get_batch_mean(samples, walkers).effective_size)
+    for _ in range(max_iterations):
+        sample_weight = sample_size / (sample_size + draws.size)
+        log_u, sample_terms, draw_terms = solve_bridge_equation(
+            samples, draws, sample_weight
+        )
+        sample_mean = get_batch_mean(sample_terms, walkers)
+        if (
+            abs(sample_mean.effective_size - sample_size)
+            <= tolerance * sample_size
+        ):
+            break
+        sample_size = float(sample_mean.effective_size)
+    else:
+        raise RuntimeError(
+            f"The samples' effective size did not settle in {max_iterations} "
+            f"iterations (last {sample_size:.1f})."
+        )
+    return BridgeEstimate(
+        log_u + shift - numpy.log(1.0 - sample_weight),
+        numpy.sqrt(
+            draw_terms.var(ddof=1) / (draws.size * draw_terms.mean() ** 2)
+            + sample_mean.variance / sample_mean.mean**2
+        ),
+        sample_size,
+        sample_mean.effective_walkers,
+    )
