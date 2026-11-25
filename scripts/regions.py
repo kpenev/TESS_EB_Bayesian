@@ -23,10 +23,14 @@ The rule (TEC-142 comments of 2026-11-23 and 2026-11-24):
     groups' positions together.
 """
 
+import logging
+
 import numpy
 from scipy.spatial import cKDTree
 
 from walker_distances import whiten
+
+_logger = logging.getLogger(__name__)
 
 
 class RegionRule:
@@ -56,6 +60,12 @@ class RegionRule:
                 region (see `local_chain.resolve_small_groups()`).
         """
 
+        if len(grouping["large_groups"]) == 0:
+            raise ValueError(
+                "No large group: the main chain has no region it samples "
+                "reliably, so there is nothing to assign the rest of the "
+                "parameter space to."
+            )
         self._splits = [split for split in grouping["splits"] if split["kept"]]
         in_large = numpy.isin(grouping["labels"], grouping["large_groups"])
         pairs = numpy.unique(
@@ -367,3 +377,83 @@ class RegionRule:
             )
             > 0
         )
+
+
+def build_region_rule(main_chain, grouping, verdicts, small_samples, config):
+    """
+    Return the rule assigning points to bridge-sampling regions (step 4).
+
+    No mass can be estimated while a small group that is not discarded has
+    an unresolved local chain: its region may be real, with unknown mass.
+    Such a target fails here. Rerunning resumes its local chains, or a
+    local chain can be declared converged by hand.
+
+    Args:
+        main_chain(MainChain):    The main chain.
+
+        grouping(dict):    ``splits`` and ``coarse_labels`` from
+            `postprocess.find_coarse_groups()`, ``labels`` (the group of each
+            position after 1b and merges, see
+            `local_chain.resolve_small_groups()`) and ``discarded`` (the
+            discarded groups).
+
+        verdicts(dict):    The verdict of each small group's local chain.
+
+        small_samples(dict):    The samples of each confirmed small region.
+
+        config:    The command line configuration (``tic_id`` and
+            ``group_min_large_walkers``).
+
+    Returns:
+        RegionRule:    The rule.
+    """
+
+    unresolved = sorted(
+        group for group, verdict in verdicts.items() if verdict == "unresolved"
+    )
+    if unresolved:
+        raise RuntimeError(
+            f"TIC {config.tic_id}: the local chains of groups {unresolved} "
+            "are unresolved, so no masses can be estimated; rerun to resume "
+            "them, or declare them converged."
+        )
+    labels = grouping["labels"]
+    large_groups = [
+        int(group)
+        for group in numpy.unique(labels)
+        if group not in grouping["discarded"]
+        and (labels == group).any(axis=0).sum()
+        >= config.group_min_large_walkers
+    ]
+    rule = RegionRule(
+        {
+            "splits": grouping["splits"],
+            "coarse_labels": grouping["coarse_labels"],
+            "labels": labels,
+            "large_groups": large_groups,
+        },
+        main_chain.positions,
+        small_samples,
+    )
+    for region in large_groups:
+        here = labels == region
+        _logger.info(
+            "Region %d (large): %.3f of positions, %d walkers ever, in 1a "
+            "leaves %s.",
+            region,
+            here.mean(),
+            here.any(axis=0).sum(),
+            [
+                leaf
+                for leaf, regions in rule.leaf_regions.items()
+                if region in regions
+            ],
+        )
+    for region, samples in small_samples.items():
+        _logger.info(
+            "Region %d (small): %d local-chain samples from %d walkers.",
+            region,
+            samples["positions"].shape[0],
+            numpy.unique(samples["walkers"]).size,
+        )
+    return rule

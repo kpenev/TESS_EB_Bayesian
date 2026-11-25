@@ -25,6 +25,7 @@ from chain_analysis import get_chain_expressions
 from local_chain import resolve_small_groups
 from main_chain import MainChain
 from paths import results_dir, samples as samples_fname
+from regions import build_region_rule
 from sample_params import SampleParams
 from walker_distances import get_walker_distances
 
@@ -830,6 +831,37 @@ def plot_groups(labels, plot_data, ranges, discarded, config):
     pyplot.close(figure)
 
 
+def plot_main_chain(main_chain, labels, discarded, config):
+    """
+    Make the corner plot of the main chain's positions, colored by group.
+
+    Args:
+        main_chain(MainChain):    The main chain.
+
+        labels(array):    The group of each position, shape (steps,
+            walkers).
+
+        discarded(set):    The discarded groups.
+
+        config:    The command line configuration (see `plot_groups()`).
+    """
+
+    blobs = main_chain.backend.get_blobs(
+        discard=config.burn_in, thin=config.thin
+    )
+    log_prob = main_chain.log_prob.flatten()
+    plot_data = pandas.DataFrame(
+        blobs.reshape(-1, blobs.shape[-1]), columns=SampleParams._fields
+    )
+    plot_data.insert(
+        0, "logprob", log_prob - log_prob[numpy.isfinite(log_prob)].min()
+    )
+    plot_data, ranges = get_chain_expressions(
+        plot_data, config.chain_expression
+    )
+    plot_groups(labels, plot_data, ranges, discarded, config)
+
+
 def main(config, main_chain=None):
     """
     Find and report the coarse groups of one target's walkers.
@@ -840,6 +872,11 @@ def main(config, main_chain=None):
         main_chain(MainChain or None):    The main chain to post-process
             (e.g. a toy posterior's, a subclass); None reads the target's
             samples file.
+
+    Returns:
+        RegionRule or None:    The rule assigning points to bridge-sampling
+            regions, or None without ``config.local_chains`` (small groups
+            are then unresolved).
     """
 
     if main_chain is None:
@@ -853,7 +890,7 @@ def main(config, main_chain=None):
         config.thin,
         positions.shape[1],
     )
-    labels, splits = find_coarse_groups(positions, config)
+    coarse_labels, splits = find_coarse_groups(positions, config)
     for split in splits:
         _logger.info(
             "Split of group %d (%d | %d walkers ever): dip %.2f, %d "
@@ -868,7 +905,7 @@ def main(config, main_chain=None):
                 else "rejected"
             ),
         )
-    labels, isolated = find_isolated_walkers(positions, labels, config)
+    labels, isolated = find_isolated_walkers(positions, coarse_labels, config)
     for group in isolated:
         _logger.info(
             "Isolated walkers %s of group %d -> group %d (closest approach "
@@ -893,24 +930,27 @@ def main(config, main_chain=None):
             / numpy.median(move_rates),
             ": discarded" if group in discarded else "",
         )
+    verdicts, small_samples = {}, {}
     if config.local_chains:
-        labels = resolve_small_groups(main_chain, labels, discarded, config)[0]
-    if config.corner_plot_fname is None:
-        return
-    blobs = main_chain.backend.get_blobs(
-        discard=config.burn_in, thin=config.thin
+        labels, verdicts, small_samples = resolve_small_groups(
+            main_chain, labels, discarded, config
+        )
+    if config.corner_plot_fname is not None:
+        plot_main_chain(main_chain, labels, discarded, config)
+    if not config.local_chains:
+        return None
+    return build_region_rule(
+        main_chain,
+        {
+            "splits": splits,
+            "coarse_labels": coarse_labels,
+            "labels": labels,
+            "discarded": discarded,
+        },
+        verdicts,
+        small_samples,
+        config,
     )
-    log_prob = main_chain.log_prob.flatten()
-    plot_data = pandas.DataFrame(
-        blobs.reshape(-1, blobs.shape[-1]), columns=SampleParams._fields
-    )
-    plot_data.insert(
-        0, "logprob", log_prob - log_prob[numpy.isfinite(log_prob)].min()
-    )
-    plot_data, ranges = get_chain_expressions(
-        plot_data, config.chain_expression
-    )
-    plot_groups(labels, plot_data, ranges, discarded, config)
 
 
 if __name__ == "__main__":
