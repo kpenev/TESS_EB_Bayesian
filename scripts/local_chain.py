@@ -21,6 +21,7 @@ from emcee.moves import StretchMove
 import git.repo
 import h5py
 import numpy
+from scipy.sparse.csgraph import connected_components
 
 from hacked_emcee_hdf5_backend import HDFBackend
 from walker_distances import whiten
@@ -352,12 +353,109 @@ def get_group_input(in_group, positions, log_prob, config):
     }
 
 
+def pool_samples(samples):
+    """
+    Return the samples of several regions as one region's.
+
+    Args:
+        samples([dict]):    Each region's samples: "positions", "log_prob"
+            and "walkers", one row per sample.
+
+    Returns:
+        dict:    The same keys, concatenated, with the walkers of each region
+            after the first renumbered past the previous ones.
+    """
+
+    offsets = numpy.cumsum(
+        [0] + [region["walkers"].max() + 1 for region in samples[:-1]]
+    )
+    return {
+        "positions": numpy.concatenate(
+            [region["positions"] for region in samples]
+        ),
+        "log_prob": numpy.concatenate(
+            [region["log_prob"] for region in samples]
+        ),
+        "walkers": numpy.concatenate(
+            [
+                region["walkers"] + offset
+                for region, offset in zip(samples, offsets)
+            ]
+        ),
+    }
+
+
+def merge_small_regions(region_samples, labels, config):
+    """
+    Merge confirmed small regions whose local chains sample one basin.
+
+    The leak test skips small groups (too few positions for a covariance),
+    so two small regions that are one basin, with both local chains
+    sampling the union, are not caught by it. Their local chains have many
+    samples, so each region gets a typical region (`get_typical_region()`),
+    and two regions connect if either one's samples are typical of the
+    other. Connected sets (single linkage) become one region with the
+    samples pooled.
+
+    Args:
+        region_samples(dict):    The samples of each confirmed small region,
+            as returned by `resolve_small_groups()`.
+
+        labels(array):    The group of each main-chain position.
+
+        config:    The command line configuration (``leak_percentile``).
+
+    Returns:
+        (array, dict):
+            The labels with each merged set relabelled to its lowest group,
+            and the samples of each region after merging (walkers of a
+            pooled region numbered consecutively, in group order).
+    """
+
+    groups = sorted(region_samples)
+    typical_regions = {
+        group: get_typical_region(
+            region_samples[group]["positions"], config.leak_percentile
+        )
+        for group in groups
+    }
+    connected = numpy.eye(len(groups), dtype=bool)
+    for first, first_group in enumerate(groups):
+        for second, second_group in enumerate(groups):
+            if first != second:
+                connected[first, second] = (
+                    find_leak(
+                        region_samples[first_group]["positions"],
+                        {second_group: typical_regions[second_group]},
+                    )
+                    is not None
+                )
+    which_set = connected_components(connected, directed=False)[1]
+    merged_labels = labels.copy()
+    merged_samples = {}
+    for set_index in range(which_set.max() + 1):
+        members = [groups[i] for i in numpy.flatnonzero(which_set == set_index)]
+        if len(members) > 1:
+            _logger.info(
+                "Small regions %s are one basin: merged into group %d.",
+                members,
+                members[0],
+            )
+        merged_labels[numpy.isin(labels, members)] = members[0]
+        merged_samples[members[0]] = pool_samples(
+            [region_samples[group] for group in members]
+        )
+    return merged_labels, merged_samples
+
+
 def resolve_small_groups(main_chain, labels, discarded, config):
     """
     Run the local chains of the small groups that are not discarded.
 
     A group whose local chain leaked into a large group is merged into it:
     it was not isolated, and the main chain's sampling there stands.
+    Confirmed small regions that are one basin are merged with each other
+    (`merge_small_regions()`).
 
     Args:
         main_chain(MainChain):    The main chain's window and the function
@@ -371,10 +469,15 @@ def resolve_small_groups(main_chain, labels, discarded, config):
         config:    The command line configuration.
 
     Returns:
-        (array, dict):
-            The group of each position with leaked groups merged, and the
+        (array, dict, dict):
+            The group of each position with merged groups relabelled; the
             verdict of each small group's local chain ("leaked",
-            "converged" or "unresolved").
+            "converged", "unresolved", or "declared converged" if set by
+            hand); and for each confirmed group ("converged" or "declared
+            converged") the samples of its region, the kept second half of
+            its local chain, in the form bridge sampling takes them (see
+            `bridge_sampling.cross_fit_log_evidence()`): one row per sample
+            of "positions", "log_prob" and "walkers" (the local chain's).
     """
 
     num_walkers = [
@@ -386,7 +489,7 @@ def resolve_small_groups(main_chain, labels, discarded, config):
         if group not in discarded and count < config.group_min_large_walkers
     ]
     if not small_groups:
-        return labels, {}
+        return labels, {}, {}
     # Small groups have too few positions for a reliable covariance, so
     # leaks are only detected into large groups.
     typical_regions = {
@@ -398,6 +501,7 @@ def resolve_small_groups(main_chain, labels, discarded, config):
     }
     merged_labels = labels.copy()
     verdicts = {}
+    region_samples = {}
     for group in small_groups:
         group_input = get_group_input(
             labels == group, main_chain.positions, main_chain.log_prob, config
@@ -414,6 +518,20 @@ def resolve_small_groups(main_chain, labels, discarded, config):
         )
         if leaked_into is not None:
             merged_labels[labels == group] = leaked_into
+        if verdicts[group] in ("converged", "declared converged"):
+            local_chain = HDFBackend(
+                group_input["fname"], name=_chain_name, read_only=True
+            )
+            kept = local_chain.get_log_prob(discard=local_chain.iteration // 2)
+            region_samples[group] = {
+                "positions": local_chain.get_chain(
+                    discard=local_chain.iteration // 2
+                ).reshape(kept.size, -1),
+                "log_prob": kept.flatten(),
+                "walkers": numpy.broadcast_to(
+                    numpy.arange(kept.shape[1]), kept.shape
+                ).flatten(),
+            }
     if "unresolved" in verdicts.values():
         _logger.warning(
             "TIC %d is unresolved: the local chains of groups %s have not "
@@ -425,4 +543,8 @@ def resolve_small_groups(main_chain, labels, discarded, config):
                 if verdict == "unresolved"
             ],
         )
-    return merged_labels, verdicts
+    if len(region_samples) > 1:
+        merged_labels, region_samples = merge_small_regions(
+            region_samples, merged_labels, config
+        )
+    return merged_labels, verdicts, region_samples
