@@ -230,9 +230,11 @@ def run_local_chain(group, typical_regions, log_likelihood, config):
     the chain is at least ``config.local_chain_autocorr_factor`` integrated
     autocorrelation times long ("converged", the second half are samples of
     the group's region), or ``config.local_chain_max_steps`` steps were added
-    in this call ("unresolved": resumed next time). For a local chain that
-    already leaked, the group it entered is found again from its saved
-    positions, since group numbers change between runs.
+    in this call ("unresolved": resumed next time). Every run first tests all
+    the saved steps against the current large groups, which change when the
+    main chain does (as do group numbers), so a chain with any verdict can
+    turn out to have leaked, and one that leaked only into large groups that
+    no longer exist is unfinished and resumed.
 
     Args:
         group(dict):    The group: its walkers ("walkers"), their positions
@@ -249,8 +251,7 @@ def run_local_chain(group, typical_regions, log_likelihood, config):
 
     Returns:
         (str, int or None):
-            The verdict, and for "leaked" the large group entered (None if
-            the saved positions no longer enter any large group).
+            The verdict, and for "leaked" the large group entered.
     """
 
     rng = numpy.random.default_rng(config.seed)
@@ -262,12 +263,21 @@ def run_local_chain(group, typical_regions, log_likelihood, config):
             log_likelihood, group["positions"], group["log_prob"], pool
         )
         backend, state = start_local_chain(group, log_likelihood, rng, config)
+        leaked_into = (
+            find_leak(backend.get_chain(), typical_regions)
+            if backend.iteration > 0
+            else None
+        )
+        if leaked_into is not None:
+            with h5py.File(group["fname"], "a") as local_file:
+                local_file[_chain_name].attrs["verdict"] = "leaked"
+            return "leaked", leaked_into
+        if isinstance(state, str) and state != "leaked":
+            return state, None
         if isinstance(state, str):
-            return state, (
-                find_leak(backend.get_chain(), typical_regions)
-                if state == "leaked"
-                else None
-            )
+            # It stopped at a leak into large groups that no longer exist
+            # (the main chain changed), so it is unfinished.
+            state = None
         sampler = EnsembleSampler(
             *backend.shape,
             log_likelihood,
@@ -275,7 +285,7 @@ def run_local_chain(group, typical_regions, log_likelihood, config):
             pool=pool,
             moves=StretchMove(),
         )
-        verdict, leaked_into = "unresolved", None
+        verdict = "unresolved"
         for _ in range(
             config.local_chain_max_steps // config.local_chain_block
         ):
@@ -404,12 +414,6 @@ def resolve_small_groups(main_chain, labels, discarded, config):
         )
         if leaked_into is not None:
             merged_labels[labels == group] = leaked_into
-        elif verdicts[group] == "leaked":
-            _logger.warning(
-                "Group %d's local chain leaked in an earlier run but no "
-                "longer enters any large group: left unmerged.",
-                group,
-            )
     if "unresolved" in verdicts.values():
         _logger.warning(
             "TIC %d is unresolved: the local chains of groups %s have not "
