@@ -25,6 +25,7 @@ from chain_analysis import get_chain_expressions
 from local_chain import resolve_small_groups
 from main_chain import MainChain
 from paths import results_dir, samples as samples_fname
+from region_masses import estimate_region_masses
 from regions import build_region_rule
 from sample_params import SampleParams
 from walker_distances import get_walker_distances
@@ -874,9 +875,10 @@ def main(config, main_chain=None):
             samples file.
 
     Returns:
-        RegionRule or None:    The rule assigning points to bridge-sampling
-            regions, or None without ``config.local_chains`` (small groups
-            are then unresolved).
+        (RegionRule, dict) or None:    The rule assigning points to
+            bridge-sampling regions and the mass of each region (see
+            `region_masses.estimate_region_masses()`), or None without
+            ``config.local_chains`` (small groups are then unresolved).
     """
 
     if main_chain is None:
@@ -939,7 +941,7 @@ def main(config, main_chain=None):
         plot_main_chain(main_chain, labels, discarded, config)
     if not config.local_chains:
         return None
-    return build_region_rule(
+    rule = build_region_rule(
         main_chain,
         {
             "splits": splits,
@@ -950,6 +952,9 @@ def main(config, main_chain=None):
         verdicts,
         small_samples,
         config,
+    )
+    return rule, estimate_region_masses(
+        main_chain, rule, labels, small_samples, config
     )
 
 

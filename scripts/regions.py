@@ -38,6 +38,8 @@ class RegionRule:
     Assign points to regions.
 
     Attributes:
+        large_regions(list):    The large regions (group labels), sorted.
+
         leaf_regions(dict):    The large regions each 1a leaf holds, sorted.
     """
 
@@ -66,6 +68,9 @@ class RegionRule:
                 "reliably, so there is nothing to assign the rest of the "
                 "parameter space to."
             )
+        self.large_regions = sorted(
+            int(group) for group in grouping["large_groups"]
+        )
         self._splits = [split for split in grouping["splits"] if split["kept"]]
         in_large = numpy.isin(grouping["labels"], grouping["large_groups"])
         pairs = numpy.unique(
